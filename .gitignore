@@ -1,0 +1,126 @@
+# ============================================================
+# LabelHub Monorepo .gitignore
+# ============================================================
+# 红线:任何 .env 文件、API key、密钥、毫秒级日志、PDF 原文都不进 Git
+# ============================================================
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+*.swp
+*.swo
+*~
+.history/
+
+# --- 机密 (★★★ 红线) ---
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.staging
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# --- Node / Frontend ---
+node_modules/
+dist/
+dist-ssr/
+build/
+.cache/
+.parcel-cache/
+.next/
+out/
+.turbo/
+.eslintcache
+*.tsbuildinfo
+.pnpm-store/
+.pnp.*
+
+# Vite
+.vite/
+vite.config.*.timestamp-*
+
+# 测试 / 覆盖率
+coverage/
+.nyc_output/
+*.lcov
+__snapshots__/.tmp/
+
+# --- Go ---
+# 编译产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+apps/api/cmd/server/server
+apps/api/cmd/server/api
+apps/ai-worker/cmd/worker/worker
+apps/ai-worker/cmd/worker/ai-worker
+
+# Go workspace cache
+go.work.sum
+
+# --- 数据库 / 数据 ---
+data/
+*.sqlite
+*.sqlite3
+*.db
+mysql-data/
+redis-data/
+
+# --- 上传文件 / 导出产物(运行时,不进 Git)---
+uploads/
+exports/
+storage/
+
+# --- 日志 ---
+*.log
+logs/
+.npm/
+.pnpm-debug.log*
+.yarn-debug.log*
+.yarn-error.log*
+
+# --- 临时 / 缓存 ---
+*.tmp
+*.temp
+.tmp/
+.DS_Store
+
+# --- 课题资料(★ 不进仓库)---
+LabelHub *.pdf
+*课题*.pdf
+*实现要求*.pdf
+
+# --- Docker 临时 ---
+.docker/
+docker-compose.override.yml
+
+# --- 演示 / 备份 ---
+*.dump
+*.sql.gz
+backups/
+
+# --- 个人 todo / 草稿 ---
+TODO.local.md
+NOTES.local.md
+scratch/

@@ -1,0 +1,58 @@
+/* ============================================================
+   LabelHub Editorial/Magazine Design Tokens
+   Editorial 风格:浅米色主背景 + 黑色主文字 + 暖红强调 +
+   IBM Plex Serif 标题 + Inter 正文 + 1px 黑色细线分隔
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  /* — Color — */
+  --color-bg: #F5F1E8;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #F0EBE0;
+  --color-text: #1A1A1A;
+  --color-text-secondary: #5C5C5C;
+  --color-text-muted: #999999;
+  --color-accent: #C73E1D;
+  --color-accent-hover: #A83217;
+  --color-border: #1A1A1A;
+  --color-border-light: #D4CFC6;
+  --color-success: #2D6A4F;
+  --color-warning: #B8860B;
+  --color-danger: #C73E1D;
+
+  /* — Typography — */
+  --font-heading: 'IBM Plex Serif', Georgia, serif;
+  --font-body: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --text-hero: clamp(2rem, 1.5rem + 2vw, 3rem);
+  --text-h1: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+  --text-h2: 1.25rem;
+  --text-base: 0.9375rem;
+  --text-sm: 0.8125rem;
+
+  /* — Spacing — */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-section: clamp(2rem, 1.5rem + 3vw, 4rem);
+
+  /* — Border — */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --border-width: 1px;
+  --border-style: solid;
+
+  /* — Shadow — */
+  --shadow-sm: 1px 1px 0 rgba(0,0,0,0.08);
+  --shadow-md: 2px 2px 0 rgba(0,0,0,0.12);
+
+  /* — Duration — */
+  --duration-fast: 120ms;
+  --duration-normal: 250ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
