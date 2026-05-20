@@ -1,6 +1,12 @@
-import { Button, Card, Tag, Table, Modal, Typography } from '@douyinfe/semi-ui'
+import { Button, Card, Tag, Table, Typography } from '@douyinfe/semi-ui'
 
 const { Title, Paragraph } = Typography
+
+interface StyleTableRow {
+  id: string
+  category: string
+  status: string
+}
 
 export default function StyleGuide() {
   return (
@@ -72,7 +78,7 @@ export default function StyleGuide() {
           columns={[
             { title: '题目 ID', dataIndex: 'id' },
             { title: '类别', dataIndex: 'category' },
-            { title: '状态', dataIndex: 'status', render: (_: unknown, r: { status: string }) => <Tag color={r.status === 'approved' ? 'green' : 'grey'}>{r.status}</Tag> },
+            { title: '状态', dataIndex: 'status', render: (_: unknown, r: StyleTableRow) => <Tag color={r.status === 'approved' ? 'green' : 'grey'}>{r.status}</Tag> },
           ]}
           dataSource={[
             { id: 'Q0001', category: '知识问答', status: 'approved' },

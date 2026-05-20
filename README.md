@@ -5,27 +5,28 @@
 ## 快速启动
 
 ```bash
-# 1. 起基础设施
+# 1. 起基础设施(MySQL + Redis + Adminer)
 make up
 
 # 2. 安装依赖
 make install
 
-# 3. 跑 API
-make api
+# 3. 跑 API(终端 A,复用或新开)
+make api                 # http://localhost:8080/health
 
-# 4. 跑前端
-make web
+# 4. 跑前端(终端 B,新开)
+make web                 # http://localhost:5173
 
-# 5. 种子数据(初次使用)
-make seed
+# Adminer(DB GUI):    http://localhost:18080  (server=mysql, user=labelhub, pass=labelhub_dev)
 ```
+
+Seed 数据将在 Sprint 1 实现。
 
 ## 架构
 
 ```
-apps/web     — React 18 + TypeScript + Semi Design (单一 SPA,角色路由)
-apps/api     — Go + Gin REST API
+apps/web      — React 18 + TypeScript + Semi Design (单一 SPA,角色路由)
+apps/api      — Go + Gin REST API (port 8080)
 apps/ai-worker — Go Asynq AI 预审 Worker
 ```
 

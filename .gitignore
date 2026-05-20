@@ -62,7 +62,7 @@ coverage/
 __snapshots__/.tmp/
 
 # --- Go ---
-# 编译产物
+# 编译产物(含 go build 默认输出到模块根目录的情况)
 *.exe
 *.exe~
 *.dll
@@ -71,8 +71,10 @@ __snapshots__/.tmp/
 *.test
 *.out
 bin/
+apps/api/server
 apps/api/cmd/server/server
 apps/api/cmd/server/api
+apps/ai-worker/worker
 apps/ai-worker/cmd/worker/worker
 apps/ai-worker/cmd/worker/ai-worker
 
@@ -103,13 +105,12 @@ logs/
 # --- 临时 / 缓存 ---
 *.tmp
 *.temp
+.~*
 .tmp/
 .DS_Store
 
 # --- 课题资料(★ 不进仓库)---
-LabelHub *.pdf
-*课题*.pdf
-*实现要求*.pdf
+*.pdf
 
 # --- Docker 临时 ---
 .docker/

@@ -21,4 +21,4 @@ web:
 	cd apps/web && pnpm dev
 
 seed:
-	cd apps/api && go run cmd/seed/main.go
+	@echo "Seed 脚本将在 Sprint 1 实现,当前请手动导入 tools/seed/datasets/"
