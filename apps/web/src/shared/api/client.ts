@@ -94,8 +94,8 @@ export type DemoUser = {
 export type Task = {
   id: number
   title: string
-  description?: { String: string, Valid: boolean }
-  baselineDescription?: { String: string, Valid: boolean }
+  description: string | null
+  baselineDescription: string | null
   status: string
   totalItems: number
   finishedItems: number
@@ -104,7 +104,7 @@ export type Task = {
 export type TaskItem = {
   id: number
   taskId: number
-  externalId?: { String: string, Valid: boolean }
+  externalId: string | null
   payload: string
   status: string
 }

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"database/sql"
 	"time"
 )
 
@@ -38,11 +37,11 @@ type Task struct {
 	ID                  uint64         `gorm:"primaryKey" json:"id"`
 	OwnerID             uint64         `json:"ownerId"`
 	Title               string         `gorm:"size:200" json:"title"`
-	Description         sql.NullString `json:"description"`
+	Description         NullString `json:"description"`
 	RichDescription     *string        `gorm:"type:json" json:"richDescription"`
 	Tags                *string        `gorm:"type:json" json:"tags"`
 	RewardConfig        *string        `gorm:"type:json" json:"rewardConfig"`
-	BaselineDescription sql.NullString `json:"baselineDescription"`
+	BaselineDescription NullString `json:"baselineDescription"`
 	Status              string         `gorm:"default:draft" json:"status"`
 	TemplateID          *uint64        `json:"templateId"`
 	Distribution        string         `gorm:"default:first_come" json:"distribution"`
@@ -52,10 +51,10 @@ type Task struct {
 	AIPromptID          *uint64        `gorm:"column:ai_prompt_id" json:"aiPromptId"`
 	TotalItems          int            `json:"totalItems"`
 	FinishedItems       int            `json:"finishedItems"`
-	Deadline            sql.NullTime   `json:"deadline"`
+	Deadline            NullTime   `json:"deadline"`
 	CreatedAt           time.Time      `json:"createdAt"`
 	UpdatedAt           time.Time      `json:"updatedAt"`
-	PublishedAt         sql.NullTime   `json:"publishedAt"`
+	PublishedAt         NullTime   `json:"publishedAt"`
 }
 
 // ============================================================
@@ -80,12 +79,12 @@ func (TaskTemplate) TableName() string { return "task_templates" }
 type TaskItem struct {
 	ID         uint64         `gorm:"primaryKey" json:"id"`
 	TaskID     uint64         `json:"taskId"`
-	ExternalID sql.NullString `gorm:"size:128" json:"externalId"`
+	ExternalID NullString `gorm:"size:128" json:"externalId"`
 	Payload    string         `gorm:"type:json" json:"payload"`
 	Status     string         `gorm:"default:available" json:"status"`
 	ClaimedBy  *uint64        `json:"claimedBy"`
-	ClaimedAt  sql.NullTime   `json:"claimedAt"`
-	FinishedAt sql.NullTime   `json:"finishedAt"`
+	ClaimedAt  NullTime   `json:"claimedAt"`
+	FinishedAt NullTime   `json:"finishedAt"`
 	Priority   int            `json:"priority"`
 	CreatedAt  time.Time      `json:"createdAt"`
 }
@@ -100,7 +99,7 @@ type TaskAssignee struct {
 	TaskID     uint64       `gorm:"uniqueIndex:uk_task_user_item" json:"taskId"`
 	UserID     uint64       `gorm:"uniqueIndex:uk_task_user_item" json:"userId"`
 	ItemID     *uint64      `gorm:"uniqueIndex:uk_task_user_item" json:"itemId"`
-	AssignedAt sql.NullTime `json:"assignedAt"`
+	AssignedAt NullTime `json:"assignedAt"`
 }
 
 func (TaskAssignee) TableName() string { return "task_assignees" }
@@ -119,8 +118,8 @@ type Submission struct {
 	AIVerdict         *string      `gorm:"column:ai_verdict" json:"aiVerdict"`
 	AIScore           *float64     `gorm:"column:ai_score" json:"aiScore"`
 	HumanVerdict      *string      `json:"humanVerdict"`
-	SubmittedAt       sql.NullTime `json:"submittedAt"`
-	ApprovedAt        sql.NullTime `json:"approvedAt"`
+	SubmittedAt       NullTime `json:"submittedAt"`
+	ApprovedAt        NullTime `json:"approvedAt"`
 	CreatedAt         time.Time    `json:"createdAt"`
 	UpdatedAt         time.Time    `json:"updatedAt"`
 }
@@ -152,16 +151,16 @@ type AIReview struct {
 	Verdict        string         `json:"verdict"`
 	OverallScore   *float64       `json:"overallScore"`
 	Dimensions     *string        `gorm:"type:json" json:"dimensions"`
-	Reason         sql.NullString `json:"reason"`
+	Reason         NullString `json:"reason"`
 	RawResponse    *string        `gorm:"type:json" json:"rawResponse"`
 	TokensInput    int            `json:"tokensInput"`
 	TokensOutput   int            `json:"tokensOutput"`
 	LatencyMS      int            `json:"latencyMs"`
 	Status         string         `gorm:"default:pending" json:"status"`
 	RetryCount     int            `json:"retryCount"`
-	ErrorMsg       sql.NullString `json:"errorMsg"`
+	ErrorMsg       NullString `json:"errorMsg"`
 	CreatedAt      time.Time      `json:"createdAt"`
-	FinishedAt     sql.NullTime   `json:"finishedAt"`
+	FinishedAt     NullTime   `json:"finishedAt"`
 }
 
 func (AIReview) TableName() string { return "ai_reviews" }
@@ -176,7 +175,7 @@ type HumanReview struct {
 	ReviewerID   uint64         `json:"reviewerId"`
 	Stage        string         `gorm:"default:first" json:"stage"`
 	Verdict      string         `json:"verdict"`
-	Reason       sql.NullString `json:"reason"`
+	Reason       NullString `json:"reason"`
 	Patch        *string        `gorm:"type:json" json:"patch"`
 	CreatedAt    time.Time      `json:"createdAt"`
 }
@@ -190,7 +189,7 @@ type AuditLog struct {
 	ID         uint64         `gorm:"primaryKey" json:"id"`
 	EntityType string         `json:"entityType"`
 	EntityID   uint64         `json:"entityId"`
-	FromState  sql.NullString `gorm:"size:32" json:"fromState"`
+	FromState  NullString `gorm:"size:32" json:"fromState"`
 	ToState    string         `gorm:"size:32" json:"toState"`
 	ActorType  string         `json:"actorType"`
 	ActorID    *uint64        `json:"actorId"`
@@ -215,7 +214,7 @@ type UploadedFile struct {
 	Status               string       `gorm:"default:temp" json:"status"`
 	CreatedBy            uint64       `json:"createdBy"`
 	CreatedAt            time.Time    `json:"createdAt"`
-	AttachedAt           sql.NullTime `json:"attachedAt"`
+	AttachedAt           NullTime `json:"attachedAt"`
 }
 
 func (UploadedFile) TableName() string { return "uploaded_files" }
@@ -232,12 +231,12 @@ type Export struct {
 	FieldMap       *string        `gorm:"type:json" json:"fieldMap"`
 	IncludeReviews bool           `json:"includeReviews"`
 	Status         string         `gorm:"default:queued" json:"status"`
-	FilePath       sql.NullString `gorm:"size:512" json:"filePath"`
+	FilePath       NullString `gorm:"size:512" json:"filePath"`
 	FileSize       *uint64        `json:"fileSize"`
 	RowCount       *int           `json:"rowCount"`
-	ErrorMsg       sql.NullString `json:"errorMsg"`
+	ErrorMsg       NullString `json:"errorMsg"`
 	CreatedAt      time.Time      `json:"createdAt"`
-	FinishedAt     sql.NullTime   `json:"finishedAt"`
+	FinishedAt     NullTime   `json:"finishedAt"`
 }
 
 func (Export) TableName() string { return "exports" }
@@ -271,7 +270,7 @@ type GoldenSample struct {
 	PayloadHash     string         `gorm:"uniqueIndex:uk_task_payload_hash;size:64" json:"payloadHash"`
 	ExpectedAnswer  string         `gorm:"type:json" json:"expectedAnswer"`
 	ExpectedVerdict string         `json:"expectedVerdict"`
-	Notes           sql.NullString `json:"notes"`
+	Notes           NullString `json:"notes"`
 	CreatedBy       uint64         `json:"createdBy"`
 	CreatedAt       time.Time      `json:"createdAt"`
 }
@@ -287,10 +286,10 @@ type AIDryRun struct {
 	AIPromptID uint64         `gorm:"column:ai_prompt_id" json:"aiPromptId"`
 	Status     string         `gorm:"default:queued" json:"status"`
 	Result     *string        `gorm:"type:json" json:"result"`
-	ErrorMsg   sql.NullString `json:"errorMsg"`
+	ErrorMsg   NullString `json:"errorMsg"`
 	CreatedBy  uint64         `json:"createdBy"`
 	CreatedAt  time.Time      `json:"createdAt"`
-	FinishedAt sql.NullTime   `json:"finishedAt"`
+	FinishedAt NullTime   `json:"finishedAt"`
 }
 
 func (AIDryRun) TableName() string { return "ai_dry_runs" }
@@ -305,7 +304,7 @@ type OutboxEvent struct {
 	Status      string       `gorm:"default:pending" json:"status"`
 	RetryCount  int          `json:"retryCount"`
 	CreatedAt   time.Time    `json:"createdAt"`
-	PublishedAt sql.NullTime `json:"publishedAt"`
+	PublishedAt NullTime `json:"publishedAt"`
 }
 
 func (OutboxEvent) TableName() string { return "outbox_events" }

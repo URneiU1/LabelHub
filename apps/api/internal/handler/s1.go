@@ -108,12 +108,27 @@ type inlineLLMRequest struct {
 }
 
 func (h S1Handler) ListTasks(c *gin.Context) {
+	claims, _ := middleware.Claims(c)
+	query := h.db.Order("id DESC").Limit(httpx.CursorLimit(c))
+	// admin 看全部;owner 只看自己创建的;混合角色按"admin 优先"放行
+	if !hasRole(claims.Roles, "admin") {
+		query = query.Where("owner_id = ?", claims.UserID)
+	}
 	var tasks []model.Task
-	if err := h.db.Order("id DESC").Limit(httpx.CursorLimit(c)).Find(&tasks).Error; err != nil {
+	if err := query.Find(&tasks).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list tasks")
 		return
 	}
 	httpx.PageOK(c, tasks, httpx.Page{})
+}
+
+func hasRole(roles []string, target string) bool {
+	for _, role := range roles {
+		if role == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (h S1Handler) CreateTask(c *gin.Context) {
@@ -273,8 +288,21 @@ func (h S1Handler) MySubmissions(c *gin.Context) {
 	httpx.PageOK(c, submissions, httpx.Page{})
 }
 
+// reviewerQueueAllowedStatuses 限定审核队列只能看 human_reviewing / revising;
+// 防止 reviewer 用 ?status=draft 或 ?status=approved 拉到不该看的中间态 / 终态记录
+var reviewerQueueAllowedStatuses = map[string]struct{}{
+	statemachine.StateHumanReviewing: {},
+	statemachine.StateRevising:       {},
+}
+
 func (h S1Handler) ReviewerQueue(c *gin.Context) {
 	status := c.DefaultQuery("status", statemachine.StateHumanReviewing)
+	if _, ok := reviewerQueueAllowedStatuses[status]; !ok {
+		httpx.ErrorWithDetails(c, http.StatusForbidden, "FORBIDDEN",
+			"reviewer queue only exposes human_reviewing / revising",
+			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing, statemachine.StateRevising}})
+		return
+	}
 	var submissions []model.Submission
 	if err := h.db.Where("status = ?", status).Order("updated_at ASC").Find(&submissions).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review queue")
@@ -363,6 +391,7 @@ func (h S1Handler) ExportJSON(c *gin.Context) {
 		return
 	}
 	claims, _ := middleware.Claims(c)
+	includeReviews := c.DefaultQuery("include_reviews", "false") == "true"
 
 	var rows []struct {
 		SubmissionID uint64 `json:"submission_id"`
@@ -382,26 +411,117 @@ func (h S1Handler) ExportJSON(c *gin.Context) {
 		return
 	}
 
+	// 收集 submission_id 一次性查 latest AI / human review,避免 N+1
+	submissionIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		submissionIDs = append(submissionIDs, row.SubmissionID)
+	}
+
+	var aiBySubmission map[uint64]model.AIReview
+	var humanBySubmission map[uint64]model.HumanReview
+	if includeReviews && len(submissionIDs) > 0 {
+		aiBySubmission, err = h.latestAIReviewBySubmission(submissionIDs)
+		if err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load ai reviews")
+			return
+		}
+		humanBySubmission, err = h.latestHumanReviewBySubmission(submissionIDs)
+		if err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load human reviews")
+			return
+		}
+	}
+
 	exportRows := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		exportRows = append(exportRows, map[string]any{
+		entry := map[string]any{
 			"submission_id": row.SubmissionID,
 			"item_id":       row.ItemID,
 			"external_id":   row.ExternalID,
 			"payload":       mustJSON(row.Payload),
 			"answer":        mustJSON(row.Answer),
-		})
+		}
+		if includeReviews {
+			if ai, ok := aiBySubmission[row.SubmissionID]; ok {
+				entry["ai_review"] = aiReviewToMap(ai)
+			} else {
+				entry["ai_review"] = nil
+			}
+			if human, ok := humanBySubmission[row.SubmissionID]; ok {
+				entry["human_review"] = humanReviewToMap(human)
+			} else {
+				entry["human_review"] = nil
+			}
+		}
+		exportRows = append(exportRows, entry)
 	}
 
 	_ = h.db.Transaction(func(tx *gorm.DB) error {
-		export := model.Export{TaskID: task.ID, CreatedBy: claims.UserID, Format: "json", IncludeReviews: true, Status: "succeeded", RowCount: ptrInt(len(exportRows))}
+		export := model.Export{TaskID: task.ID, CreatedBy: claims.UserID, Format: "json", IncludeReviews: includeReviews, Status: "succeeded", RowCount: ptrInt(len(exportRows))}
 		if err := tx.Create(&export).Error; err != nil {
 			return err
 		}
-		return createAuditLog(tx, "export", export.ID, "", "succeeded", "user", &claims.UserID, "exported", map[string]any{"task_id": task.ID, "format": "json"})
+		return createAuditLog(tx, "export", export.ID, "", "succeeded", "user", &claims.UserID, "exported", map[string]any{"task_id": task.ID, "format": "json", "include_reviews": includeReviews})
 	})
 
-	httpx.OK(c, gin.H{"task": task, "rows": exportRows})
+	httpx.OK(c, gin.H{"task": task, "rows": exportRows, "include_reviews": includeReviews})
+}
+
+// 每个 submission 取最新一条 AI review;append-only 表所以 ORDER BY id DESC 等价于 created_at DESC
+func (h S1Handler) latestAIReviewBySubmission(submissionIDs []uint64) (map[uint64]model.AIReview, error) {
+	var reviews []model.AIReview
+	if err := h.db.Where("submission_id IN ?", submissionIDs).Order("id DESC").Find(&reviews).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uint64]model.AIReview, len(submissionIDs))
+	for _, review := range reviews {
+		if _, seen := out[review.SubmissionID]; !seen {
+			out[review.SubmissionID] = review
+		}
+	}
+	return out, nil
+}
+
+func (h S1Handler) latestHumanReviewBySubmission(submissionIDs []uint64) (map[uint64]model.HumanReview, error) {
+	var reviews []model.HumanReview
+	if err := h.db.Where("submission_id IN ?", submissionIDs).Order("id DESC").Find(&reviews).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uint64]model.HumanReview, len(submissionIDs))
+	for _, review := range reviews {
+		if _, seen := out[review.SubmissionID]; !seen {
+			out[review.SubmissionID] = review
+		}
+	}
+	return out, nil
+}
+
+func aiReviewToMap(review model.AIReview) map[string]any {
+	return map[string]any{
+		"verdict":        review.Verdict,
+		"overall_score":  review.OverallScore,
+		"dimensions":     unwrapJSONPointer(review.Dimensions),
+		"reason":         review.Reason,
+		"prompt_version": review.PromptVersion,
+		"created_at":     review.CreatedAt,
+	}
+}
+
+func humanReviewToMap(review model.HumanReview) map[string]any {
+	return map[string]any{
+		"verdict":      review.Verdict,
+		"reason":       review.Reason,
+		"stage":        review.Stage,
+		"reviewer_id":  review.ReviewerID,
+		"created_at":   review.CreatedAt,
+	}
+}
+
+func unwrapJSONPointer(raw *string) any {
+	if raw == nil {
+		return nil
+	}
+	return mustJSON(*raw)
 }
 
 func (h S1Handler) InlineLLM(c *gin.Context) {
@@ -535,7 +655,9 @@ func (h S1Handler) saveRevision(c *gin.Context, draft bool) {
 		}
 
 		to := from
-		event := statemachine.EventSave
+		// submitEvent / dispatchEvent 仅在 !draft 路径有意义,留空字符串作为"未跨态"标记
+		submitEvent := ""
+		dispatchEvent := ""
 		updates := map[string]any{"current_revision_id": revision.ID}
 		if !draft {
 			if from != statemachine.StateDraft && from != statemachine.StateRevising {
@@ -544,18 +666,16 @@ func (h S1Handler) saveRevision(c *gin.Context, draft bool) {
 			if err := statemachine.Apply(from, statemachine.EventSubmit, statemachine.StateSubmitted); err != nil {
 				return err
 			}
-			event = statemachine.EventSubmit
+			submitEvent = statemachine.EventSubmit
 			to = statemachine.StateSubmitted
 			if task.AIReviewEnabled {
 				to = statemachine.StateAIReviewing
+				dispatchEvent = statemachine.EventEnqueue
 			} else {
 				to = statemachine.StateHumanReviewing
+				dispatchEvent = statemachine.EventSkipAI
 			}
-			submitEvent := statemachine.EventSkipAI
-			if task.AIReviewEnabled {
-				submitEvent = statemachine.EventEnqueue
-			}
-			if err := statemachine.Apply(statemachine.StateSubmitted, submitEvent, to); err != nil {
+			if err := statemachine.Apply(statemachine.StateSubmitted, dispatchEvent, to); err != nil {
 				return err
 			}
 			for key, value := range resubmitClearedFields(to, time.Now().UTC()) {
@@ -565,7 +685,7 @@ func (h S1Handler) saveRevision(c *gin.Context, draft bool) {
 			return fmt.Errorf("draft can only be saved before first submit")
 		}
 		if draft && from == statemachine.StateDraft {
-			if err := statemachine.Apply(from, event, statemachine.StateDraft); err != nil {
+			if err := statemachine.Apply(from, statemachine.EventSave, statemachine.StateDraft); err != nil {
 				return err
 			}
 		}
@@ -580,7 +700,11 @@ func (h S1Handler) saveRevision(c *gin.Context, draft bool) {
 			}
 		}
 		if !draft {
-			if err := createAuditLog(tx, "submission", submission.ID, from, to, "user", &claims.UserID, "submit", nil); err != nil {
+			// PLAN §11"audit_log 覆盖所有迁移":跨态写 2 条 — submit 进 submitted、再 enqueue/skip_ai 进 ai/human_reviewing
+			if err := createAuditLog(tx, "submission", submission.ID, from, statemachine.StateSubmitted, "user", &claims.UserID, submitEvent, nil); err != nil {
+				return err
+			}
+			if err := createAuditLog(tx, "submission", submission.ID, statemachine.StateSubmitted, to, "user", &claims.UserID, dispatchEvent, nil); err != nil {
 				return err
 			}
 		}
@@ -673,8 +797,8 @@ func parseIDParam(c *gin.Context, name string) (uint64, bool) {
 	return id, true
 }
 
-func nullString(value string) sql.NullString {
-	return sql.NullString{String: value, Valid: value != ""}
+func nullString(value string) model.NullString {
+	return model.StringFrom(value)
 }
 
 func nextRevisionNo(tx *gorm.DB, submissionID uint64) (int, error) {

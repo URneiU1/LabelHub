@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"log"
@@ -111,13 +110,13 @@ func seedQAQuality(database *gorm.DB) error {
 		task := model.Task{
 			OwnerID:             owner.ID,
 			Title:               "官方 qa_quality 质检标注",
-			Description:         sql.NullString{String: "基于官方 qa_quality 数据集的问答质量标注任务。", Valid: true},
-			BaselineDescription: sql.NullString{String: string(baseline), Valid: true},
+			Description:         model.StringFrom("基于官方 qa_quality 数据集的问答质量标注任务。"),
+			BaselineDescription: model.StringFrom(string(baseline)),
 			Status:              "published",
 			Distribution:        "first_come",
 			AIReviewEnabled:     false,
 			HumanReviewEnabled:  true,
-			PublishedAt:         sql.NullTime{Time: time.Now().UTC(), Valid: true},
+			PublishedAt:         model.TimeFrom(time.Now().UTC()),
 		}
 		if err := tx.Where("title = ?", task.Title).Attrs(task).FirstOrCreate(&task).Error; err != nil {
 			return err
@@ -169,7 +168,7 @@ func seedQAQuality(database *gorm.DB) error {
 			}
 			item := model.TaskItem{
 				TaskID:     task.ID,
-				ExternalID: sql.NullString{String: externalID, Valid: externalID != ""},
+				ExternalID: model.StringFrom(externalID),
 				Payload:    string(raw),
 				Status:     "available",
 			}

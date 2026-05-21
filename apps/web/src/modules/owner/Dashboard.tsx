@@ -62,7 +62,7 @@ export default function OwnerDashboard() {
                 官方 qa_quality 主线任务。AI 预审在 Sprint 1 关闭，提交后直接进入人工审核。
               </p>
               <div style={{ marginTop: 'var(--space-md)', padding: 'var(--space-md)', border: '1px solid var(--color-border-light)', maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                {selected.baselineDescription?.String || '暂无 baseline'}
+                {selected.baselineDescription || '暂无 baseline'}
               </div>
               <Button onClick={() => void exportJSON(selected.id)} style={{ marginTop: 'var(--space-md)' }}>
                 导出 approved JSON
