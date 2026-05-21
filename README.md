@@ -11,16 +11,20 @@ make up
 # 2. 安装依赖
 make install
 
-# 3. 跑 API(终端 A,复用或新开)
+# 3. 初始化官方 qa_quality seed
+make seed
+
+# 4. 跑 API(终端 A,复用或新开)
 make api                 # http://localhost:8080/health
 
-# 4. 跑前端(终端 B,新开)
+# 5. 跑前端(终端 B,新开)
 make web                 # http://localhost:5173
 
+# MySQL(host):        localhost:13306  (user=labelhub, pass=labelhub_dev)
 # Adminer(DB GUI):    http://localhost:18080  (server=mysql, user=labelhub, pass=labelhub_dev)
 ```
 
-Seed 数据将在 Sprint 1 实现。
+如果本机 8080 被占用,可用 `API_PORT=18080 make api` 启 API,再用 `VITE_API_PROXY_TARGET=http://localhost:18080 make web` 启前端。
 
 ## 架构
 

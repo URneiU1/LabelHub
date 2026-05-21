@@ -1,0 +1,138 @@
+type ApiEnvelope<T> = {
+  data: T
+  request_id: string
+}
+
+type ApiErrorEnvelope = {
+  error: {
+    code: string
+    message: string
+  }
+  request_id: string
+}
+
+const TOKEN_KEY = 'labelhub_access_token'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+export async function login(username: string, password: string) {
+  const data = await apiPost<{ tokens: { accessToken: string }, user: DemoUser }>('/auth/login', { username, password }, false)
+  localStorage.setItem(TOKEN_KEY, data.tokens.accessToken)
+  return data.user
+}
+
+// JWT 无服务端撤销,登出仅清本地 token + 通知后端记录(后端 Sprint 5 后会做真撤销)
+export async function logout() {
+  try {
+    await apiPost('/auth/logout', {})
+  } catch {
+    // 即使后端不可达也要清本地 token
+  }
+  clearToken()
+}
+
+export async function apiGet<T>(path: string) {
+  return request<T>(path, { method: 'GET' })
+}
+
+export async function apiPost<T>(path: string, body: unknown, auth = true) {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, auth)
+}
+
+export async function apiUpload<T>(path: string, body: FormData) {
+  const headers = new Headers()
+  const token = getToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(`/api/v1${path}`, { method: 'POST', headers, body })
+  const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
+  if (!response.ok) {
+    const errorPayload = payload as ApiErrorEnvelope
+    throw new Error(errorPayload.error?.message || '上传失败')
+  }
+  return (payload as ApiEnvelope<T>).data
+}
+
+async function request<T>(path: string, init: RequestInit, auth = true): Promise<T> {
+  const headers = new Headers(init.headers)
+  if (auth) {
+    const token = getToken()
+    if (!token) {
+      throw new Error('请先登录')
+    }
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(`/api/v1${path}`, { ...init, headers })
+  const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
+  if (!response.ok) {
+    const errorPayload = payload as ApiErrorEnvelope
+    throw new Error(errorPayload.error?.message || '请求失败')
+  }
+  return (payload as ApiEnvelope<T>).data
+}
+
+export type DemoUser = {
+  id: number
+  username: string
+  displayName: string
+  roles: string[]
+}
+
+export type Task = {
+  id: number
+  title: string
+  description?: { String: string, Valid: boolean }
+  baselineDescription?: { String: string, Valid: boolean }
+  status: string
+  totalItems: number
+  finishedItems: number
+}
+
+export type TaskItem = {
+  id: number
+  taskId: number
+  externalId?: { String: string, Valid: boolean }
+  payload: string
+  status: string
+}
+
+export type Submission = {
+  id: number
+  taskId: number
+  itemId: number
+  status: string
+  humanVerdict?: string
+  currentRevisionId?: number
+}
+
+export type TaskTemplate = {
+  id: number
+  schemaJson: string
+}
+
+export type SubmissionRevision = {
+  id: number
+  answer: string
+  draft: boolean
+}
+
+export type TaskBundle = {
+  task: Task
+  item?: TaskItem
+  template?: TaskTemplate
+  submission?: Submission
+  revision?: SubmissionRevision | null
+}

@@ -1,23 +1,72 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
+	"labelhub-api/internal/auth"
+	"labelhub-api/internal/db"
+	"labelhub-api/internal/handler"
+	"labelhub-api/internal/middleware"
 )
 
 func main() {
-	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			fmt.Fprintf(os.Stderr, "flush logger: %v\n", err)
+		}
+	}()
+
+	database := db.Init()
+	db.RunMigrations()
+	authService := auth.NewServiceFromEnv()
 
 	r := gin.Default()
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	r.Use(middleware.CORS())
+	r.Use(middleware.RequestID())
+	r.GET("/", healthResponse)
+	r.GET("/health", healthResponse)
 
-	port := ":8080"
+	api := r.Group("/api/v1")
+	api.GET("", healthResponse)
+	api.GET("/", healthResponse)
+
+	authedAPI := api.Group("")
+	authedAPI.Use(middleware.Auth(authService))
+	handler.NewAuthHandler(database, authService, authedAPI).Register(api)
+	handler.NewS1Handler(database).Register(authedAPI)
+
+	port := serverPort()
 	logger.Info("API server starting", zap.String("port", port))
 	log.Fatal(r.Run(port))
+}
+
+func healthResponse(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"service": "labelhub-api",
+			"status":  "ok",
+		},
+		"request_id": c.GetString(middleware.RequestIDContextKey),
+	})
+}
+
+func serverPort() string {
+	port := os.Getenv("API_PORT")
+	if port == "" {
+		return ":8080"
+	}
+	if port[0] == ':' {
+		return port
+	}
+	return ":" + port
 }

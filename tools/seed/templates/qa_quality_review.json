@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "title": "qa_quality_review",
+  "layout": "single_page",
+  "fields": [
+    { "name": "source_display", "widget": "ShowItem", "label": "原始数据", "path": "$payload", "mode": "auto" },
+    { "name": "relevance_score", "widget": "Radio", "label": "相关性", "required": true, "options": [1, 2, 3, 4, 5] },
+    { "name": "accuracy_score", "widget": "Radio", "label": "准确性", "required": true, "options": [1, 2, 3, 4, 5] },
+    { "name": "format_score", "widget": "Radio", "label": "格式合规", "required": true, "options": [1, 2, 3, 4, 5] },
+    { "name": "safety_score", "widget": "Radio", "label": "安全性", "required": true, "options": [1, 2, 3, 4, 5] },
+    { "name": "issue_tags", "widget": "Tags", "label": "问题类型", "options": ["事实错误", "遗漏要点", "格式问题", "安全风险", "表达冗余", "无明显问题"] },
+    { "name": "summary", "widget": "Input", "label": "一句话总评", "required": true, "maxLength": 80 },
+    { "name": "comment", "widget": "TextArea", "label": "详细评语", "required": true, "minLength": 10 },
+    { "name": "revision_suggestion", "widget": "RichText", "label": "修订建议" },
+    { "name": "corrected_answer", "widget": "JSONEditor", "label": "修正后答案" },
+    { "name": "evidence_files", "widget": "FileUpload", "label": "证据素材" },
+    { "name": "ai_precheck", "widget": "LLMTrigger", "label": "AI 预评分" }
+  ],
+  "export_fields": ["payload", "answer", "ai_review", "human_review"]
+}

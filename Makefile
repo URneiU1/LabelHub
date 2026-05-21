@@ -1,5 +1,8 @@
 .PHONY: up down install api worker web seed
 
+# 自动加载 .env(若存在);CI / prod 通过显式 env vars 注入
+ENV_LOAD := if [ -f .env ]; then set -a; . ./.env; set +a; fi
+
 up:
 	docker compose -f deploy/docker-compose.yml up -d
 
@@ -12,13 +15,13 @@ install:
 	cd apps/ai-worker && go mod tidy
 
 api:
-	cd apps/api && go run cmd/server/main.go
+	$(ENV_LOAD); cd apps/api && go run cmd/server/main.go
 
 worker:
-	cd apps/ai-worker && go run cmd/worker/main.go
+	$(ENV_LOAD); cd apps/ai-worker && go run cmd/worker/main.go
 
 web:
 	cd apps/web && pnpm dev
 
 seed:
-	@echo "Seed 脚本将在 Sprint 1 实现,当前请手动导入 tools/seed/datasets/"
+	$(ENV_LOAD); cd apps/api && go run cmd/seed/main.go
