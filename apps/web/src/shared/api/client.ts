@@ -41,20 +41,21 @@ export async function apiGet<T>(path: string) {
   return request<T>(path, { method: 'GET' })
 }
 
-export async function apiPost<T>(path: string, body: unknown, auth = true) {
+export async function apiPost<T>(path: string, body: Record<string, unknown> | FormData, auth = true) {
   return request<T>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: body instanceof FormData ? body : JSON.stringify(body),
   }, auth)
 }
 
 export async function apiUpload<T>(path: string, body: FormData) {
   const headers = new Headers()
   const token = getToken()
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
+  if (!token) {
+    throw new Error('请先登录')
   }
+  headers.set('Authorization', `Bearer ${token}`)
 
   const response = await fetch(`/api/v1${path}`, { method: 'POST', headers, body })
   const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
