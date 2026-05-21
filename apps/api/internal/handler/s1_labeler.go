@@ -14,6 +14,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/policy"
 	"labelhub-api/internal/statemachine"
 )
 
@@ -33,6 +34,8 @@ func (h S1Handler) ClaimItem(c *gin.Context) {
 	}
 	claims, _ := middleware.Claims(c)
 
+	// Path A:已经 claim 中的 item 直接 resume。即使 task 后来被 pause/archive,
+	// 也允许 labeler 把手上的活做完(否则会卡死他的 in-flight 工作)。
 	var claimed model.TaskItem
 	err := h.db.Where("task_id = ? AND claimed_by = ? AND status = ?", task.ID, claims.UserID, itemStatusClaimed).Order("id").First(&claimed).Error
 	if err == nil {
@@ -41,6 +44,12 @@ func (h S1Handler) ClaimItem(c *gin.Context) {
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load claimed item")
+		return
+	}
+
+	// Path B:尝试领新题前,task 必须是 published。draft/paused/archived 一律 409。
+	if decision := policy.CanClaimNew(claims, task); !decision.Allowed {
+		httpx.Error(c, decision.HTTPStatus, decision.Code, decision.Message)
 		return
 	}
 
@@ -77,11 +86,24 @@ func (h S1Handler) GetItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.canReadTask(c, task) {
-		return
-	}
 	item, ok := h.loadItem(c, task.ID)
 	if !ok {
+		return
+	}
+
+	// 查 submission(可能不存在);policy.CanReadItem 需要它来判定 reviewer 是否有权限看。
+	var submissionPtr *model.Submission
+	var submission model.Submission
+	if err := h.db.Where("item_id = ?", item.ID).First(&submission).Error; err == nil {
+		submissionPtr = &submission
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")
+		return
+	}
+
+	claims, _ := middleware.Claims(c)
+	if !policy.CanReadItem(claims, task, item, submissionPtr) {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "item is not visible to current user")
 		return
 	}
 	h.respondItem(c, task, item)
@@ -106,17 +128,40 @@ func (h S1Handler) MySubmissions(c *gin.Context) {
 }
 
 func (h S1Handler) respondItem(c *gin.Context, task model.Task, item model.TaskItem) {
-	template, _ := h.currentTemplate(task.ID)
+	// template / submission / revision 任一查询出非 NotFound 错误都应该上报,
+	// 否则前端拿到空 schema 还会接着渲染,排查反而困难。
+	template, templateErr := h.currentTemplate(task.ID)
+	if templateErr != nil && !errors.Is(templateErr, gorm.ErrRecordNotFound) {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load template")
+		return
+	}
+
 	var submission model.Submission
-	_ = h.db.Where("item_id = ?", item.ID).First(&submission).Error
+	submissionErr := h.db.Where("item_id = ?", item.ID).First(&submission).Error
+	if submissionErr != nil && !errors.Is(submissionErr, gorm.ErrRecordNotFound) {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")
+		return
+	}
+
 	var revision *model.SubmissionRevision
 	if submission.ID != 0 && submission.CurrentRevisionID != nil {
 		var current model.SubmissionRevision
-		if err := h.db.First(&current, *submission.CurrentRevisionID).Error; err == nil {
+		if err := h.db.First(&current, *submission.CurrentRevisionID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load revision")
+				return
+			}
+		} else {
 			revision = &current
 		}
 	}
-	httpx.OK(c, gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision})
+
+	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision}
+	// 已发布的 task 缺模板属于配置缺失,显式 warning 让前端能渲染 setup-incomplete 状态。
+	if errors.Is(templateErr, gorm.ErrRecordNotFound) {
+		payload["warnings"] = []string{"template_missing"}
+	}
+	httpx.OK(c, payload)
 }
 
 func (h S1Handler) saveRevision(c *gin.Context, draft bool) {

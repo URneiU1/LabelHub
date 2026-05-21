@@ -8,6 +8,7 @@ import (
 	"labelhub-api/internal/model"
 )
 
+// hasRole 保留为兼容层,新代码请直接调 policy.HasRole;handler 内部沿用 []string 签名免去构造 Claims。
 func hasRole(roles []string, target string) bool {
 	for _, role := range roles {
 		if role == target {

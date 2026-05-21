@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/policy"
 	"labelhub-api/internal/statemachine"
 )
 
@@ -85,6 +88,11 @@ func (h S1Handler) ImportItems(c *gin.Context) {
 			raw, err := json.Marshal(payload)
 			if err != nil {
 				return err
+			}
+			// 缺 id 时用 payload 哈希兜底,避免每次重导致建出重复 task_items。
+			// 前缀 "hash:" 让调用方一眼能区分"是我给的 ID"还是"系统兜底生成"。
+			if externalID == "" {
+				externalID = payloadHashExternalID(raw)
 			}
 			item := model.TaskItem{
 				TaskID:     task.ID,
@@ -209,7 +217,7 @@ func (h S1Handler) loadOwnedTask(c *gin.Context) (model.Task, bool) {
 		return model.Task{}, false
 	}
 	claims, _ := middleware.Claims(c)
-	if hasRole(claims.Roles, "admin") || task.OwnerID == claims.UserID {
+	if policy.IsTaskOwner(claims, task) {
 		return task, true
 	}
 	httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "task does not belong to current owner")
@@ -218,13 +226,7 @@ func (h S1Handler) loadOwnedTask(c *gin.Context) (model.Task, bool) {
 
 func (h S1Handler) canReadTask(c *gin.Context, task model.Task) bool {
 	claims, _ := middleware.Claims(c)
-	if hasRole(claims.Roles, "admin") {
-		return true
-	}
-	if hasRole(claims.Roles, "owner") && task.OwnerID == claims.UserID {
-		return true
-	}
-	if (hasRole(claims.Roles, "labeler") || hasRole(claims.Roles, "reviewer")) && task.Status == "published" {
+	if policy.CanReadTask(claims, task) {
 		return true
 	}
 	httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "task is not visible to current user")
@@ -293,6 +295,13 @@ func nextRevisionFromMax(valid bool, max int64) int {
 		return 1
 	}
 	return int(max) + 1
+}
+
+// payloadHashExternalID 用 payload JSON 的 sha256 前 16 字节(32 hex)生成内部 external_id,
+// 确保同一 payload 重复导入命中 unique key (task_id, external_id) 而不是建出重复行。
+func payloadHashExternalID(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return "hash:" + hex.EncodeToString(sum[:16])
 }
 
 func parseIDParam(c *gin.Context, name string) (uint64, bool) {
