@@ -146,10 +146,15 @@ func seedQAQuality(database *gorm.DB) error {
 		}
 		var existing model.TaskTemplate
 		err = tx.Where("task_id = ? AND version = ?", task.ID, 1).First(&existing).Error
+		var existingPtr *model.TaskTemplate
+		if err == nil {
+			existingPtr = &existing
+			template.ID = existing.ID
+		}
+		action := seedTemplateActions(task, existingPtr, template.SchemaHash)
 		switch {
 		case err == nil:
-			template.ID = existing.ID
-			if existing.SchemaHash != template.SchemaHash {
+			if action.UpdateExisting {
 				if err := tx.Model(&existing).Updates(map[string]any{
 					"schema_json": template.SchemaJSON,
 					"schema_hash": template.SchemaHash,
@@ -158,15 +163,20 @@ func seedQAQuality(database *gorm.DB) error {
 				}
 			}
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			if err := tx.Create(&template).Error; err != nil {
-				return err
+			if action.CreateTemplate {
+				if err := tx.Create(&template).Error; err != nil {
+					return err
+				}
 			}
 		default:
 			return err
 		}
+		if !action.CreateTemplate && template.ID == 0 {
+			return errors.New("seed template action resolved without template id")
+		}
 		// Seed 只负责补齐/更新官方 v1 模板。S2 之后 Owner 可能已经创建 v2/v3,
 		// rerun seed 不能把当前模板指针回滚到 v1。
-		if task.TemplateID == nil {
+		if action.AttachToTask {
 			if err := tx.Model(&task).Update("template_id", template.ID).Error; err != nil {
 				return err
 			}
@@ -198,6 +208,20 @@ func seedQAQuality(database *gorm.DB) error {
 
 		return tx.Model(&task).Update("total_items", len(items)).Error
 	})
+}
+
+type seedTemplateAction struct {
+	CreateTemplate bool
+	UpdateExisting bool
+	AttachToTask   bool
+}
+
+func seedTemplateActions(task model.Task, existing *model.TaskTemplate, nextHash string) seedTemplateAction {
+	return seedTemplateAction{
+		CreateTemplate: existing == nil,
+		UpdateExisting: existing != nil && existing.SchemaHash != nextHash,
+		AttachToTask:   task.TemplateID == nil,
+	}
 }
 
 func loadQAQualityItems() ([]map[string]any, error) {
