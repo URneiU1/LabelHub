@@ -35,6 +35,9 @@ func findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, l
 	var submission model.Submission
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("item_id = ?", item.ID).First(&submission).Error
 	if err == nil {
+		if submission.TaskID != task.ID || submission.ItemID != item.ID || submission.LabelerID != labelerID {
+			return model.Submission{}, ErrItemNotClaimed
+		}
 		return submission, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -52,6 +55,23 @@ func findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, l
 		Status:          statemachine.StateDraft,
 	}
 	return submission, tx.Create(&submission).Error
+}
+
+func lockClaimedItem(tx *gorm.DB, taskID uint64, itemID uint64, labelerID uint64) (model.TaskItem, error) {
+	var item model.TaskItem
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND task_id = ?", itemID, taskID).
+		First(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.TaskItem{}, ErrItemNotClaimed
+		}
+		return model.TaskItem{}, err
+	}
+	if item.Status != ItemStatusClaimed || item.ClaimedBy == nil || *item.ClaimedBy != labelerID {
+		return model.TaskItem{}, ErrItemNotClaimed
+	}
+	return item, nil
 }
 
 func templateVersionForTask(tx *gorm.DB, task model.Task) (int, error) {

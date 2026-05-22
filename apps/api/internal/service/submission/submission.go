@@ -28,6 +28,7 @@ var (
 	ErrInvalidSubmit     = errors.New("submission: cannot submit from current state")
 	ErrDraftAfterSubmit  = errors.New("submission: draft can only be saved before first submit")
 	ErrInvalidTransition = errors.New("submission: invalid state machine transition")
+	ErrItemNotClaimed    = errors.New("submission: item is not claimed by current user")
 )
 
 // SaveInput:Save 调用所需要的全部领域数据。
@@ -44,7 +45,11 @@ type SaveInput struct {
 func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 	var response model.Submission
 	err := db.Transaction(func(tx *gorm.DB) error {
-		sub, err := findOrCreateSubmission(tx, input.Task, input.Item, input.UserID)
+		item, err := lockClaimedItem(tx, input.Task.ID, input.Item.ID, input.UserID)
+		if err != nil {
+			return err
+		}
+		sub, err := findOrCreateSubmission(tx, input.Task, item, input.UserID)
 		if err != nil {
 			return err
 		}

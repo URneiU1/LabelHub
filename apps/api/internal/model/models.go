@@ -46,7 +46,7 @@ type Task struct {
 	TemplateID          *uint64    `json:"templateId"`
 	Distribution        string     `gorm:"default:first_come" json:"distribution"`
 	QuotaPerUser        int        `json:"quotaPerUser"`
-	AIReviewEnabled     bool       `gorm:"default:true" json:"aiReviewEnabled"`
+	AIReviewEnabled     bool       `gorm:"default:false" json:"aiReviewEnabled"`
 	HumanReviewEnabled  bool       `gorm:"default:true" json:"humanReviewEnabled"`
 	AIPromptID          *uint64    `gorm:"column:ai_prompt_id" json:"aiPromptId"`
 	TotalItems          int        `json:"totalItems"`

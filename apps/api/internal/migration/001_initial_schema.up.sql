@@ -46,7 +46,7 @@ CREATE TABLE tasks (
   template_id BIGINT NULL,
   distribution ENUM('first_come','assigned','quota') NOT NULL DEFAULT 'first_come',
   quota_per_user INT NOT NULL DEFAULT 0,
-  ai_review_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  ai_review_enabled TINYINT(1) NOT NULL DEFAULT 0,
   human_review_enabled TINYINT(1) NOT NULL DEFAULT 1,
   ai_prompt_id BIGINT NULL,
   total_items INT NOT NULL DEFAULT 0,

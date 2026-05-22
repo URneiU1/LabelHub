@@ -167,6 +167,8 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, submission.ErrItemNotClaimed):
+			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "item is not claimed by current user")
 		case errors.Is(err, submission.ErrInvalidSubmit):
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
 		case errors.Is(err, submission.ErrDraftAfterSubmit):

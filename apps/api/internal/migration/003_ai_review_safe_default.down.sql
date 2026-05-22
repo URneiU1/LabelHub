@@ -1,0 +1,4 @@
+SET NAMES utf8mb4;
+
+ALTER TABLE tasks
+  MODIFY ai_review_enabled TINYINT(1) NOT NULL DEFAULT 1;
