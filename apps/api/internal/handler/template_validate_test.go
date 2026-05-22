@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,13 @@ func TestValidateTemplateSchema(t *testing.T) {
 			wantValid: false, wantField: "fields[0].maxLength", wantMsg: "min > max",
 		},
 		{
+			name: "negative minLength",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"a","widget":"Input","minLength":-5}
+			]}`,
+			wantValid: false, wantField: "fields[0].minLength", wantMsg: ">= 0",
+		},
+		{
 			name: "malformed JSON",
 			raw:  `{not json`,
 			wantValid: false, wantField: "$", wantMsg: "invalid JSON",
@@ -74,18 +82,9 @@ func TestValidateTemplateSchema(t *testing.T) {
 			if errs[0].Field != tc.wantField {
 				t.Errorf("Field = %q, want %q", errs[0].Field, tc.wantField)
 			}
-			if !contains(errs[0].Message, tc.wantMsg) {
+			if !strings.Contains(errs[0].Message, tc.wantMsg) {
 				t.Errorf("Message %q does not contain %q", errs[0].Message, tc.wantMsg)
 			}
 		})
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
