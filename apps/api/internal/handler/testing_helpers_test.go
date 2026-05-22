@@ -14,4 +14,5 @@ func registerAllHandlers(r gin.IRouter, db *gorm.DB) {
 	NewUploadHandler(db).Register(r)
 	NewLLMHandler().Register(r)
 	NewExportHandler(db).Register(r)
+	NewTemplateHandler(db).Register(r)
 }
