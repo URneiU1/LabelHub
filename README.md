@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-22 `fix(api): harden review and claim transactions`: 完成阶段一 P0 后端并发与越权重构:新增 `task_reviewers` 显式审核授权表;Reviewer Queue/Detail/Review 统一按 owner/admin/task_reviewers 做资源隔离;`review.Apply` 在事务内锁 task/submission 并校验 `human_reviewing`;Claim 在事务内锁 task、抢 item、立即创建 draft submission 并冻结 `template_version`;Save/Submit 在 submission 行锁保护下生成 revision_no。
 - 2026-05-22 `0b871d5`: 修复安全和边界问题,包括 ShowItem URL 白名单、reviewer/owner 审核资源边界、upload task 权限与 MIME/content 校验、template/answer body 限制、CORS 显式 origin、submission template_version snapshot。
 - 2026-05-22 `92f08ac`: 完成 S2 Day2 SchemaRenderer runtime,支持官方 schema 解析、核心 widget 渲染、答案校验和 renderer 单测。
 
@@ -54,8 +55,14 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 - 前端 build 仍有 `lottie-web` 依赖的 eval warning 和 chunk size warning,不是安全修复引入,但后续需要通过依赖替换或分包处理。
 - Plaza / Reviewer 当前仍是旧工作台表单,已补 URL 安全边界,但还未完全切换到 SchemaRenderer 驱动。
+- `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续: 将 SchemaRenderer 接入 labeler/reviewer 主流程,再进入 Designer 的 append/delete/简易属性编辑能力。
-- 持续补充权限边界测试,尤其是 owner/reviewer/admin 多角色交叉场景。
+- 进入阶段二:重写 Plaza/Queue 的动态渲染闭环,补齐 RichText/JSONEditor/FileUpload/LLMTrigger 的真实可交互组件。
+- 继续阶段三前置:把 AI outbox topic、pending ai_reviews 行和 worker 降级状态机对齐。
+
+### 验证记录
+
+- 2026-05-22 阶段一: `go test ./...` 通过;`make seed` 通过并确认本地 MySQL `task_reviewers` 中官方任务已分配 `reviewer1`。

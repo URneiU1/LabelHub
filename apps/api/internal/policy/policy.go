@@ -103,7 +103,7 @@ func CanClaimNew(claims *auth.Claims, task model.Task) ClaimDecision {
 //   - admin:always
 //   - owner:仅自己拥有的 task 下的 item
 //   - labeler:仅自己 claim 中的 item(防止 labeler 互相查看 raw payload)
-//   - reviewer:仅当存在 submission 且 status ∈ {human_reviewing, approved, rejected}
+//   - reviewer:仅当调用方已在 task_reviewers 显式授权,且 submission status 可读
 func CanReadItem(claims *auth.Claims, task model.Task, item model.TaskItem, submission *model.Submission) bool {
 	if HasRole(claims, RoleAdmin) {
 		return true
@@ -120,4 +120,21 @@ func CanReadItem(claims *auth.Claims, task model.Task, item model.TaskItem, subm
 		}
 	}
 	return false
+}
+
+// CanReviewTask:人工审核入口的资源边界。
+// reviewerAssigned 必须由调用方通过 task_reviewers(task_id,user_id) 查出。
+func CanReviewTask(claims *auth.Claims, task model.Task, reviewerAssigned bool) bool {
+	if HasRole(claims, RoleAdmin) {
+		return true
+	}
+	if HasRole(claims, RoleOwner) && task.OwnerID == claims.UserID {
+		return true
+	}
+	return HasRole(claims, RoleReviewer) && reviewerAssigned
+}
+
+func CanReviewSubmissionStatus(status string) bool {
+	_, ok := reviewerReadableSubmissionStatuses[status]
+	return ok
 }

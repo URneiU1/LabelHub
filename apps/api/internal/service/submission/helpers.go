@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/statemachine"
@@ -28,11 +29,11 @@ func ResubmitClearedFields(to string, now time.Time) map[string]any {
 	}
 }
 
-// findOrCreateSubmission 历史实现:模板版本查询走外层 db(非 tx),Phase 3 严格保持原行为。
-// 将来若需要"刚 publish 的 task 立即领单"严格读 tx 内可见的 template,再统一改。
-func findOrCreateSubmission(db *gorm.DB, tx *gorm.DB, task model.Task, item model.TaskItem, labelerID uint64) (model.Submission, error) {
+// findOrCreateSubmission 在 tx 内锁住 submission 行后再生成 revision_no。
+// 新 claim 已经会创建 draft submission;这里保留 create 分支用于兼容历史数据。
+func findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, labelerID uint64) (model.Submission, error) {
 	var submission model.Submission
-	err := tx.Where("item_id = ?", item.ID).First(&submission).Error
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("item_id = ?", item.ID).First(&submission).Error
 	if err == nil {
 		return submission, nil
 	}
@@ -40,10 +41,8 @@ func findOrCreateSubmission(db *gorm.DB, tx *gorm.DB, task model.Task, item mode
 		return model.Submission{}, err
 	}
 	templateVersion := 1
-	if task.TemplateID != nil {
-		if template, err := templateByID(db, task.ID, *task.TemplateID); err == nil {
-			templateVersion = template.Version
-		}
+	if version, err := templateVersionForTask(tx, task); err == nil {
+		templateVersion = version
 	}
 	submission = model.Submission{
 		TaskID:          task.ID,
@@ -55,9 +54,20 @@ func findOrCreateSubmission(db *gorm.DB, tx *gorm.DB, task model.Task, item mode
 	return submission, tx.Create(&submission).Error
 }
 
-func templateByID(db *gorm.DB, taskID uint64, templateID uint64) (model.TaskTemplate, error) {
+func templateVersionForTask(tx *gorm.DB, task model.Task) (int, error) {
+	if task.TemplateID == nil {
+		return 1, gorm.ErrRecordNotFound
+	}
+	template, err := templateByID(tx, task.ID, *task.TemplateID)
+	if err != nil {
+		return 1, err
+	}
+	return template.Version, nil
+}
+
+func templateByID(tx *gorm.DB, taskID uint64, templateID uint64) (model.TaskTemplate, error) {
 	var template model.TaskTemplate
-	err := db.Where("id = ? AND task_id = ?", templateID, taskID).First(&template).Error
+	err := tx.Where("id = ? AND task_id = ?", templateID, taskID).First(&template).Error
 	return template, err
 }
 

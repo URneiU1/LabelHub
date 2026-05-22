@@ -10,12 +10,12 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed commit: `0b871d5 fix(security): tighten review upload and payload boundaries`.
-- Current focus: S2 implementation after SchemaRenderer runtime and security boundary hardening.
-- Next priority: wire SchemaRenderer into the labeler/reviewer flows, then continue Designer editing capability.
+- Latest completed work: Phase 1 P0 backend concurrency/RBAC hardening is implemented locally and ready to commit.
+- Current focus: S2/S3 hardening after SchemaRenderer runtime and review/claim transaction fixes.
+- Next priority: wire SchemaRenderer into the labeler/reviewer flows, then continue Designer editing capability and AI outbox closure.
 
 ## Known Follow-Ups
 
 - Resolve or document the `lottie-web` eval build warning.
 - Address web chunk size warning with route-level or vendor chunk splitting when the UI stabilizes.
-- Keep permission boundary tests close to every new owner/reviewer/admin endpoint.
+- Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
@@ -49,65 +47,30 @@ func (h LabelerHandler) ListPublishedTasks(c *gin.Context) {
 }
 
 func (h LabelerHandler) ClaimItem(c *gin.Context) {
-	task, ok := loadTask(h.db, c)
+	taskID, ok := parseIDParam(c, "taskId")
 	if !ok {
 		return
 	}
 	claims, _ := middleware.Claims(c)
 
-	// Path A:已经 claim 中的 item 直接 resume。即使 task 后来被 pause/archive,
-	// 也允许 labeler 把手上的活做完(否则会卡死他的 in-flight 工作)。
-	var claimed model.TaskItem
-	err := h.db.Where("task_id = ? AND claimed_by = ? AND status = ?", task.ID, claims.UserID, itemStatusClaimed).Order("id").First(&claimed).Error
-	if err == nil {
-		respondItem(h.db, c, task, claimed)
-		return
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load claimed item")
-		return
-	}
-
-	// Path B:尝试领新题前,task 必须是 published。draft/paused/archived 一律 409。
-	if decision := policy.CanClaimNew(claims, task); !decision.Allowed {
-		switch decision.Reason {
-		case policy.ClaimDenyNotLabeler:
-			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "only labeler can claim items")
-		case policy.ClaimDenyTaskNotPublished:
-			httpx.Error(c, http.StatusConflict, "CONFLICT",
-				"task is not accepting new claims (status="+decision.TaskStatus+")")
-		default:
-			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "claim denied")
-		}
-		return
-	}
-
-	err = h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("task_id = ? AND status = ?", task.ID, itemStatusAvailable).
-			Order("id").
-			First(&claimed).Error; err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		return tx.Model(&claimed).Updates(map[string]any{
-			"status":     itemStatusClaimed,
-			"claimed_by": claims.UserID,
-			"claimed_at": now,
-		}).Error
+	result, err := submission.Claim(h.db, submission.ClaimInput{
+		TaskID:    taskID,
+		LabelerID: claims.UserID,
 	})
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	switch {
+	case err == nil:
+		respondItem(h.db, c, result.Task, result.Item)
+	case errors.Is(err, submission.ErrTaskNotFound):
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+	case errors.Is(err, submission.ErrTaskNotPublished):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "task is not accepting new claims")
+	case errors.Is(err, submission.ErrNoAvailableItem):
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "没有可领取的题目")
-		return
-	}
-	if err != nil {
+	case errors.Is(err, submission.ErrClaimRaceLost):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "claim race lost, please retry")
+	default:
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to claim item")
-		return
 	}
-
-	claimed.ClaimedBy = &claims.UserID
-	claimed.Status = itemStatusClaimed
-	respondItem(h.db, c, task, claimed)
 }
 
 func (h LabelerHandler) GetItem(c *gin.Context) {
@@ -131,6 +94,17 @@ func (h LabelerHandler) GetItem(c *gin.Context) {
 	}
 
 	claims, _ := middleware.Claims(c)
+	if policy.HasRole(claims, policy.RoleReviewer) && !policy.HasRole(claims, policy.RoleAdmin) && !policy.IsTaskOwner(claims, task) {
+		allowed, err := canReviewTask(h.db, claims, task)
+		if err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check review access")
+			return
+		}
+		if !allowed {
+			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+			return
+		}
+	}
 	if !policy.CanReadItem(claims, task, item, submissionPtr) {
 		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "item is not visible to current user")
 		return

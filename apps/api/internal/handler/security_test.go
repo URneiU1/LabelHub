@@ -23,13 +23,15 @@ func TestClaimItem_BlockedOnNonPublishedTask(t *testing.T) {
 
 			claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
 
-			mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+			mock.ExpectBegin()
+			mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
 					AddRow(1, 1, status))
 
 			// Path A 未命中(此 labeler 没在干这个 task 的 item)
-			mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+			mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by.+FOR UPDATE`).
 				WillReturnError(gorm.ErrRecordNotFound)
+			mock.ExpectRollback()
 
 			r := newGinWithClaims(claims)
 			registerAllHandlers(r, db)
@@ -46,7 +48,6 @@ func TestClaimItem_BlockedOnNonPublishedTask(t *testing.T) {
 			if errObj["code"] != "CONFLICT" {
 				t.Errorf("status=%s: expected CONFLICT, got %v", status, errObj["code"])
 			}
-			// 关键:status=paused/archived 时禁止"新"领取,但事务不应该开。验证 ExpectBegin 没出现。
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatalf("status=%s: unexpected DB calls: %v", status, err)
 			}
@@ -63,19 +64,25 @@ func TestClaimItem_ResumeWorksOnPausedTask(t *testing.T) {
 	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
 
 	// task 已经 paused
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
 			AddRow(1, 1, "paused"))
 
 	// Path A 命中:该 labeler 在这个 paused task 上有正在干的 item
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
 			AddRow(11, 1, 7, itemStatusClaimed))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, 1, 7, "draft", nil))
+	mock.ExpectCommit()
 
-	// respondItem 后续查询:无 submission 时按当前模板渲染
+	// respondItem 后续查询:已有 claim 必须已有 draft submission。
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
-		WillReturnError(gorm.ErrRecordNotFound)
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, 1, 7, "draft", nil))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 1, `{}`))
 
@@ -99,12 +106,17 @@ func TestRespondItem_ExistingSubmissionUsesTemplateVersion(t *testing.T) {
 
 	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
 
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
 			AddRow(1, 1, "published"))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
 			AddRow(11, 1, 7, itemStatusClaimed))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, 1, 7, "draft", nil))
+	mock.ExpectCommit()
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
 			AddRow(501, 1, 11, 1, 7, "draft", nil))
@@ -186,6 +198,8 @@ func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
 	r := newGinWithClaims(claims)
 	registerAllHandlers(r, db)
@@ -224,9 +238,17 @@ func TestReviewSubmissionOwnerCannotReviewOtherTask(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
 
-	mock.ExpectQuery(`(?is)^SELECT tasks.id, tasks.owner_id FROM .tasks. JOIN submissions ON submissions.task_id = tasks.id.+submissions.id`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).
-			AddRow(1, 99))
+	revisionID := uint64(901)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, "human_reviewing", revisionID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 99))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, "human_reviewing", revisionID))
+	mock.ExpectRollback()
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)

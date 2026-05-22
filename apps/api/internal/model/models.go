@@ -105,7 +105,20 @@ type TaskAssignee struct {
 func (TaskAssignee) TableName() string { return "task_assignees" }
 
 // ============================================================
-// 7. submissions
+// 7. task_reviewers
+// ============================================================
+type TaskReviewer struct {
+	ID         uint64    `gorm:"primaryKey" json:"id"`
+	TaskID     uint64    `gorm:"uniqueIndex:uk_task_reviewer" json:"taskId"`
+	UserID     uint64    `gorm:"uniqueIndex:uk_task_reviewer" json:"userId"`
+	AssignedBy *uint64   `json:"assignedBy"`
+	AssignedAt time.Time `gorm:"autoCreateTime" json:"assignedAt"`
+}
+
+func (TaskReviewer) TableName() string { return "task_reviewers" }
+
+// ============================================================
+// 8. submissions
 // ============================================================
 type Submission struct {
 	ID                uint64    `gorm:"primaryKey" json:"id"`
@@ -125,7 +138,7 @@ type Submission struct {
 }
 
 // ============================================================
-// 8. submission_revisions
+// 9. submission_revisions
 // ============================================================
 type SubmissionRevision struct {
 	ID           uint64    `gorm:"primaryKey" json:"id"`
@@ -140,7 +153,7 @@ type SubmissionRevision struct {
 func (SubmissionRevision) TableName() string { return "submission_revisions" }
 
 // ============================================================
-// 9. ai_reviews
+// 10. ai_reviews
 // ============================================================
 type AIReview struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
@@ -166,7 +179,7 @@ type AIReview struct {
 func (AIReview) TableName() string { return "ai_reviews" }
 
 // ============================================================
-// 10. human_reviews
+// 11. human_reviews
 // ============================================================
 type HumanReview struct {
 	ID           uint64     `gorm:"primaryKey" json:"id"`
@@ -183,7 +196,7 @@ type HumanReview struct {
 func (HumanReview) TableName() string { return "human_reviews" }
 
 // ============================================================
-// 11. audit_logs
+// 12. audit_logs
 // ============================================================
 type AuditLog struct {
 	ID         uint64     `gorm:"primaryKey" json:"id"`
@@ -201,7 +214,7 @@ type AuditLog struct {
 func (AuditLog) TableName() string { return "audit_logs" }
 
 // ============================================================
-// 12. uploaded_files
+// 13. uploaded_files
 // ============================================================
 type UploadedFile struct {
 	ID                   uint64    `gorm:"primaryKey" json:"id"`
@@ -220,7 +233,7 @@ type UploadedFile struct {
 func (UploadedFile) TableName() string { return "uploaded_files" }
 
 // ============================================================
-// 13. exports
+// 14. exports
 // ============================================================
 type Export struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
@@ -242,7 +255,7 @@ type Export struct {
 func (Export) TableName() string { return "exports" }
 
 // ============================================================
-// 14. ai_prompt_configs
+// 15. ai_prompt_configs
 // ============================================================
 type AIPromptConfig struct {
 	ID             uint64    `gorm:"primaryKey" json:"id"`
@@ -260,7 +273,7 @@ type AIPromptConfig struct {
 func (AIPromptConfig) TableName() string { return "ai_prompt_configs" }
 
 // ============================================================
-// 15. golden_samples
+// 16. golden_samples
 // ============================================================
 type GoldenSample struct {
 	ID              uint64     `gorm:"primaryKey" json:"id"`
@@ -278,7 +291,7 @@ type GoldenSample struct {
 func (GoldenSample) TableName() string { return "golden_samples" }
 
 // ============================================================
-// 16. ai_dry_runs
+// 17. ai_dry_runs
 // ============================================================
 type AIDryRun struct {
 	ID         uint64     `gorm:"primaryKey" json:"id"`
@@ -295,7 +308,7 @@ type AIDryRun struct {
 func (AIDryRun) TableName() string { return "ai_dry_runs" }
 
 // ============================================================
-// 17. outbox_events
+// 18. outbox_events
 // ============================================================
 type OutboxEvent struct {
 	ID          uint64    `gorm:"primaryKey" json:"id"`

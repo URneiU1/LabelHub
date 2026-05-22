@@ -27,6 +27,7 @@ func NewReviewerHandler(db *gorm.DB) ReviewerHandler {
 
 func (h ReviewerHandler) Register(api gin.IRouter) {
 	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerQueue)
+	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerDetail)
 	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
 }
 
@@ -50,14 +51,29 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 	claims, _ := middleware.Claims(c)
 	var submissions []model.Submission
 	query := h.db.Model(&model.Submission{}).Where("submissions.status = ?", status)
-	if !policy.HasRole(claims, policy.RoleAdmin) && !policy.HasRole(claims, policy.RoleReviewer) {
-		query = query.Joins("JOIN tasks ON tasks.id = submissions.task_id").Where("tasks.owner_id = ?", claims.UserID)
+	var scoped bool
+	query, scoped = applyReviewQueueScope(query, claims)
+	if !scoped {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "review queue access denied")
+		return
 	}
 	if err := query.Order("submissions.updated_at ASC").Find(&submissions).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review queue")
 		return
 	}
 	httpx.PageOK(c, submissions, httpx.Page{})
+}
+
+func (h ReviewerHandler) ReviewerDetail(c *gin.Context) {
+	submissionID, ok := parseIDParam(c, "submissionId")
+	if !ok {
+		return
+	}
+	bundle, ok := h.loadReviewBundle(c, submissionID)
+	if !ok {
+		return
+	}
+	httpx.OK(c, bundle)
 }
 
 func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
@@ -75,15 +91,13 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 		return
 	}
 	claims, _ := middleware.Claims(c)
-	if !h.enforceCanReviewSubmission(c, submissionID) {
-		return
-	}
 
 	result, err := review.Apply(h.db, review.ApplyInput{
 		SubmissionID: submissionID,
 		Verdict:      req.Verdict,
 		Reason:       req.Reason,
 		ReviewerID:   claims.UserID,
+		Roles:        claims.Roles,
 	})
 	if err != nil {
 		switch {
@@ -95,6 +109,10 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
 		case errors.Is(err, review.ErrNoRevision):
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission has no revision")
+		case errors.Is(err, review.ErrForbidden):
+			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+		case errors.Is(err, review.ErrConcurrentWrite):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission changed during review, please reload")
 		default:
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to review submission")
 		}
@@ -104,33 +122,60 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status})
 }
 
-func (h ReviewerHandler) enforceCanReviewSubmission(c *gin.Context, submissionID uint64) bool {
+func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (gin.H, bool) {
 	claims, _ := middleware.Claims(c)
-	if policy.HasRole(claims, policy.RoleAdmin) || policy.HasRole(claims, policy.RoleReviewer) {
-		return true
+	var submission model.Submission
+	if err := h.db.First(&submission, submissionID).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
+		return nil, false
 	}
-	if !policy.HasRole(claims, policy.RoleOwner) {
-		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "review access denied")
-		return false
+	if !policy.CanReviewSubmissionStatus(submission.Status) {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "submission is not visible in reviewer detail")
+		return nil, false
 	}
 
 	var task model.Task
-	err := h.db.Table("tasks").
-		Select("tasks.id, tasks.owner_id").
-		Joins("JOIN submissions ON submissions.task_id = tasks.id").
-		Where("submissions.id = ?", submissionID).
-		First(&task).Error
+	if err := h.db.First(&task, submission.TaskID).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+		return nil, false
+	}
+	allowed, err := canReviewTask(h.db, claims, task)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
-			return false
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check review access")
+		return nil, false
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+		return nil, false
+	}
+
+	var item model.TaskItem
+	if err := h.db.Where("id = ? AND task_id = ?", submission.ItemID, task.ID).First(&item).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "item not found")
+		return nil, false
+	}
+	template, templateErr := templateForBundle(h.db, task, submission)
+	if templateErr != nil && !errors.Is(templateErr, gorm.ErrRecordNotFound) {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load template")
+		return nil, false
+	}
+
+	var revision *model.SubmissionRevision
+	if submission.CurrentRevisionID != nil {
+		var current model.SubmissionRevision
+		if err := h.db.First(&current, *submission.CurrentRevisionID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load revision")
+				return nil, false
+			}
+		} else {
+			revision = &current
 		}
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission owner")
-		return false
 	}
-	if policy.IsTaskOwner(claims, task) {
-		return true
+
+	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision}
+	if errors.Is(templateErr, gorm.ErrRecordNotFound) {
+		payload["warnings"] = []string{"template_missing"}
 	}
-	httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "submission does not belong to current owner")
-	return false
+	return payload, true
 }

@@ -150,3 +150,27 @@ func TestCanReadItem(t *testing.T) {
 		})
 	}
 }
+
+func TestCanReviewTask(t *testing.T) {
+	task := model.Task{ID: 1, OwnerID: 10, Status: "published"}
+	cases := []struct {
+		name             string
+		claims           *auth.Claims
+		reviewerAssigned bool
+		want             bool
+	}{
+		{"admin always", &auth.Claims{UserID: 1, Roles: []string{"admin"}}, false, true},
+		{"owner own task", &auth.Claims{UserID: 10, Roles: []string{"owner"}}, false, true},
+		{"owner other task blocked", &auth.Claims{UserID: 11, Roles: []string{"owner"}}, false, false},
+		{"reviewer assigned", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, true, true},
+		{"reviewer unassigned blocked", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, false, false},
+		{"labeler blocked", &auth.Claims{UserID: 7, Roles: []string{"labeler"}}, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CanReviewTask(tc.claims, task, tc.reviewerAssigned); got != tc.want {
+				t.Errorf("CanReviewTask = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

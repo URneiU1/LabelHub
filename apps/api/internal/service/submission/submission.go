@@ -44,7 +44,7 @@ type SaveInput struct {
 func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 	var response model.Submission
 	err := db.Transaction(func(tx *gorm.DB) error {
-		sub, err := findOrCreateSubmission(db, tx, input.Task, input.Item, input.UserID)
+		sub, err := findOrCreateSubmission(tx, input.Task, input.Item, input.UserID)
 		if err != nil {
 			return err
 		}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -231,6 +232,10 @@ func isWebPSample(sample []byte) bool {
 }
 
 func storageKey(name string) string {
+	random := make([]byte, 32)
+	if _, err := rand.Read(random); err == nil {
+		return hex.EncodeToString(random)
+	}
 	hash := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", name, time.Now().UnixNano())))
 	return hex.EncodeToString(hash[:])
 }

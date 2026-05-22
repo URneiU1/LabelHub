@@ -103,6 +103,10 @@ func seedQAQuality(database *gorm.DB) error {
 		if err := tx.Where("username = ?", "owner1").First(&owner).Error; err != nil {
 			return err
 		}
+		var reviewer model.User
+		if err := tx.Where("username = ?", "reviewer1").First(&reviewer).Error; err != nil {
+			return err
+		}
 
 		baseline, err := os.ReadFile(projectFile("tools/seed/datasets/qa_quality/标注要求.md"))
 		if err != nil {
@@ -173,6 +177,11 @@ func seedQAQuality(database *gorm.DB) error {
 		}
 		if !action.CreateTemplate && template.ID == 0 {
 			return errors.New("seed template action resolved without template id")
+		}
+		if err := tx.Where("task_id = ? AND user_id = ?", task.ID, reviewer.ID).
+			Attrs(model.TaskReviewer{TaskID: task.ID, UserID: reviewer.ID, AssignedBy: &owner.ID, AssignedAt: time.Now().UTC()}).
+			FirstOrCreate(&model.TaskReviewer{}).Error; err != nil {
+			return err
 		}
 		// Seed 只负责补齐/更新官方 v1 模板。S2 之后 Owner 可能已经创建 v2/v3,
 		// rerun seed 不能把当前模板指针回滚到 v1。

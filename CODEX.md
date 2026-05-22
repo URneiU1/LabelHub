@@ -19,9 +19,11 @@ After every code-writing turn:
 - S2 Day1 backend template endpoints are in place.
 - S2 Day2 SchemaRenderer runtime is in place.
 - Security boundary fixes are in place as of `0b871d5`.
+- Phase 1 P0 backend concurrency/RBAC hardening now adds `task_reviewers`, transactional claim draft creation, locked review apply, and locked revision numbering.
 
 ## Next Work
 
 - Connect SchemaRenderer to the active labeler/reviewer pages.
 - Continue Designer implementation with append/delete/simple property editing.
 - Keep tests focused on behavior and role/resource boundaries.
+- Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.

@@ -71,31 +71,35 @@ func TestClaimItem_HappyPath(t *testing.T) {
 
 	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
 
-	// regex 故意宽松:GORM 在 WHERE 后会追加 ORDER BY / LIMIT,严格匹配会脆弱。
-	// 重点验证"对哪张表做了什么 + 顺序",不锁死字段顺序
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
-			AddRow(1, 1, "qa_quality", "published"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "template_id"}).
+			AddRow(1, 1, "qa_quality", "published", 101))
 
 	// 已 claimed 的 item 查找 — ErrRecordNotFound 走"没有正在干的活"分支
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by.+FOR UPDATE`).
 		WillReturnError(gorm.ErrRecordNotFound)
 
-	mock.ExpectBegin()
 	// PLAN §4.5 核心:SKIP LOCKED 必须真的出现在 SQL 里
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE SKIP LOCKED`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).
 			AddRow(11, 1, itemStatusAvailable))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-
-	// respondItem 后续:submission + template。无 submission 时按当前 task/template latest 渲染。
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
-		WillReturnError(gorm.ErrRecordNotFound)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
-			AddRow(101, 1, 1, `{}`))
+			AddRow(101, 1, 2, `{}`))
+	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
+		WillReturnResult(sqlmock.NewResult(42, 1))
+	mock.ExpectCommit()
+
+	// respondItem 后续:claim 时已经创建 draft submission,按 frozen template_version 渲染。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status"}).
+			AddRow(42, 1, 11, 2, 7, "draft"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 2, `{}`))
 
 	r := newGinWithClaims(claims)
 	registerAllHandlers(r, db)
@@ -127,11 +131,17 @@ func TestReviewApprove_TransactionFullSequence(t *testing.T) {
 	claims := &auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}}
 
 	revisionID := uint64(901)
+	mock.ExpectBegin()
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
 			AddRow(42, 1, 11, "human_reviewing", revisionID))
-
-	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(42, 1, 11, "human_reviewing", revisionID))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
