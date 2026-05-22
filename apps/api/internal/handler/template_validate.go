@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // allowedWidgets: S2 v1 锁定的 9 个核心物料,与 spec §3.5 widgetPrefixMap 严格一致。
@@ -43,21 +44,31 @@ func validateTemplateSchema(raw string) []ValidationError {
 		return errs
 	}
 	seenNames := make(map[string]int, len(parsed.Fields))
+	fieldNames := make(map[string]struct{}, len(parsed.Fields))
+	type llmTarget struct {
+		path          string
+		target        string
+		allowExternal bool
+	}
+	var llmTargets []llmTarget
 	for i, f := range parsed.Fields {
 		path := fmt.Sprintf("fields[%d]", i)
-		errs = append(errs, validateTemplateFieldLimits(path, f)...)
-		name, _ := f["name"].(string)
+		nameRaw, _ := f["name"].(string)
+		name := strings.TrimSpace(nameRaw)
 		if name == "" {
 			errs = append(errs, ValidationError{Field: path + ".name", Message: "name is required"})
 		} else if _, dup := seenNames[name]; dup {
 			errs = append(errs, ValidationError{Field: path + ".name", Message: "duplicate name " + name})
 		} else {
 			seenNames[name] = i
+			fieldNames[name] = struct{}{}
 		}
-		widget, _ := f["widget"].(string)
+		widgetRaw, _ := f["widget"].(string)
+		widget := strings.TrimSpace(widgetRaw)
 		if _, ok := allowedWidgets[widget]; !ok {
 			errs = append(errs, ValidationError{Field: path + ".widget", Message: "widget not in enum: " + widget})
 		}
+		errs = append(errs, validateTemplateFieldLimits(path, f, widget)...)
 		if reqRaw, has := f["required"]; has {
 			if _, ok := reqRaw.(bool); !ok {
 				errs = append(errs, ValidationError{Field: path + ".required", Message: "required must be bool"})
@@ -80,19 +91,76 @@ func validateTemplateSchema(raw string) []ValidationError {
 		if hasMin && hasMax && minOK && maxOK && minLen > maxLen {
 			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "min > max"})
 		}
+		if widget == "LLMTrigger" {
+			targetRaw, hasTarget := f["target_field"]
+			allowExternal, _ := f["x-allow-external-target"].(bool)
+			target, targetOK := targetRaw.(string)
+			target = strings.TrimSpace(target)
+			if !hasTarget || !targetOK || target == "" {
+				if !allowExternal {
+					errs = append(errs, ValidationError{Field: path + ".target_field", Message: "target_field is required"})
+				}
+			} else {
+				llmTargets = append(llmTargets, llmTarget{path: path, target: target, allowExternal: allowExternal})
+			}
+		}
+	}
+	for _, target := range llmTargets {
+		if target.allowExternal {
+			continue
+		}
+		if _, ok := fieldNames[target.target]; !ok {
+			errs = append(errs, ValidationError{Field: target.path + ".target_field", Message: "target_field must reference an existing field"})
+		}
 	}
 	return errs
 }
 
-func validateTemplateFieldLimits(path string, f map[string]any) []ValidationError {
+func validateTemplateFieldLimits(path string, f map[string]any, widget string) []ValidationError {
 	var errs []ValidationError
 	for key, raw := range f {
 		if value, ok := raw.(string); ok && len(value) > maxTemplateStringBytes {
 			errs = append(errs, ValidationError{Field: path + "." + key, Message: fmt.Sprintf("%s must be <= %d bytes", key, maxTemplateStringBytes)})
 		}
 	}
-	if options, ok := f["options"].([]any); ok && len(options) > maxTemplateOptions {
+	if rawOptions, hasOptions := f["options"]; hasOptions {
+		options, ok := rawOptions.([]any)
+		if !ok {
+			errs = append(errs, ValidationError{Field: path + ".options", Message: "options must be an array"})
+		} else {
+			errs = append(errs, validateOptions(path, options)...)
+		}
+	} else if widget == "Radio" || widget == "Tags" {
+		errs = append(errs, ValidationError{Field: path + ".options", Message: "options must be non-empty"})
+	}
+	if widget == "FileUpload" {
+		maxFiles, hasMaxFiles, ok := numericField(f, "maxFiles")
+		if hasMaxFiles && (!ok || maxFiles <= 0) {
+			errs = append(errs, ValidationError{Field: path + ".maxFiles", Message: "maxFiles must be > 0"})
+		}
+	}
+	return errs
+}
+
+func validateOptions(path string, options []any) []ValidationError {
+	var errs []ValidationError
+	if len(options) == 0 {
+		return []ValidationError{{Field: path + ".options", Message: "options must be non-empty"}}
+	}
+	if len(options) > maxTemplateOptions {
 		errs = append(errs, ValidationError{Field: path + ".options", Message: fmt.Sprintf("options must be <= %d", maxTemplateOptions)})
+	}
+	for i, option := range options {
+		switch v := option.(type) {
+		case string:
+			if strings.TrimSpace(v) == "" {
+				errs = append(errs, ValidationError{Field: fmt.Sprintf("%s.options[%d]", path, i), Message: "option must be non-empty string or number"})
+			}
+		case float64:
+		case int:
+		default:
+			errs = append(errs, ValidationError{Field: fmt.Sprintf("%s.options[%d]", path, i), Message: "option must be string or number"})
+		}
 	}
 	return errs
 }

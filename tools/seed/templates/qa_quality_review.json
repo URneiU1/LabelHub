@@ -14,7 +14,7 @@
     { "name": "revision_suggestion", "widget": "RichText", "label": "修订建议" },
     { "name": "corrected_answer", "widget": "JSONEditor", "label": "修正后答案" },
     { "name": "evidence_files", "widget": "FileUpload", "label": "证据素材" },
-    { "name": "ai_precheck", "widget": "LLMTrigger", "label": "AI 预评分" }
+    { "name": "ai_precheck", "widget": "LLMTrigger", "label": "AI 预评分", "target_field": "ai_precheck" }
   ],
   "export_fields": ["payload", "answer", "ai_review", "human_review"]
 }

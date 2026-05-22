@@ -35,6 +35,14 @@ func TestValidateTemplateSchema(t *testing.T) {
 			wantValid: false, wantField: "fields[1].name", wantMsg: "duplicate",
 		},
 		{
+			name: "duplicate name after trim",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"score","widget":"Input"},
+				{"name":" score ","widget":"TextArea"}
+			]}`,
+			wantValid: false, wantField: "fields[1].name", wantMsg: "duplicate",
+		},
+		{
 			name: "unknown widget",
 			raw: `{"title":"t","layout":"single_page","fields":[
 				{"name":"a","widget":"Slider"}
@@ -75,6 +83,41 @@ func TestValidateTemplateSchema(t *testing.T) {
 				{"name":"a","widget":"Input","minLength":1.5}
 			]}`,
 			wantValid: false, wantField: "fields[0].minLength", wantMsg: "must be number",
+		},
+		{
+			name: "radio requires options",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"score","widget":"Radio"}
+			]}`,
+			wantValid: false, wantField: "fields[0].options", wantMsg: "non-empty",
+		},
+		{
+			name: "option object rejected",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"score","widget":"Radio","options":[{"label":"A","value":"a"}]}
+			]}`,
+			wantValid: false, wantField: "fields[0].options[0]", wantMsg: "string or number",
+		},
+		{
+			name: "file upload maxFiles must be positive",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"evidence","widget":"FileUpload","maxFiles":0}
+			]}`,
+			wantValid: false, wantField: "fields[0].maxFiles", wantMsg: "> 0",
+		},
+		{
+			name: "llm trigger target must exist",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"ai","widget":"LLMTrigger","target_field":"missing"}
+			]}`,
+			wantValid: false, wantField: "fields[0].target_field", wantMsg: "existing field",
+		},
+		{
+			name: "llm trigger external target must be explicit",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"ai","widget":"LLMTrigger","target_field":"external.score","x-allow-external-target":true}
+			]}`,
+			wantValid: true,
 		},
 		{
 			name:      "malformed JSON",

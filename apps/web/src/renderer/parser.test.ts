@@ -75,6 +75,74 @@ describe('parseTemplateSchema', () => {
     }
   })
 
+  it('detects duplicate names after trim', () => {
+    const result = parseTemplateSchema({
+      title: 'bad',
+      fields: [
+        { name: 'score', widget: 'Input' },
+        { name: ' score ', widget: 'TextArea' },
+      ],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.field).toBe('fields[1].name')
+    }
+  })
+
+  it('rejects invalid radio options instead of silently filtering them', () => {
+    const result = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'score', widget: 'Radio', options: [{ label: 'A', value: 'a' }] }],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.field).toBe('fields[0].options[0]')
+    }
+  })
+
+  it('requires non-empty options for radio and tags', () => {
+    const result = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'issue_tags', widget: 'Tags' }],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.field).toBe('fields[0].options')
+    }
+  })
+
+  it('rejects invalid FileUpload maxFiles', () => {
+    const result = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'evidence', widget: 'FileUpload', maxFiles: 0 }],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.field).toBe('fields[0].maxFiles')
+    }
+  })
+
+  it('requires LLMTrigger target_field to reference an existing field unless external is explicit', () => {
+    const bad = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'ai', widget: 'LLMTrigger', target_field: 'missing' }],
+    })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) {
+      expect(bad.error.field).toBe('fields[0].target_field')
+    }
+
+    const good = parseTemplateSchema({
+      title: 'good',
+      fields: [{ name: 'ai', widget: 'LLMTrigger', target_field: 'external.score', 'x-allow-external-target': true }],
+    })
+    expect(good.ok).toBe(true)
+  })
+
   it('preserves export_fields and x-* extensions round-trip', () => {
     const result = parseTemplateSchema({
       title: 'exportable',

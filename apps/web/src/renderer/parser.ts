@@ -54,8 +54,14 @@ export function parseTemplateSchema(raw: string | unknown): ParseResult<Template
     } else if ('required' in rawField) {
       return parseError(`${path}.required`, 'required must be boolean')
     }
-    if (Array.isArray(rawField.options)) {
-      field.options = rawField.options.filter((item): item is string | number => typeof item === 'string' || typeof item === 'number')
+    if ('options' in rawField) {
+      const optionsResult = parseOptions(rawField.options, path)
+      if (!optionsResult.ok) {
+        return optionsResult
+      }
+      field.options = optionsResult.value
+    } else if (widget === 'Radio' || widget === 'Tags') {
+      return parseError(`${path}.options`, 'options must be non-empty')
     }
     const minLength = numberProp(rawField.minLength)
     const maxLength = numberProp(rawField.maxLength)
@@ -81,15 +87,19 @@ export function parseTemplateSchema(raw: string | unknown): ParseResult<Template
       }
       field.mode = rawField.mode as FieldSchema['mode']
     }
-    const maxFiles = integerProp(rawField.maxFiles)
-    if (maxFiles !== undefined && maxFiles > 0) {
+    const maxFiles = positiveIntegerProp(rawField.maxFiles)
+    if (maxFiles !== undefined) {
       field.maxFiles = maxFiles
+    } else if ('maxFiles' in rawField) {
+      return parseError(`${path}.maxFiles`, 'maxFiles must be > 0')
     }
     if (typeof rawField.prompt === 'string') {
       field.prompt = rawField.prompt
     }
     if (typeof rawField.target_field === 'string') {
-      field.target_field = rawField.target_field
+      field.target_field = rawField.target_field.trim()
+    } else if ('target_field' in rawField) {
+      return parseError(`${path}.target_field`, 'target_field must be string')
     }
     for (const [key, value] of Object.entries(rawField)) {
       if (key.startsWith('x-')) {
@@ -97,6 +107,23 @@ export function parseTemplateSchema(raw: string | unknown): ParseResult<Template
       }
     }
     fields.push(field)
+  }
+
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]
+    if (field.widget !== 'LLMTrigger') {
+      continue
+    }
+    const allowExternal = field['x-allow-external-target'] === true
+    if (!field.target_field) {
+      if (!allowExternal) {
+        return parseError(`fields[${index}].target_field`, 'target_field is required')
+      }
+      continue
+    }
+    if (!allowExternal && !names.has(field.target_field)) {
+      return parseError(`fields[${index}].target_field`, 'target_field must reference an existing field')
+    }
   }
 
   const schema: TemplateSchema = {
@@ -160,6 +187,37 @@ function numberProp(value: unknown) {
 
 function integerProp(value: unknown) {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined
+}
+
+function positiveIntegerProp(value: unknown) {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+function parseOptions(value: unknown, path: string): ParseResult<Array<string | number>> {
+  if (!Array.isArray(value)) {
+    return parseError(`${path}.options`, 'options must be an array')
+  }
+  if (value.length === 0) {
+    return parseError(`${path}.options`, 'options must be non-empty')
+  }
+  const options: Array<string | number> = []
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index]
+    if (typeof item === 'string') {
+      const trimmed = item.trim()
+      if (!trimmed) {
+        return parseError(`${path}.options[${index}]`, 'option must be non-empty string or number')
+      }
+      options.push(trimmed)
+      continue
+    }
+    if (typeof item === 'number') {
+      options.push(item)
+      continue
+    }
+    return parseError(`${path}.options[${index}]`, 'option must be string or number')
+  }
+  return { ok: true, value: options }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
