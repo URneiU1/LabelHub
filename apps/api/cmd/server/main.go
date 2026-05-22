@@ -1,18 +1,25 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"labelhub-api/internal/auth"
 	"labelhub-api/internal/db"
 	"labelhub-api/internal/handler"
 	"labelhub-api/internal/middleware"
+	"labelhub-api/internal/service/outbox"
 )
 
 func main() {
@@ -29,6 +36,9 @@ func main() {
 	database := db.Init()
 	db.RunMigrations()
 	authService := auth.NewServiceFromEnv()
+	outboxCtx, stopOutbox := context.WithCancel(context.Background())
+	defer stopOutbox()
+	startOutboxPublisher(outboxCtx, database, logger)
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -77,4 +87,48 @@ func serverPort() string {
 		return port
 	}
 	return ":" + port
+}
+
+func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
+	if envOrDefault("OUTBOX_PUBLISHER_ENABLED", "true") == "false" {
+		logger.Info("outbox publisher disabled")
+		return
+	}
+	client := asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr()})
+	publisher := outbox.NewPublisher(database, client, logger, outboxInterval(), outboxBatch())
+	go publisher.Run(ctx)
+	go func() {
+		<-ctx.Done()
+		if err := client.Close(); err != nil {
+			logger.Warn("close outbox asynq client", zap.Error(err))
+		}
+	}()
+	logger.Info("outbox publisher started", zap.String("redis_addr", redisAddr()))
+}
+
+func redisAddr() string {
+	return net.JoinHostPort(envOrDefault("REDIS_HOST", "localhost"), envOrDefault("REDIS_PORT", "6379"))
+}
+
+func envOrDefault(key string, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func outboxInterval() time.Duration {
+	ms, err := strconv.Atoi(envOrDefault("OUTBOX_POLL_INTERVAL_MS", "1000"))
+	if err != nil || ms <= 0 {
+		return time.Second
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func outboxBatch() int {
+	batch, err := strconv.Atoi(envOrDefault("OUTBOX_BATCH", "20"))
+	if err != nil || batch <= 0 {
+		return 20
+	}
+	return batch
 }

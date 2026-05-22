@@ -171,7 +171,7 @@ CREATE TABLE ai_reviews (
   revision_id BIGINT NOT NULL,
   idempotency_key CHAR(64) NOT NULL,
   prompt_version INT NOT NULL DEFAULT 1,
-  verdict ENUM('pass','reject','uncertain') NOT NULL,
+  verdict ENUM('pass','reject','uncertain') NULL,
   overall_score DECIMAL(5,2),
   dimensions JSON COMMENT '[{"name":"相关性","score":9,"reason":"..."}]',
   reason TEXT,

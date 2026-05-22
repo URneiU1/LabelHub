@@ -3,11 +3,14 @@ module labelhub-ai-worker
 go 1.26.3
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/go-sql-driver/mysql v1.8.1
 	github.com/hibiken/asynq v0.26.0
 	go.uber.org/zap v1.28.0
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/google/uuid v1.6.0 // indirect

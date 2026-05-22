@@ -10,13 +10,20 @@ import (
 // 导出以便 Sprint 4 多格式导出器(JSONL / CSV / XLSX)复用同一份字段约定。
 func AIReviewToMap(review model.AIReview) map[string]any {
 	return map[string]any{
-		"verdict":        review.Verdict,
+		"verdict":        stringPointerValue(review.Verdict),
 		"overall_score":  review.OverallScore,
 		"dimensions":     unwrapJSONPointer(review.Dimensions),
 		"reason":         review.Reason,
 		"prompt_version": review.PromptVersion,
 		"created_at":     review.CreatedAt,
 	}
+}
+
+func stringPointerValue(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 func HumanReviewToMap(review model.HumanReview) map[string]any {

@@ -161,7 +161,7 @@ type AIReview struct {
 	RevisionID     uint64     `json:"revisionId"`
 	IdempotencyKey string     `gorm:"uniqueIndex;size:64" json:"idempotencyKey"`
 	PromptVersion  int        `json:"promptVersion"`
-	Verdict        string     `json:"verdict"`
+	Verdict        *string    `json:"verdict"`
 	OverallScore   *float64   `json:"overallScore"`
 	Dimensions     *string    `gorm:"type:json" json:"dimensions"`
 	Reason         NullString `json:"reason"`

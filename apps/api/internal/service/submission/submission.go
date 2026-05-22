@@ -74,6 +74,14 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 				return err
 			}
 		}
+		aiPlan := aiReviewPlan{}
+		if !input.Draft {
+			var err error
+			aiPlan, err = buildAIReviewPlan(tx, input.Task, sub, revision)
+			if err != nil {
+				return err
+			}
+		}
 
 		to := from
 		submitEvent := ""
@@ -88,7 +96,7 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}
 			submitEvent = statemachine.EventSubmit
 			to = statemachine.StateSubmitted
-			if input.Task.AIReviewEnabled {
+			if aiPlan.Enabled {
 				to = statemachine.StateAIReviewing
 				dispatchEvent = statemachine.EventEnqueue
 			} else {
@@ -113,13 +121,11 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 		if err := tx.Model(&model.Submission{}).Where("id = ?", sub.ID).Updates(updates).Error; err != nil {
 			return err
 		}
-		if input.Task.AIReviewEnabled && !input.Draft {
-			outbox := model.OutboxEvent{
-				Topic:   "ai.review.requested",
-				Payload: fmt.Sprintf(`{"submission_id":%d,"revision_id":%d}`, sub.ID, revision.ID),
-				Status:  "pending",
+		if !input.Draft {
+			if err := createPendingAIReview(tx, sub, revision, aiPlan); err != nil {
+				return err
 			}
-			if err := tx.Create(&outbox).Error; err != nil {
+			if err := createAIReviewOutbox(tx, aiPlan); err != nil {
 				return err
 			}
 		}
