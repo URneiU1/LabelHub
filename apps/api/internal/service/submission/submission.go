@@ -69,6 +69,11 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 		if err := tx.Create(&revision).Error; err != nil {
 			return err
 		}
+		if !input.Draft {
+			if err := attachUploadedFiles(tx, input.Task, sub, revision, input.AnswerRaw, input.UserID); err != nil {
+				return err
+			}
+		}
 
 		to := from
 		submitEvent := ""

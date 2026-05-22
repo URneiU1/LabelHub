@@ -175,6 +175,8 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 			httpx.Error(c, http.StatusConflict, "CONFLICT", err.Error())
 		case errors.Is(err, submission.ErrInvalidTransition):
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
+		case errors.Is(err, submission.ErrInvalidUploadedFile):
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "answer contains invalid uploaded file reference")
 		default:
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save answer")
 		}
