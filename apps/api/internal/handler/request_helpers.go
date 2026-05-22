@@ -72,19 +72,32 @@ func currentTemplate(db *gorm.DB, taskID uint64) (model.TaskTemplate, error) {
 	return template, err
 }
 
+func templateForBundle(db *gorm.DB, task model.Task, submission model.Submission) (model.TaskTemplate, error) {
+	var template model.TaskTemplate
+	if submission.ID != 0 {
+		err := db.Where("task_id = ? AND version = ?", task.ID, submission.TemplateVersion).First(&template).Error
+		return template, err
+	}
+	if task.TemplateID != nil {
+		err := db.Where("id = ? AND task_id = ?", *task.TemplateID, task.ID).First(&template).Error
+		return template, err
+	}
+	return currentTemplate(db, task.ID)
+}
+
 // respondItem 用 task + item 拼标准化的"答题视图"(task / item / template / submission / revision)。
 // labeler 的 ClaimItem / GetItem 两条路径都收敛到这里,保持 HTTP 响应结构一致。
 func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskItem) {
-	template, templateErr := currentTemplate(db, task.ID)
-	if templateErr != nil && !errors.Is(templateErr, gorm.ErrRecordNotFound) {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load template")
-		return
-	}
-
 	var submission model.Submission
 	submissionErr := db.Where("item_id = ?", item.ID).First(&submission).Error
 	if submissionErr != nil && !errors.Is(submissionErr, gorm.ErrRecordNotFound) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")
+		return
+	}
+
+	template, templateErr := templateForBundle(db, task, submission)
+	if templateErr != nil && !errors.Is(templateErr, gorm.ErrRecordNotFound) {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load template")
 		return
 	}
 

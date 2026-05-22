@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -143,13 +144,24 @@ func seedQAQuality(database *gorm.DB) error {
 			SchemaHash: hex.EncodeToString(hash[:]),
 			CreatedBy:  owner.ID,
 		}
-		if err := tx.Where("task_id = ? AND version = ?", task.ID, 1).Attrs(template).FirstOrCreate(&template).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&template).Updates(map[string]any{
-			"schema_json": template.SchemaJSON,
-			"schema_hash": template.SchemaHash,
-		}).Error; err != nil {
+		var existing model.TaskTemplate
+		err = tx.Where("task_id = ? AND version = ?", task.ID, 1).First(&existing).Error
+		switch {
+		case err == nil:
+			template.ID = existing.ID
+			if existing.SchemaHash != template.SchemaHash {
+				if err := tx.Model(&existing).Updates(map[string]any{
+					"schema_json": template.SchemaJSON,
+					"schema_hash": template.SchemaHash,
+				}).Error; err != nil {
+					return err
+				}
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			if err := tx.Create(&template).Error; err != nil {
+				return err
+			}
+		default:
 			return err
 		}
 		if err := tx.Model(&task).Update("template_id", template.ID).Error; err != nil {

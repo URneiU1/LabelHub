@@ -62,8 +62,22 @@ func TestValidateTemplateSchema(t *testing.T) {
 			wantValid: false, wantField: "fields[0].minLength", wantMsg: ">= 0",
 		},
 		{
-			name: "malformed JSON",
-			raw:  `{not json`,
+			name: "minLength non-number",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"a","widget":"Input","minLength":"5"}
+			]}`,
+			wantValid: false, wantField: "fields[0].minLength", wantMsg: "must be number",
+		},
+		{
+			name: "minLength fractional",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"a","widget":"Input","minLength":1.5}
+			]}`,
+			wantValid: false, wantField: "fields[0].minLength", wantMsg: "must be number",
+		},
+		{
+			name:      "malformed JSON",
+			raw:       `{not json`,
 			wantValid: false, wantField: "$", wantMsg: "invalid JSON",
 		},
 	}

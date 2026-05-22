@@ -58,32 +58,41 @@ func validateTemplateSchema(raw string) []ValidationError {
 				errs = append(errs, ValidationError{Field: path + ".required", Message: "required must be bool"})
 			}
 		}
-		minLen, hasMin := numericField(f, "minLength")
-		maxLen, hasMax := numericField(f, "maxLength")
-		if hasMin && minLen < 0 {
+		minLen, hasMin, minOK := numericField(f, "minLength")
+		maxLen, hasMax, maxOK := numericField(f, "maxLength")
+		if hasMin && !minOK {
+			errs = append(errs, ValidationError{Field: path + ".minLength", Message: "minLength must be number"})
+		}
+		if hasMax && !maxOK {
+			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "maxLength must be number"})
+		}
+		if hasMin && minOK && minLen < 0 {
 			errs = append(errs, ValidationError{Field: path + ".minLength", Message: "minLength must be >= 0"})
 		}
-		if hasMax && maxLen < 0 {
+		if hasMax && maxOK && maxLen < 0 {
 			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "maxLength must be >= 0"})
 		}
-		if hasMin && hasMax && minLen > maxLen {
+		if hasMin && hasMax && minOK && maxOK && minLen > maxLen {
 			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "min > max"})
 		}
 	}
 	return errs
 }
 
-func numericField(f map[string]any, key string) (int, bool) {
+func numericField(f map[string]any, key string) (int, bool, bool) {
 	raw, ok := f[key]
 	if !ok {
-		return 0, false
+		return 0, false, true
 	}
 	switch v := raw.(type) {
 	case float64:
-		return int(v), true
+		if v != float64(int(v)) {
+			return 0, true, false
+		}
+		return int(v), true, true
 	case int:
-		return v, true
+		return v, true, true
 	default:
-		return 0, false
+		return 0, true, false
 	}
 }

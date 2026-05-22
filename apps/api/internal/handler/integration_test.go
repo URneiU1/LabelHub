@@ -90,12 +90,12 @@ func TestClaimItem_HappyPath(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	// respondItem 后续:template + submission
+	// respondItem 后续:submission + template。无 submission 时按当前 task/template latest 渲染。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnError(gorm.ErrRecordNotFound)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 1, `{}`))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
-		WillReturnError(gorm.ErrRecordNotFound)
 
 	r := newGinWithClaims(claims)
 	registerAllHandlers(r, db)

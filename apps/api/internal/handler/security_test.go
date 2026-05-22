@@ -71,12 +71,12 @@ func TestClaimItem_ResumeWorksOnPausedTask(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
 			AddRow(11, 1, 7, itemStatusClaimed))
 
-	// respondItem 后续查询
+	// respondItem 后续查询:无 submission 时按当前模板渲染
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnError(gorm.ErrRecordNotFound)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 1, `{}`))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
-		WillReturnError(gorm.ErrRecordNotFound)
 
 	r := newGinWithClaims(claims)
 	registerAllHandlers(r, db)
@@ -86,6 +86,44 @@ func TestClaimItem_ResumeWorksOnPausedTask(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestRespondItem_ExistingSubmissionUsesTemplateVersion(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
+			AddRow(1, 1, "published"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
+			AddRow(11, 1, 7, itemStatusClaimed))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, 1, 7, "draft", nil))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 1, `{"title":"v1","fields":[{"name":"old","widget":"Input"}]}`))
+
+	r := newGinWithClaims(claims)
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim", map[string]any{}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	template := data["template"].(map[string]any)
+	if template["version"] != float64(1) {
+		t.Fatalf("template version = %v, want historical version 1", template["version"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -200,7 +238,9 @@ func TestRespondItem_TemplateDBErrorReturns500(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
 			AddRow(11, 1, 7, itemStatusClaimed))
 
-	// respondItem:template 查询返回真 DB 错误(不是 NotFound)
+	// respondItem:submission 未命中后,template 查询返回真 DB 错误(不是 NotFound)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnError(gorm.ErrRecordNotFound)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnError(gorm.ErrInvalidDB)
 
