@@ -132,9 +132,9 @@ export default function ReviewerQueue() {
                   placeholder="例如:第 2 维度评分依据不足;corrected_answer JSON 缺少 reference 字段"
                 />
                 <div style={actionRowStyle}>
-                  <Button loading={loading} onClick={() => void review('revise')}>打回修改</Button>
-                  <Button loading={loading} onClick={() => void review('reject')}>拒绝</Button>
-                  <Button loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
+                  <Button disabled={!schema.ok} loading={loading} onClick={() => void review('revise')}>打回修改</Button>
+                  <Button disabled={!schema.ok} loading={loading} onClick={() => void review('reject')}>拒绝</Button>
+                  <Button disabled={!schema.ok} loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
                 </div>
               </section>
             </>
