@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gin-gonic/gin"
 	mysqlerr "github.com/go-sql-driver/mysql"
 
 	"labelhub-api/internal/auth"
@@ -241,6 +242,43 @@ func TestCreateTemplateRejectsOversizedBody(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestBindCanonicalTemplateSchemaPreservesExportFieldsAndExtensions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = jsonRequest(http.MethodPost, "/tasks/1/templates", map[string]any{
+		"title":         "Custom",
+		"layout":        "single_page",
+		"export_fields": []string{"payload", "answer"},
+		"x-owner-note":  map[string]any{"source": "designer"},
+		"fields": []map[string]any{{
+			"name": "summary", "widget": "Input", "x-field-note": "kept",
+		}},
+	})
+
+	raw, ok := bindCanonicalTemplateSchema(c, "Fallback")
+	if !ok {
+		t.Fatalf("expected canonical schema, got response %d: %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["title"] != "Custom" {
+		t.Fatalf("title = %v", got["title"])
+	}
+	if got["x-owner-note"] == nil {
+		t.Fatalf("missing x-owner-note in %s", string(raw))
+	}
+	if _, ok := got["export_fields"].([]any); !ok {
+		t.Fatalf("missing export_fields in %s", string(raw))
+	}
+	fields := got["fields"].([]any)
+	if fields[0].(map[string]any)["x-field-note"] != "kept" {
+		t.Fatalf("field extension lost: %s", string(raw))
 	}
 }
 

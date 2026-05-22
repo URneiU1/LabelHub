@@ -74,6 +74,30 @@ describe('parseTemplateSchema', () => {
       expect(result.error.field).toBe('fields[0].widget')
     }
   })
+
+  it('preserves export_fields and x-* extensions round-trip', () => {
+    const result = parseTemplateSchema({
+      title: 'exportable',
+      layout: 'single_page',
+      export_fields: ['payload', 'answer'],
+      'x-owner-note': { source: 'designer' },
+      fields: [
+        {
+          name: 'summary',
+          widget: 'Input',
+          label: 'Summary',
+          'x-field-note': 'kept',
+        },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.export_fields).toEqual(['payload', 'answer'])
+      expect(result.value['x-owner-note']).toEqual({ source: 'designer' })
+      expect(result.value.fields[0]['x-field-note']).toBe('kept')
+    }
+  })
 })
 
 describe('parseAnswer', () => {

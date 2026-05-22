@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import type { AnswerValue, RenderPayload, TemplateSchema, ValidationError } from './types'
+import type { AnswerValue, RenderPayload, RenderRuntime, TemplateSchema, ValidationError } from './types'
 import { widgetRegistry } from './widgets'
 
 type SchemaRendererProps = {
@@ -8,6 +8,7 @@ type SchemaRendererProps = {
   value?: AnswerValue
   readOnly?: boolean
   errors?: ValidationError[]
+  runtime?: RenderRuntime
   onChange?: (next: AnswerValue) => void
 }
 
@@ -17,6 +18,7 @@ export default function SchemaRenderer({
   value = {},
   readOnly = false,
   errors = [],
+  runtime,
   onChange,
 }: SchemaRendererProps) {
   function updateField(name: string, nextValue: unknown) {
@@ -35,6 +37,7 @@ export default function SchemaRenderer({
               value={value[field.name]}
               answer={value}
               payload={payload}
+              runtime={runtime}
               readOnly={readOnly}
               onChange={updateField}
             />

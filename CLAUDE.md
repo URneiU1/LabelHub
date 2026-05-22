@@ -10,12 +10,13 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: Phase 1 P0 backend concurrency/RBAC hardening is implemented locally and ready to commit.
-- Current focus: S2/S3 hardening after SchemaRenderer runtime and review/claim transaction fixes.
-- Next priority: wire SchemaRenderer into the labeler/reviewer flows, then continue Designer editing capability and AI outbox closure.
+- Latest completed work: Phase 2 labeler/reviewer SchemaRenderer runtime wiring is implemented locally and ready to commit.
+- Current focus: S2/S3 hardening after dynamic runtime and review/claim transaction fixes.
+- Next priority: continue Designer append/delete/property editing, then close AI outbox + worker failover.
 
 ## Known Follow-Ups
 
-- Resolve or document the `lottie-web` eval build warning.
-- Address web chunk size warning with route-level or vendor chunk splitting when the UI stabilizes.
+- AI review failover remains incomplete: add transactional outbox publisher, pending `ai_reviews`, worker retry/dead-state handling, and human-review fallback.
+- Move labeler item ownership verification into the submission service transaction before adding reclaim/reassign flows.
+- Change DB default for `ai_review_enabled` to safe-off and migrate old unconfigured tasks.
 - Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

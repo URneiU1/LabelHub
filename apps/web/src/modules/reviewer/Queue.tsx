@@ -1,14 +1,19 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
+import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
+import type { AnswerValue, TemplateSchema } from '../../renderer/types'
 import { apiGet, apiPost, type Submission, type TaskBundle } from '../../shared/api/client'
-import ShowItem from '../../shared/components/ShowItem'
 import { parsePayload } from '../../shared/components/payload'
 
 type ReviewResponse = {
   submission_id: number
   status: string
 }
+
+type ParsedSchema =
+  | { ok: true, schema: TemplateSchema }
+  | { ok: false, message: string }
 
 export default function ReviewerQueue() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
@@ -35,10 +40,14 @@ export default function ReviewerQueue() {
     void loadQueue()
   }, [loadQueue])
 
+  const schema = useMemo(() => parseBundleSchema(detail), [detail])
+  const payload = useMemo(() => parsePayload(detail?.item?.payload), [detail?.item?.payload])
+  const answer = useMemo<AnswerValue>(() => parseAnswer(detail?.revision?.answer), [detail?.revision?.answer])
+
   async function openSubmission(submission: Submission) {
     setSelected(submission)
     try {
-      const data = await apiGet<TaskBundle>(`/tasks/${submission.taskId}/items/${submission.itemId}`)
+      const data = await apiGet<TaskBundle>(`/reviewer/submissions/${submission.id}`)
       setDetail(data)
       setReason('')
     } catch (error) {
@@ -68,9 +77,6 @@ export default function ReviewerQueue() {
     }
   }
 
-  const payload = parsePayload(detail?.item?.payload)
-  const answer = parseAnswer(detail?.revision?.answer)
-
   return (
     <div>
       <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)' }}>人工审核中心</h1>
@@ -96,10 +102,22 @@ export default function ReviewerQueue() {
         <main style={{ display: 'grid', gap: 'var(--space-lg)' }}>
           {detail?.item ? (
             <>
-              <ShowItem payload={payload} />
               <section style={panelStyle}>
-                <h2 style={headingStyle}>标注结果</h2>
-                <pre style={answerStyle}>{JSON.stringify(answer, null, 2)}</pre>
+                <div style={formHeaderStyle}>
+                  <h2 style={headingStyle}>{schema.ok ? schema.schema.title : '提交详情'}</h2>
+                  <span style={mutedStyle}>Submission #{detail.submission?.id}</span>
+                </div>
+                {schema.ok ? (
+                  <SchemaRenderer
+                    schema={schema.schema}
+                    payload={payload}
+                    value={answer}
+                    readOnly
+                    runtime={{ taskId: detail.task.id, itemId: detail.item.id, submissionId: detail.submission?.id }}
+                  />
+                ) : (
+                  <div role="alert" style={errorBannerStyle}>{schema.message}</div>
+                )}
               </section>
               <section style={panelStyle}>
                 <h2 style={headingStyle}>审核处理</h2>
@@ -132,15 +150,15 @@ export default function ReviewerQueue() {
   )
 }
 
-function parseAnswer(raw?: string) {
-  if (!raw) {
-    return {}
+function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
+  if (!bundle?.template?.schemaJson) {
+    return { ok: false, message: '当前提交缺少模板快照' }
   }
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return { raw }
+  const result = parseTemplateSchema(bundle.template.schemaJson)
+  if (!result.ok) {
+    return { ok: false, message: `${result.error.field}: ${result.error.message}` }
   }
+  return { ok: true, schema: result.value }
 }
 
 const layoutStyle: CSSProperties = {
@@ -183,14 +201,19 @@ const activeListButtonStyle: CSSProperties = {
   background: 'var(--color-bg)',
 }
 
-const answerStyle: CSSProperties = {
-  marginTop: 'var(--space-md)',
+const formHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 'var(--space-md)',
+  alignItems: 'center',
+  marginBottom: 'var(--space-lg)',
+}
+
+const errorBannerStyle: CSSProperties = {
   padding: 'var(--space-md)',
+  border: '1px solid var(--color-danger, #b42318)',
+  color: 'var(--color-danger, #b42318)',
   background: 'var(--color-bg)',
-  border: '1px solid var(--color-border-light)',
-  maxHeight: 360,
-  overflow: 'auto',
-  whiteSpace: 'pre-wrap',
 }
 
 const textareaStyle: CSSProperties = {

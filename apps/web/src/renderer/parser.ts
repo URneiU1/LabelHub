@@ -91,17 +91,32 @@ export function parseTemplateSchema(raw: string | unknown): ParseResult<Template
     if (typeof rawField.target_field === 'string') {
       field.target_field = rawField.target_field
     }
+    for (const [key, value] of Object.entries(rawField)) {
+      if (key.startsWith('x-')) {
+        field[key as `x-${string}`] = value
+      }
+    }
     fields.push(field)
+  }
+
+  const schema: TemplateSchema = {
+    version: integerProp(parsed.version),
+    title: stringProp(parsed.title) || 'untitled_template',
+    layout: 'single_page',
+    fields,
+  }
+  if (Array.isArray(parsed.export_fields)) {
+    schema.export_fields = parsed.export_fields.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+  }
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key.startsWith('x-')) {
+      schema[key as `x-${string}`] = value
+    }
   }
 
   return {
     ok: true,
-    value: {
-      version: integerProp(parsed.version),
-      title: stringProp(parsed.title) || 'untitled_template',
-      layout: 'single_page',
-      fields,
-    },
+    value: schema,
   }
 }
 

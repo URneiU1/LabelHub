@@ -39,12 +39,6 @@ type templateSchemaRequest struct {
 	Fields []map[string]any `json:"fields" binding:"required"`
 }
 
-type canonicalTemplateSchema struct {
-	Title  string           `json:"title"`
-	Layout string           `json:"layout"`
-	Fields []map[string]any `json:"fields"`
-}
-
 func (h TemplateHandler) ListTemplates(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
 	if !ok {
@@ -176,34 +170,70 @@ func (h TemplateHandler) createTemplateVersion(taskID uint64, createdBy uint64, 
 }
 
 func bindCanonicalTemplateSchema(c *gin.Context, defaultTitle string) ([]byte, bool) {
-	var req templateSchemaRequest
+	var req map[string]any
 	if !bindLimitedJSON(c, &req, maxTemplateSchemaBytes) {
 		return nil, false
 	}
-	if req.Layout == "" {
-		req.Layout = "single_page"
+	layout, _ := req["layout"].(string)
+	if layout == "" {
+		layout = "single_page"
 	}
-	if req.Layout != "single_page" {
+	if layout != "single_page" {
 		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "layout must be single_page")
 		return nil, false
 	}
-	if strings.TrimSpace(req.Title) == "" {
-		req.Title = defaultTitle
+	title, _ := req["title"].(string)
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = defaultTitle
 	}
-	if len(req.Title) > maxTemplateStringBytes {
+	if len(title) > maxTemplateStringBytes {
 		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "title is too long")
 		return nil, false
 	}
-	raw, err := json.Marshal(canonicalTemplateSchema{
-		Title:  req.Title,
-		Layout: req.Layout,
-		Fields: req.Fields,
-	})
+	fields, _ := req["fields"].([]any)
+	canonical := map[string]any{
+		"title":  title,
+		"layout": layout,
+		"fields": fields,
+	}
+	if rawExportFields, has := req["export_fields"]; has {
+		exportFields, ok := stringSliceProp(rawExportFields)
+		if !ok {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "export_fields must be string array")
+			return nil, false
+		}
+		canonical["export_fields"] = exportFields
+	}
+	for key, value := range req {
+		if strings.HasPrefix(key, "x-") {
+			canonical[key] = value
+		}
+	}
+	raw, err := json.Marshal(canonical)
 	if err != nil {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "template schema is invalid")
 		return nil, false
 	}
 	return raw, true
+}
+
+func stringSliceProp(raw any) ([]string, bool) {
+	values, ok := raw.([]any)
+	if !ok {
+		return nil, false
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			return nil, false
+		}
+		if strings.TrimSpace(text) != "" {
+			result = append(result, strings.TrimSpace(text))
+		}
+	}
+	return result, true
 }
 
 func isDuplicateTemplateVersion(err error) bool {

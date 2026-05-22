@@ -31,6 +31,7 @@ export type FieldSchema = {
   maxFiles?: number
   prompt?: string
   target_field?: string
+  [key: `x-${string}`]: unknown
 }
 
 export type TemplateSchema = {
@@ -38,6 +39,8 @@ export type TemplateSchema = {
   title: string
   layout: 'single_page'
   fields: FieldSchema[]
+  export_fields?: string[]
+  [key: `x-${string}`]: unknown
 }
 
 export type AnswerValue = Record<string, unknown>
@@ -58,11 +61,18 @@ export type ValidationError = {
   message: string
 }
 
+export type RenderRuntime = {
+  taskId?: number
+  itemId?: number
+  submissionId?: number
+}
+
 export type WidgetProps = {
   field: FieldSchema
   value: unknown
   answer: AnswerValue
   payload: RenderPayload
+  runtime?: RenderRuntime
   readOnly?: boolean
   onChange: (name: string, value: unknown) => void
 }

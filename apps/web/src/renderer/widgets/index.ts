@@ -1,8 +1,11 @@
 import type { ComponentType } from 'react'
 import type { WidgetProps, WidgetType } from '../types'
+import FileUploadWidget from './FileUpload'
 import InputWidget from './Input'
-import PlaceholderWidget from './Placeholder'
+import JSONEditorWidget from './JSONEditor'
+import LLMTriggerWidget from './LLMTrigger'
 import RadioWidget from './Radio'
+import RichTextWidget from './RichText'
 import ShowItemWidget from './ShowItem'
 import TagsWidget from './Tags'
 import TextAreaWidget from './TextArea'
@@ -13,8 +16,8 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
   TextArea: TextAreaWidget,
   Radio: RadioWidget,
   Tags: TagsWidget,
-  RichText: PlaceholderWidget,
-  JSONEditor: PlaceholderWidget,
-  FileUpload: PlaceholderWidget,
-  LLMTrigger: PlaceholderWidget,
+  RichText: RichTextWidget,
+  JSONEditor: JSONEditorWidget,
+  FileUpload: FileUploadWidget,
+  LLMTrigger: LLMTriggerWidget,
 }

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -70,6 +70,21 @@ describe('SchemaRenderer', () => {
       summary: '回答准确',
       comment: '内容完整且安全',
     })
+  })
+
+  it('updates rich text and JSON editor widgets', async () => {
+    const user = userEvent.setup()
+    render(<ControlledRenderer />)
+
+    await user.type(screen.getByLabelText('修订建议'), '补充引用来源')
+    fireEvent.change(screen.getByLabelText('修正后答案'), {
+      target: { value: '{"corrected_answer":"叶绿体"}' },
+    })
+    fireEvent.blur(screen.getByLabelText('修正后答案'))
+
+    const answer = JSON.parse(screen.getByLabelText('answer-json').textContent || '{}') as AnswerValue
+    expect(answer.revision_suggestion).toBe('补充引用来源')
+    expect(answer.corrected_answer).toEqual({ corrected_answer: '叶绿体' })
   })
 
   it('renders ShowItem media modes from path', () => {
