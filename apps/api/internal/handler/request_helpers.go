@@ -1,11 +1,9 @@
 package handler
 
-// 临时聚合文件:Phase 2 把原 S1Handler 上的方法转成包级函数,
-// Phase 3 把跨 Sprint 复用的(createAuditLog / aiReviewToMap 等)搬到 service 层,
-// Phase 4 把剩余 jsonx / hasRole / parseIDParam 等散到对应包,删掉本文件。
+// request_helpers 收纳 handler 包内复用的"绑路径参数 → 查库 → 写 HTTP 错误"小工具。
+// 跨业务但仅供 handler 自用,故保持 unexported。
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -18,15 +16,6 @@ import (
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/policy"
 )
-
-// itemStatus* 是 task_items.status 的字面值,跨 handler 共用(labeler 领单 / 写完;reviewer 设 finished;task 导入设 available)。
-const (
-	itemStatusAvailable = "available"
-	itemStatusClaimed   = "claimed"
-	itemStatusFinished  = "finished"
-)
-
-// --- task helpers(原 S1Handler 方法,改包级)---
 
 func loadTask(db *gorm.DB, c *gin.Context) (model.Task, bool) {
 	taskID, ok := parseIDParam(c, "taskId")
@@ -54,7 +43,7 @@ func loadOwnedTask(db *gorm.DB, c *gin.Context) (model.Task, bool) {
 	return model.Task{}, false
 }
 
-// enforceCanReadTask 对应原 S1Handler.canReadTask:policy 判可见 + 不可见时写 403。
+// enforceCanReadTask:policy 判可见 + 不可见时写 403。
 func enforceCanReadTask(c *gin.Context, task model.Task) bool {
 	claims, _ := middleware.Claims(c)
 	if policy.CanReadTask(claims, task) {
@@ -120,67 +109,6 @@ func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskIt
 	httpx.OK(c, payload)
 }
 
-// --- audit log / json / param helpers(Phase 4 会拆到对应包)---
-
-// hasRole 保留为兼容层,Phase 4 删;新代码请直接调 policy.HasRole。
-func hasRole(roles []string, target string) bool {
-	for _, role := range roles {
-		if role == target {
-			return true
-		}
-	}
-	return false
-}
-
-func mustJSON(raw string) any {
-	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return raw
-	}
-	return value
-}
-
-func ptrInt(value int) *int {
-	return &value
-}
-
-func aiReviewToMap(review model.AIReview) map[string]any {
-	return map[string]any{
-		"verdict":        review.Verdict,
-		"overall_score":  review.OverallScore,
-		"dimensions":     unwrapJSONPointer(review.Dimensions),
-		"reason":         review.Reason,
-		"prompt_version": review.PromptVersion,
-		"created_at":     review.CreatedAt,
-	}
-}
-
-func humanReviewToMap(review model.HumanReview) map[string]any {
-	return map[string]any{
-		"verdict":     review.Verdict,
-		"reason":      review.Reason,
-		"stage":       review.Stage,
-		"reviewer_id": review.ReviewerID,
-		"created_at":  review.CreatedAt,
-	}
-}
-
-func unwrapJSONPointer(raw *string) any {
-	if raw == nil {
-		return nil
-	}
-	return mustJSON(*raw)
-}
-
-// nextRevisionFromMax 兼容垫片:s1_test.go 单测此契约,Phase 4 把测试搬到 service/submission
-// 后删本垫片。生产路径已不走这里,改由 submission.Save 内部调 service 包私有同名函数。
-func nextRevisionFromMax(valid bool, max int64) int {
-	if !valid {
-		return 1
-	}
-	return int(max) + 1
-}
-
 func parseIDParam(c *gin.Context, name string) (uint64, bool) {
 	id, err := strconv.ParseUint(c.Param(name), 10, 64)
 	if err != nil || id == 0 {
@@ -188,26 +116,4 @@ func parseIDParam(c *gin.Context, name string) (uint64, bool) {
 		return 0, false
 	}
 	return id, true
-}
-
-func nullString(value string) model.NullString {
-	return model.StringFrom(value)
-}
-
-func nullStringJSON(value model.NullString) any {
-	if !value.Valid {
-		return nil
-	}
-	return value.String
-}
-
-// registerAllHandlers 把 6 个 handler 一次性注册到 router,供测试用。
-// main.go 不走这里,而是显式列出 6 个 NewXHandler(db).Register(...) 让路由分组可见。
-func registerAllHandlers(r gin.IRouter, db *gorm.DB) {
-	NewTaskHandler(db).Register(r)
-	NewLabelerHandler(db).Register(r)
-	NewReviewerHandler(db).Register(r)
-	NewUploadHandler(db).Register(r)
-	NewLLMHandler().Register(r)
-	NewExportHandler(db).Register(r)
 }

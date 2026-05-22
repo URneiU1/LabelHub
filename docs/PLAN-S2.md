@@ -23,7 +23,7 @@ S1.5 commit `4df816b` 当前分数:代码质量 8.5 / 架构 8.5 / 业务理解 
 | Save 语义 | 每次 Save 建新版本(append-only history) | 同事务更新 `tasks.template_id`;已有 submission 锁自己的 template_version snapshot |
 | Timeline | Sprint 2 一次到位 4.5 → 6 天 | 周末加班 1.5 天,Sprint 6 不动 |
 | Renderer 落点 | `apps/web/src/renderer/` 纯 TS 模块 | S2 v1 只有 web 一个消费者;workspace package 等 mobile 出现再升 |
-| Validation | 最小校验(name 唯一 / widget ∈ 9 enum / required 是 bool) | 完整 JSON Schema 校验推到 S3 |
+| Validation | S2 v1 校验 name 唯一 / widget ∈ 9 enum / required bool / min/max 类型与 `min <= max` | requiredWhen / regex / custom validation / 完整 JSON Schema 校验推到 S3 |
 
 ## 3. 架构
 
@@ -120,7 +120,7 @@ forms/
   PropForm_JSONEditor.tsx  // Common
   PropForm_FileUpload.tsx  // Common + maxFiles
   PropForm_LLMTrigger.tsx  // Common + prompt + target_field
-  PropForm_ShowItem.tsx    // Common + path + mode(5 enum)
+  PropForm_ShowItem.tsx    // Common + path + mode(6 enum:auto/text/video/image/markdown/json)
 ```
 
 总 ~250 LoC 而非 9×50。改 "required 不能为空" 只动 CommonPropsForm 一处。
@@ -152,16 +152,38 @@ mount: GET /api/v1/templates/:templateId
 |---|---|
 | 挂载时 schema_json 坏 | `<SchemaErrorBanner>`,提供 "新建空 schema" 入口 |
 | **POST 409**(`uk_task_version` 撞) | 后端事务 + duplicate key fallback 已防主路径;真撞了 → 前端 toast "已有人创建了新版本,请刷新",**不前端静默 retry**(撞了说明真有别人在改,刷新看最新更安全)|
-| POST 422(name 重复 / widget 非 enum / required 非 bool) | error 列表逐个高亮到 PropForm_X 的字段 |
+| POST 422(name 重复 / widget 非 enum / required 非 bool / min/max 非数字或 min > max) | error 列表逐个高亮到 PropForm_X 的字段 |
 | name 实时重复(本地改一样) | CommonPropsForm 实时校验,撞了红框 + Save disabled |
 | 本地无变化 | Save 按钮 disabled |
 | 离开页有未保存(刷新/关页) | `beforeunload` 原生 confirm |
 | SPA 内部路由跳转 | **不拦** — react-router `useBlocker` 推到 Sprint 6 polish |
 | readonly 模式点 Save | 不存在(按钮文案是 Fork as new version)|
 
-**后端兜底声明**:POST /templates 后端必须通过 `transaction + SELECT FOR UPDATE + duplicate-key fallback` 保证一致性,**不依赖前端 retry**。
+**后端兜底声明**:POST /templates 后端必须通过 `transaction + 先锁 task 行 + duplicate-key fallback` 保证一致性,**不依赖前端 retry**。
 
-## 6. 后端 API contract
+## 6. 后端 handler 落点(S1.5 重构后约定)
+
+Sprint 1.5 已经把 god object `S1Handler` 拆成按业务域组织的 6 个 handler(`TaskHandler` / `LabelerHandler` / `ReviewerHandler` / `UploadHandler` / `LLMHandler` / `ExportHandler`),并把跨事务的业务规则抽到 `internal/service/{audit,submission,review,export}`。S2 严格沿用这套结构,**不复活 S1Handler / 不挂回旧 receiver**。
+
+**新增文件**:
+
+```
+apps/api/internal/handler/template.go      # TemplateHandler{db}
+apps/api/internal/service/template/...     # Sprint 2 多版本 / 字段校验事务编排,若复杂度低可暂留 handler 内
+```
+
+`TemplateHandler` 自己持 `*gorm.DB`,自己的 `Register(api gin.IRouter)` 列 4 个 template 端点(下方 §6 表),`main.go` 在已有 6 个 `NewXHandler(database).Register(authedAPI)` 调用之后,**追加** `handler.NewTemplateHandler(database).Register(authedAPI)`,不修改其他 5 个 handler 的代码或受影响。
+
+**禁止反模式**(S1.5 已把命名空间清掉,S2 不引回):
+
+- ❌ `sN_*.go`(任何按 Sprint 编号的文件名)— 新文件按业务域命名:`template.go` / `template_test.go`
+- ❌ 把 template 路由挂到 `TaskHandler` 上(template 不是 task 的同义概念,版本管理独立)
+- ❌ `helpers.go` / `s1_helpers.go` 这种垃圾桶文件 — 跨包的共用工具入 `internal/jsonx/` / `internal/service/audit/`;handler 自用助手入 `internal/handler/request_helpers.go`
+- ❌ 在 handler 里写跨表事务 — Schema 创建涉及锁 task + 写 templates + 更新 `tasks.template_id` 三步,放 `service/template` 或暂时塞 handler 内同一函数,**不要散到 handler 的多个方法里**
+
+**事务复用**:Designer 保存新版本时如果需要写 audit_log,**调 `audit.Write(tx, audit.LogEntry{...})`**,不要在 handler 内手写 `model.AuditLog{...}`(单一来源,S3 ai-worker 也用同一入口)。
+
+## 6.1 后端 API contract
 
 | 路由 | 方法 | 权限 | 行为 |
 |---|---|---|---|
@@ -174,20 +196,28 @@ mount: GET /api/v1/templates/:templateId
 
 ```go
 tx.Transaction(func(tx *gorm.DB) error {
-    // 1. SELECT MAX(version) FOR UPDATE — 行锁防赛跑
-    var maxV int
-    tx.Set("gorm:query_option", "FOR UPDATE").
-       Model(&TaskTemplate{}).Where("task_id=?", taskID).
-       Select("COALESCE(MAX(version),0)").Scan(&maxV)
+    // 1. 先锁 task 行,统一锁顺序:task -> task_templates,避免并发 Save / Fork 赛跑和死锁
+    var task Task
+    if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+        Where("id = ?", taskID).First(&task).Error; err != nil {
+        return err
+    }
 
-    // 2. INSERT new template
+    // 2. 在 task 行锁保护下读取当前最大版本
+    var maxV int
+    if err := tx.Model(&TaskTemplate{}).Where("task_id = ?", taskID).
+        Select("COALESCE(MAX(version),0)").Scan(&maxV).Error; err != nil {
+        return err
+    }
+
+    // 3. INSERT new template
     newT := &TaskTemplate{TaskID: taskID, Version: maxV+1, SchemaJSON: body, SchemaHash: sha256(body)}
     if err := tx.Create(newT).Error; err != nil {
         if isDuplicateKey(err) { return errConflict409 }   // 防御性兜底
         return err
     }
 
-    // 3. 同事务把 task 指向新模板 — 否则新 claim 还在 v1
+    // 4. 同事务把 task 指向新模板 — 否则新 claim 还在旧模板
     if err := tx.Model(&Task{}).Where("id=?", taskID).
         Update("template_id", newT.ID).Error; err != nil {
         return err
@@ -199,6 +229,7 @@ tx.Transaction(func(tx *gorm.DB) error {
 **业务规则**:
 - ✓ 新 claim / 新 submission 走新模板(`Task.TemplateID = latest`)
 - ✓ 已有 submissions 继续绑自己的 `template_version` snapshot(已存,无需改)
+- ✓ 返回答题/审核 bundle 时:有 submission → 按 `(task_id, submission.template_version)` 查模板;无 submission → 按 `tasks.template_id`/latest 查模板。禁止用 current latest 覆盖历史 submission 的渲染 schema
 - ✓ Owner 想"回滚"就 Fork 旧版本 → 自动成为新 latest
 - ✓ 失败回滚 task.template_id
 
@@ -240,7 +271,7 @@ apps/web/src/modules/template/               # Designer 编辑用
 ### 8.1 Vitest 落地
 
 ```bash
-pnpm -F @labelhub/web add -D vitest @testing-library/react @testing-library/jest-dom jsdom @vitejs/plugin-react
+pnpm -F web add -D vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event jsdom
 ```
 - `apps/web/vitest.config.ts`:environment=jsdom + jest-dom matchers
 - `apps/web/package.json`:`"test": "vitest run"`,`"test:watch": "vitest"`
@@ -265,7 +296,7 @@ pnpm -F @labelhub/web add -D vitest @testing-library/react @testing-library/jest
   - `TestGetTemplate_ReturnsIsLatest` — isLatest 字段正确
   - `TestCreateTemplate_BumpsVersionAndUpdatesTaskTemplateID` — **同事务双更新断言**
   - `TestCreateTemplate_DuplicateKeyReturns409` — 模拟撞 uk_task_version
-  - `TestValidateTemplate_RejectsDuplicateNames` / `_UnknownWidget` / `_NonBoolRequired`
+  - `TestValidateTemplate_RejectsDuplicateNames` / `_UnknownWidget` / `_NonBoolRequired` / `_InvalidMinMax`
 
 ### 8.5 E2E smoke(Day 6 收尾)
 
@@ -282,7 +313,7 @@ pnpm -F @labelhub/web add -D vitest @testing-library/react @testing-library/jest
 |---|---|---|---|
 | **1** | Backend 4 路由 + seed upsert + 单测 | `s1_template.go` + `tasks.template_id` 同事务更新 + `isLatest` + seed sha256 upsert | go test:每路由 1 happy + 1 边界(POST 撞 409)+ seed mutation 验证 |
 | **2** | Vitest 落地 + Renderer 模块 + 5 简单 widgets(Input/TextArea/Radio/Tags/ShowItem-with-path-mode)+ parser/validator | `apps/web/src/renderer/` 框架 + `parseTemplateSchema` + qa_quality fixture 渲染 12 字段 | vitest 全绿;Plaza 暂未迁移 |
-| **3** | 4 复杂 widgets(JSONEditor/FileUpload/RichText/LLMTrigger)+ Plaza/Queue 迁移(MEDIUM 4 闭环) | `LabelAnswer` interface 彻底删除;Plaza/Queue 通过 SchemaErrorBanner 处理坏 schema | E2E smoke 老 happy path + 坏 schema 边界 |
+| **3** | 4 复杂 widgets(JSONEditor/FileUpload/RichText/LLMTrigger)+ Plaza/Queue 迁移(MEDIUM 4 闭环) | `LabelAnswer` interface 彻底删除;Plaza/Queue 通过 SchemaErrorBanner 处理坏 schema;历史 submission 按 `template_version` 渲染 | E2E smoke 老 happy path + 坏 schema 边界 + 历史模板边界 |
 | **4** | Designer edit-mode 主体:DraftCanvas / CanvasFieldShell / WidgetPreview / MaterialPalette / useDesignerState | 物料库 → 画布 append + delete + 选中态 + Discard | vitest:append/delete/discard 行为 + 选中态保持 |
 | **5** | PropertyPanel:CommonPropsForm + OptionsPropsForm + LengthPropsForm + 9 PropForm_X 组合 | 选中字段 → 改 name/label/required + Radio/Tags 改 options + Input 改 maxLength | vitest:每个 PropForm 渲染 + name 实时撞验证 |
 | **6** | List 页 + Designer readonly/Fork mode + Save flow + E2E smoke + Demo 剧本 + commit | `/owner/tasks/:taskId/templates` 全链路 + `docs/S2_ACCEPTANCE.md` + `docs/S2_DEMO_SCRIPT.md` | 全套 E2E + go test + lint + build 全绿 |
@@ -295,12 +326,12 @@ pnpm -F @labelhub/web add -D vitest @testing-library/react @testing-library/jest
 
 1. ✓ Backend 4 路由 + GET 携带 `isLatest` + POST 同事务更新 `tasks.template_id` + 后端 duplicate-key 兜底 → sqlmock 全绿
 2. ✓ Labeler/Plaza:schema 驱动,**qa_quality 12 字段全渲染**(field 数从 11 修正到 12)
-3. ✓ Reviewer/Queue:readOnly + answer 来自 `revision.answer`
+3. ✓ Reviewer/Queue:readOnly + answer 来自 `revision.answer`;历史 submission 按 `(task_id, submission.template_version)` 查 schema,不是 latest
 4. ✓ Owner/Designer **edit 模式**:**能 from 0 构造** — 点 Radio → 改 name `fluency_score` → 改 label → Save as v2 → URL 跳 v2 → Plaza 看到新字段
 5. ✓ Owner/Designer **readonly 模式**(开旧版本):物料/删除/属性面板全 disabled + toolbar 替换为 Fork
 6. ✓ Fork:点 Fork → POST 当前 schema 副本 → URL 跳 v(N+1) edit 模式
 7. ✓ `_draftId` 工作:append → 选中 → 改 name 多次,选中态保持(Vitest 验)
-8. ✓ ShowItem path+mode:接受 `field.path`(`$payload`)+ `field.mode`(`auto`/`text`/`video`/`image`/`markdown`/`json`)5 分支
+8. ✓ ShowItem path+mode:接受 `field.path`(`$payload`)+ `field.mode`(`auto`/`text`/`video`/`image`/`markdown`/`json`)6 分支
 9. ✓ SchemaErrorBanner:故意改坏 schema_json → banner 出现,角色分文案(labeler 看"联系任务管理员",owner 看具体 parse error)
 10. ✓ Seed mutation:改 `qa_quality_review.json` 一个 label → `make seed` → Plaza 立即看到新 label
 11. ✓ go test ./... -race / pnpm lint / pnpm build / vitest 全绿;handler cover ≥ 35%

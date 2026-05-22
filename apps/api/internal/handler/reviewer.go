@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -94,14 +93,4 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 	}
 
 	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status})
-}
-
-// reviewUpdates / reviewDecision 兼容垫片:s1_test.go 还测原契约,Phase 4 把测试搬走后删。
-// 单一来源在 service/review,这里只转调。
-func reviewUpdates(to string, humanVerdict string, now time.Time) map[string]any {
-	return review.UpdatesFor(to, humanVerdict, now)
-}
-
-func reviewDecision(verdict string) (event string, to string, humanVerdict string, ok bool) {
-	return review.Decode(verdict)
 }

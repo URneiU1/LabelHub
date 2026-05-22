@@ -66,8 +66,8 @@ func (h TaskHandler) CreateTask(c *gin.Context) {
 		OwnerID:             claims.UserID,
 		Title:               req.Title,
 		Status:              "draft",
-		Description:         nullString(req.Description),
-		BaselineDescription: nullString(req.BaselineDescription),
+		Description:         model.StringFrom(req.Description),
+		BaselineDescription: model.StringFrom(req.BaselineDescription),
 		Distribution:        "first_come",
 		AIReviewEnabled:     false,
 		HumanReviewEnabled:  true,
@@ -119,7 +119,7 @@ func (h TaskHandler) ImportItems(c *gin.Context) {
 			}
 			item := model.TaskItem{
 				TaskID:     task.ID,
-				ExternalID: nullString(externalID),
+				ExternalID: model.StringFrom(externalID),
 				Payload:    string(raw),
 				Status:     itemStatusAvailable,
 			}

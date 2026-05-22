@@ -52,8 +52,8 @@ func RunJSON(db *gorm.DB, input JSONInput) (JSONResult, error) {
 			"submission_id": row.SubmissionID,
 			"item_id":       row.ItemID,
 			"external_id":   nullStringJSON(row.ExternalID),
-			"payload":       mustJSON(row.Payload),
-			"answer":        mustJSON(row.Answer),
+			"payload":       DecodeJSONFallback(row.Payload),
+			"answer":        DecodeJSONFallback(row.Answer),
 		}
 		if input.IncludeReviews {
 			if ai, ok := aiBySubmission[row.SubmissionID]; ok {

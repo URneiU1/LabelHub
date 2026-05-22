@@ -66,11 +66,12 @@ func nextRevisionNo(tx *gorm.DB, submissionID uint64) (int, error) {
 	if err := tx.Model(&model.SubmissionRevision{}).Where("submission_id = ?", submissionID).Select("MAX(revision_no)").Scan(&maxRevision).Error; err != nil {
 		return 0, err
 	}
-	return nextRevisionFromMax(maxRevision.Valid, maxRevision.Int64), nil
+	return NextRevisionFromMax(maxRevision.Valid, maxRevision.Int64), nil
 }
 
-// nextRevisionFromMax 导出形式不变以便单测;handler 包还有同名的私有副本,Phase 4 拆掉。
-func nextRevisionFromMax(valid bool, max int64) int {
+// NextRevisionFromMax:append-only revision_no 自增的纯函数。导出以便单测。
+// 契约:无历史 → 1;有历史 max=N → N+1。命中 UK(submission_id, revision_no) 后由 DB 保证唯一。
+func NextRevisionFromMax(valid bool, max int64) int {
 	if !valid {
 		return 1
 	}

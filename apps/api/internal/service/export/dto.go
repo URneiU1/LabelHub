@@ -29,9 +29,11 @@ func HumanReviewToMap(review model.HumanReview) map[string]any {
 	}
 }
 
-// mustJSON / unwrapJSONPointer / nullStringJSON:
-// Phase 3 暂在 export 包内私有一份,Phase 4 抽到 internal/jsonx 公共包后合并。
-func mustJSON(raw string) any {
+// DecodeJSONFallback 把 JSON 字符串解码成 any;解码失败时**原样返回字符串**而非 panic。
+// 用于导出场景:DB 里的 payload / answer / dimensions 这些 JSON 列正常都是合法 JSON,
+// 但偶尔遇到历史脏数据或半截写入时,导出文件应该带着原始字符串继续走,而不是整批崩。
+// 测试见 dto_test.go(原 handler/s1_test.go TestMustJSONFallback 搬到这里)。
+func DecodeJSONFallback(raw string) any {
 	var value any
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return raw
@@ -43,7 +45,7 @@ func unwrapJSONPointer(raw *string) any {
 	if raw == nil {
 		return nil
 	}
-	return mustJSON(*raw)
+	return DecodeJSONFallback(*raw)
 }
 
 func nullStringJSON(value model.NullString) any {

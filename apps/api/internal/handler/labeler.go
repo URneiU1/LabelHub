@@ -203,10 +203,3 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 	}
 	httpx.OK(c, response)
 }
-
-// resubmitClearedFields / nextRevisionFromMax 在 s1_test.go 还有契约单测引用,
-// Phase 4 把这些测试搬到 service/submission 后会一并删本文件里的兼容垫片。
-// 这里转调 service 包,确保两边语义一致(单一来源)。
-func resubmitClearedFields(to string, now time.Time) map[string]any {
-	return submission.ResubmitClearedFields(to, now)
-}
