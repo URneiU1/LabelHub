@@ -11,9 +11,11 @@ vi.mock('../../shared/api/client', () => ({
 }))
 
 vi.mock('@douyinfe/semi-ui', () => ({
-  Button: ({ children, loading: _loading, theme: _theme, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean, theme?: string }) => (
-    <button type="button" {...props}>{children}</button>
-  ),
+  Button: ({ children, loading, theme, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean, theme?: string }) => {
+    void loading
+    void theme
+    return <button type="button" {...props}>{children}</button>
+  },
   Toast: {
     error: vi.fn(),
     success: vi.fn(),

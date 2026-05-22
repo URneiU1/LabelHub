@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-23 `p1-p2-closeout`: 一次性补齐 P1/P2 审查项:FileUpload 在 submit 事务内把答案引用的 `storageKey` 校验并绑定到 `submission_revision_id`,非法 owner/cross-task/重复 key 有测试;前后端 schema 校验对齐 trim 后 name、严格 options、FileUpload `maxFiles`、LLMTrigger `target_field`;Labeler/Reviewer 增加页面级 schema runtime 回归;AI submit 事务创建 pending `ai_reviews` + `ai:review` outbox,API 后台 publisher 投递 Asynq,worker 幂等消费并在成功/失败后流转到 `human_reviewing`。
 - 2026-05-22 `p1-safety-defaults`: 补 P1 安全口径:Save/Submit 在 `submission.Save` 事务内用 `FOR UPDATE` 锁住 `task_items` 并二次校验 `claimed_by/status`;并将 `ai_review_enabled` 的初始 schema、GORM 默认值和 003 迁移统一改为安全默认关闭,旧库中未配置 AI prompt 的任务会被迁移为关闭 AI。
 - 2026-05-22 `phase2-schema-runtime`: 完成阶段二动态模板运行时闭环:Labeler Plaza 和 Reviewer Queue 改为读取 `bundle.template.schemaJson` 并通过 `SchemaRenderer` 渲染;Reviewer 详情改走 `/reviewer/submissions/:submissionId`;补齐 RichText/JSONEditor/FileUpload/LLMTrigger 真实可交互 widget;前后端 parser/canonical 保存保留 `export_fields` 与 `x-*` 扩展;Vite 对 React/Semi/lottie 做分包并将 lottie 指到 light player,build 不再出现 eval/chunk warning。
 - 2026-05-22 `fix(api): harden review and claim transactions`: 完成阶段一 P0 后端并发与越权重构:新增 `task_reviewers` 显式审核授权表;Reviewer Queue/Detail/Review 统一按 owner/admin/task_reviewers 做资源隔离;`review.Apply` 在事务内锁 task/submission 并校验 `human_reviewing`;Claim 在事务内锁 task、抢 item、立即创建 draft submission 并冻结 `template_version`;Save/Submit 在 submission 行锁保护下生成 revision_no。
@@ -55,16 +56,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- AI 预审异步闭环仍未完成:outbox publisher、pending `ai_reviews` 幂等占位、worker 失败降级到人工审核还需要阶段三落地。
+- AI 预审已有队列和降级闭环,但当前 worker 使用 deterministic evaluator;真实豆包/OpenAI-compatible provider、Function Calling schema 校验、golden dry-run UI 仍需在 S3 完成。
+- FileUpload 已完成 temp→attached 绑定,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:进入 Designer 的 append/delete/简易属性编辑能力。
-- 继续阶段三前置:把 AI outbox topic、pending ai_reviews 行和 worker 降级状态机对齐。
+- 推进 S3 产品层:Owner AI Prompt 配置、golden dry-run、真实 LLM provider、Reviewer 展示 AI verdict/score。
+- 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-23 P1/P2 closeout: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-22 P1: `cd apps/api && go test ./...` 通过;`make seed` 通过;本地 MySQL 确认 `tasks.ai_review_enabled` 默认值为 `0`,官方 seed 任务 AI 为关闭。
 - 2026-05-22 阶段二: `cd apps/api && go test ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过且无 lottie eval/chunk size warning。
 - 2026-05-22 阶段一: `go test ./...` 通过;`make seed` 通过并确认本地 MySQL `task_reviewers` 中官方任务已分配 `reviewer1`。
