@@ -164,8 +164,12 @@ func seedQAQuality(database *gorm.DB) error {
 		default:
 			return err
 		}
-		if err := tx.Model(&task).Update("template_id", template.ID).Error; err != nil {
-			return err
+		// Seed 只负责补齐/更新官方 v1 模板。S2 之后 Owner 可能已经创建 v2/v3,
+		// rerun seed 不能把当前模板指针回滚到 v1。
+		if task.TemplateID == nil {
+			if err := tx.Model(&task).Update("template_id", template.ID).Error; err != nil {
+				return err
+			}
 		}
 
 		items, err := loadQAQualityItems()
