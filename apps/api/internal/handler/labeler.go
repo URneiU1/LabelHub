@@ -18,7 +18,29 @@ import (
 	"labelhub-api/internal/statemachine"
 )
 
-func (h S1Handler) ListPublishedTasks(c *gin.Context) {
+// LabelerHandler 封装 labeler 角色端点:任务广场、领单、作答(draft / submit)、我的提交。
+type LabelerHandler struct {
+	db *gorm.DB
+}
+
+func NewLabelerHandler(db *gorm.DB) LabelerHandler {
+	return LabelerHandler{db: db}
+}
+
+func (h LabelerHandler) Register(api gin.IRouter) {
+	api.GET("/labeler/tasks", middleware.RequireRoles("labeler"), h.ListPublishedTasks)
+	api.POST("/tasks/:taskId/claim", middleware.RequireRoles("labeler"), h.ClaimItem)
+	api.GET("/tasks/:taskId/items/:itemId", middleware.RequireRoles("labeler", "reviewer", "owner", "admin"), h.GetItem)
+	api.POST("/tasks/:taskId/items/:itemId/draft", middleware.RequireRoles("labeler"), h.SaveDraft)
+	api.POST("/tasks/:taskId/items/:itemId/submit", middleware.RequireRoles("labeler"), h.SubmitItem)
+	api.GET("/me/submissions", middleware.RequireRoles("labeler"), h.MySubmissions)
+}
+
+type answerRequest struct {
+	Answer map[string]any `json:"answer" binding:"required"`
+}
+
+func (h LabelerHandler) ListPublishedTasks(c *gin.Context) {
 	var tasks []model.Task
 	if err := h.db.Where("status = ?", "published").Order("id DESC").Find(&tasks).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list tasks")
@@ -27,8 +49,8 @@ func (h S1Handler) ListPublishedTasks(c *gin.Context) {
 	httpx.PageOK(c, tasks, httpx.Page{})
 }
 
-func (h S1Handler) ClaimItem(c *gin.Context) {
-	task, ok := h.loadTask(c)
+func (h LabelerHandler) ClaimItem(c *gin.Context) {
+	task, ok := loadTask(h.db, c)
 	if !ok {
 		return
 	}
@@ -39,7 +61,7 @@ func (h S1Handler) ClaimItem(c *gin.Context) {
 	var claimed model.TaskItem
 	err := h.db.Where("task_id = ? AND claimed_by = ? AND status = ?", task.ID, claims.UserID, itemStatusClaimed).Order("id").First(&claimed).Error
 	if err == nil {
-		h.respondItem(c, task, claimed)
+		respondItem(h.db, c, task, claimed)
 		return
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -86,15 +108,15 @@ func (h S1Handler) ClaimItem(c *gin.Context) {
 
 	claimed.ClaimedBy = &claims.UserID
 	claimed.Status = itemStatusClaimed
-	h.respondItem(c, task, claimed)
+	respondItem(h.db, c, task, claimed)
 }
 
-func (h S1Handler) GetItem(c *gin.Context) {
-	task, ok := h.loadTask(c)
+func (h LabelerHandler) GetItem(c *gin.Context) {
+	task, ok := loadTask(h.db, c)
 	if !ok {
 		return
 	}
-	item, ok := h.loadItem(c, task.ID)
+	item, ok := loadItem(h.db, c, task.ID)
 	if !ok {
 		return
 	}
@@ -114,18 +136,18 @@ func (h S1Handler) GetItem(c *gin.Context) {
 		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "item is not visible to current user")
 		return
 	}
-	h.respondItem(c, task, item)
+	respondItem(h.db, c, task, item)
 }
 
-func (h S1Handler) SaveDraft(c *gin.Context) {
+func (h LabelerHandler) SaveDraft(c *gin.Context) {
 	h.saveRevision(c, true)
 }
 
-func (h S1Handler) SubmitItem(c *gin.Context) {
+func (h LabelerHandler) SubmitItem(c *gin.Context) {
 	h.saveRevision(c, false)
 }
 
-func (h S1Handler) MySubmissions(c *gin.Context) {
+func (h LabelerHandler) MySubmissions(c *gin.Context) {
 	claims, _ := middleware.Claims(c)
 	var submissions []model.Submission
 	if err := h.db.Where("labeler_id = ?", claims.UserID).Order("updated_at DESC").Find(&submissions).Error; err != nil {
@@ -135,49 +157,12 @@ func (h S1Handler) MySubmissions(c *gin.Context) {
 	httpx.PageOK(c, submissions, httpx.Page{})
 }
 
-func (h S1Handler) respondItem(c *gin.Context, task model.Task, item model.TaskItem) {
-	// template / submission / revision 任一查询出非 NotFound 错误都应该上报,
-	// 否则前端拿到空 schema 还会接着渲染,排查反而困难。
-	template, templateErr := h.currentTemplate(task.ID)
-	if templateErr != nil && !errors.Is(templateErr, gorm.ErrRecordNotFound) {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load template")
-		return
-	}
-
-	var submission model.Submission
-	submissionErr := h.db.Where("item_id = ?", item.ID).First(&submission).Error
-	if submissionErr != nil && !errors.Is(submissionErr, gorm.ErrRecordNotFound) {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")
-		return
-	}
-
-	var revision *model.SubmissionRevision
-	if submission.ID != 0 && submission.CurrentRevisionID != nil {
-		var current model.SubmissionRevision
-		if err := h.db.First(&current, *submission.CurrentRevisionID).Error; err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load revision")
-				return
-			}
-		} else {
-			revision = &current
-		}
-	}
-
-	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision}
-	// 已发布的 task 缺模板属于配置缺失,显式 warning 让前端能渲染 setup-incomplete 状态。
-	if errors.Is(templateErr, gorm.ErrRecordNotFound) {
-		payload["warnings"] = []string{"template_missing"}
-	}
-	httpx.OK(c, payload)
-}
-
-func (h S1Handler) saveRevision(c *gin.Context, draft bool) {
-	task, ok := h.loadTask(c)
+func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
+	task, ok := loadTask(h.db, c)
 	if !ok {
 		return
 	}
-	item, ok := h.loadItem(c, task.ID)
+	item, ok := loadItem(h.db, c, task.ID)
 	if !ok {
 		return
 	}
@@ -281,7 +266,7 @@ func (h S1Handler) saveRevision(c *gin.Context, draft bool) {
 	httpx.OK(c, response)
 }
 
-func (h S1Handler) findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, labelerID uint64) (model.Submission, error) {
+func (h LabelerHandler) findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, labelerID uint64) (model.Submission, error) {
 	var submission model.Submission
 	err := tx.Where("item_id = ?", item.ID).First(&submission).Error
 	if err == nil {
@@ -292,7 +277,9 @@ func (h S1Handler) findOrCreateSubmission(tx *gorm.DB, task model.Task, item mod
 	}
 	templateVersion := 1
 	if task.TemplateID != nil {
-		if template, err := h.currentTemplate(task.ID); err == nil {
+		// 历史实现:此查询走 h.db 而非传入的 tx,Phase 2 严格保持原行为不动。
+		// Phase 3 抽 service 层时再统一 tx vs db 的语义。
+		if template, err := currentTemplate(h.db, task.ID); err == nil {
 			templateVersion = template.Version
 		}
 	}

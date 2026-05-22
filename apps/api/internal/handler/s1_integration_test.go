@@ -98,7 +98,7 @@ func TestClaimItem_HappyPath(t *testing.T) {
 		WillReturnError(gorm.ErrRecordNotFound)
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim", map[string]any{}))
@@ -146,7 +146,7 @@ func TestReviewApprove_TransactionFullSequence(t *testing.T) {
 	mock.ExpectCommit()
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/submissions/42/review", map[string]any{
@@ -218,7 +218,7 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 	mock.ExpectCommit()
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/items/11/submit", map[string]any{

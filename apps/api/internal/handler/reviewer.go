@@ -14,11 +14,30 @@ import (
 	"labelhub-api/internal/statemachine"
 )
 
+// ReviewerHandler 封装 reviewer 审核相关端点。
+type ReviewerHandler struct {
+	db *gorm.DB
+}
+
+func NewReviewerHandler(db *gorm.DB) ReviewerHandler {
+	return ReviewerHandler{db: db}
+}
+
+func (h ReviewerHandler) Register(api gin.IRouter) {
+	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerQueue)
+	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
+}
+
+type reviewRequest struct {
+	Verdict string `json:"verdict" binding:"required"`
+	Reason  string `json:"reason"`
+}
+
 var reviewerQueueAllowedStatuses = map[string]struct{}{
 	statemachine.StateHumanReviewing: {},
 }
 
-func (h S1Handler) ReviewerQueue(c *gin.Context) {
+func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 	status := c.DefaultQuery("status", statemachine.StateHumanReviewing)
 	if _, ok := reviewerQueueAllowedStatuses[status]; !ok {
 		httpx.ErrorWithDetails(c, http.StatusForbidden, "FORBIDDEN",
@@ -34,7 +53,7 @@ func (h S1Handler) ReviewerQueue(c *gin.Context) {
 	httpx.PageOK(c, submissions, httpx.Page{})
 }
 
-func (h S1Handler) ReviewSubmission(c *gin.Context) {
+func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 	submissionID, ok := parseIDParam(c, "submissionId")
 	if !ok {
 		return

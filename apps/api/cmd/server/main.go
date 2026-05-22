@@ -43,7 +43,14 @@ func main() {
 	authedAPI := api.Group("")
 	authedAPI.Use(middleware.Auth(authService))
 	handler.NewAuthHandler(database, authService, authedAPI).Register(api)
-	handler.NewS1Handler(database).Register(authedAPI)
+
+	// 按业务域分组注册;新增 handler 在此追加,不再合并进单一 god handler。
+	handler.NewTaskHandler(database).Register(authedAPI)
+	handler.NewLabelerHandler(database).Register(authedAPI)
+	handler.NewReviewerHandler(database).Register(authedAPI)
+	handler.NewUploadHandler(database).Register(authedAPI)
+	handler.NewLLMHandler().Register(authedAPI)
+	handler.NewExportHandler(database).Register(authedAPI)
 
 	port := serverPort()
 	logger.Info("API server starting", zap.String("port", port))

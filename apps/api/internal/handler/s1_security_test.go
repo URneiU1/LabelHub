@@ -31,7 +31,7 @@ func TestClaimItem_BlockedOnNonPublishedTask(t *testing.T) {
 				WillReturnError(gorm.ErrRecordNotFound)
 
 			r := newGinWithClaims(claims)
-			NewS1Handler(db).Register(r)
+			registerAllHandlers(r, db)
 
 			rec := httptest.NewRecorder()
 			r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim", map[string]any{}))
@@ -79,7 +79,7 @@ func TestClaimItem_ResumeWorksOnPausedTask(t *testing.T) {
 		WillReturnError(gorm.ErrRecordNotFound)
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim", map[string]any{}))
@@ -114,7 +114,7 @@ func TestGetItem_LabelerCannotReadPeerClaimedItem(t *testing.T) {
 		WillReturnError(gorm.ErrRecordNotFound)
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/items/11", nil))
@@ -149,7 +149,7 @@ func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 		WillReturnError(gorm.ErrRecordNotFound)
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/items/11", nil))
@@ -205,7 +205,7 @@ func TestRespondItem_TemplateDBErrorReturns500(t *testing.T) {
 		WillReturnError(gorm.ErrInvalidDB)
 
 	r := newGinWithClaims(claims)
-	NewS1Handler(db).Register(r)
+	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim", map[string]any{}))
