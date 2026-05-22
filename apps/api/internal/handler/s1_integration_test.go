@@ -59,12 +59,12 @@ func jsonRequest(method, path string, body any) *http.Request {
 // --- Test 1: ClaimItem happy path ---
 //
 // PLAN §4.5 "first_come 抢单":确保事务内
-//   1) SELECT current-user 已 claim 的 item(找不到)
-//   2) BEGIN
-//   3) SELECT ... FOR UPDATE SKIP LOCKED 拿一条 available
-//   4) UPDATE task_items 标 claimed_by + status='claimed'
-//   5) COMMIT
-//   6) SELECT template / submission / revision 给 respondItem
+//  1. SELECT current-user 已 claim 的 item(找不到)
+//  2. BEGIN
+//  3. SELECT ... FOR UPDATE SKIP LOCKED 拿一条 available
+//  4. UPDATE task_items 标 claimed_by + status='claimed'
+//  5. COMMIT
+//  6. SELECT template / submission / revision 给 respondItem
 func TestClaimItem_HappyPath(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
@@ -114,11 +114,12 @@ func TestClaimItem_HappyPath(t *testing.T) {
 // --- Test 2: ReviewApprove 整事务 5 mutation + finished_items+1 ---
 //
 // PLAN §2 关键易忘点 + §4.3:approve 路径在同一事务内必须发生 5 件事:
-//   INSERT human_reviews
-//   UPDATE submissions(status=approved + human_verdict + approved_at)
-//   UPDATE task_items(status=finished + finished_at)
-//   UPDATE tasks(finished_items += 1)
-//   INSERT audit_logs
+//
+//	INSERT human_reviews
+//	UPDATE submissions(status=approved + human_verdict + approved_at)
+//	UPDATE task_items(status=finished + finished_at)
+//	UPDATE tasks(finished_items += 1)
+//	INSERT audit_logs
 func TestReviewApprove_TransactionFullSequence(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()

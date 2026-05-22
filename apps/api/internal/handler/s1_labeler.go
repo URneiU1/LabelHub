@@ -49,7 +49,15 @@ func (h S1Handler) ClaimItem(c *gin.Context) {
 
 	// Path B:尝试领新题前,task 必须是 published。draft/paused/archived 一律 409。
 	if decision := policy.CanClaimNew(claims, task); !decision.Allowed {
-		httpx.Error(c, decision.HTTPStatus, decision.Code, decision.Message)
+		switch decision.Reason {
+		case policy.ClaimDenyNotLabeler:
+			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "only labeler can claim items")
+		case policy.ClaimDenyTaskNotPublished:
+			httpx.Error(c, http.StatusConflict, "CONFLICT",
+				"task is not accepting new claims (status="+decision.TaskStatus+")")
+		default:
+			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "claim denied")
+		}
 		return
 	}
 

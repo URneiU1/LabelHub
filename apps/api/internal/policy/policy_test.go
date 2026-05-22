@@ -84,15 +84,15 @@ func TestCanClaimNew(t *testing.T) {
 		claims         *auth.Claims
 		task           model.Task
 		wantAllowed    bool
-		wantHTTPStatus int
-		wantCode       string
+		wantReason     ClaimDenyReason
+		wantTaskStatus string
 	}{
-		{"labeler on published OK", labeler, model.Task{Status: "published"}, true, 0, ""},
-		{"labeler on draft → 409", labeler, model.Task{Status: "draft"}, false, 409, "CONFLICT"},
-		{"labeler on paused → 409", labeler, model.Task{Status: "paused"}, false, 409, "CONFLICT"},
-		{"labeler on archived → 409", labeler, model.Task{Status: "archived"}, false, 409, "CONFLICT"},
-		{"owner cannot claim", &auth.Claims{UserID: 10, Roles: []string{"owner"}}, model.Task{Status: "published"}, false, 403, "FORBIDDEN"},
-		{"reviewer cannot claim", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, model.Task{Status: "published"}, false, 403, "FORBIDDEN"},
+		{"labeler on published OK", labeler, model.Task{Status: "published"}, true, "", ""},
+		{"labeler on draft → task_not_published", labeler, model.Task{Status: "draft"}, false, ClaimDenyTaskNotPublished, "draft"},
+		{"labeler on paused → task_not_published", labeler, model.Task{Status: "paused"}, false, ClaimDenyTaskNotPublished, "paused"},
+		{"labeler on archived → task_not_published", labeler, model.Task{Status: "archived"}, false, ClaimDenyTaskNotPublished, "archived"},
+		{"owner cannot claim", &auth.Claims{UserID: 10, Roles: []string{"owner"}}, model.Task{Status: "published"}, false, ClaimDenyNotLabeler, ""},
+		{"reviewer cannot claim", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, model.Task{Status: "published"}, false, ClaimDenyNotLabeler, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,11 +101,11 @@ func TestCanClaimNew(t *testing.T) {
 				t.Errorf("Allowed = %v, want %v", got.Allowed, tc.wantAllowed)
 			}
 			if !tc.wantAllowed {
-				if got.HTTPStatus != tc.wantHTTPStatus {
-					t.Errorf("HTTPStatus = %d, want %d", got.HTTPStatus, tc.wantHTTPStatus)
+				if got.Reason != tc.wantReason {
+					t.Errorf("Reason = %q, want %q", got.Reason, tc.wantReason)
 				}
-				if got.Code != tc.wantCode {
-					t.Errorf("Code = %q, want %q", got.Code, tc.wantCode)
+				if got.TaskStatus != tc.wantTaskStatus {
+					t.Errorf("TaskStatus = %q, want %q", got.TaskStatus, tc.wantTaskStatus)
 				}
 			}
 		})

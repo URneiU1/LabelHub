@@ -11,11 +11,11 @@ import (
 // 业务决策:reviewer 的 verdict 映射到状态机 event + 目标态 + human_verdict 字段
 func TestReviewDecisionMapping(t *testing.T) {
 	tests := []struct {
-		verdict       string
-		wantEvent     string
-		wantTo        string
-		wantVerdict   string
-		wantOK        bool
+		verdict     string
+		wantEvent   string
+		wantTo      string
+		wantVerdict string
+		wantOK      bool
 	}{
 		{"approve", statemachine.EventApprove, statemachine.StateApproved, "approve", true},
 		{"reject", statemachine.EventReject, statemachine.StateRejected, "reject", true},

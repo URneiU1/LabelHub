@@ -70,7 +70,6 @@ func (h S1Handler) Register(api gin.IRouter) {
 	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
 
 	api.POST("/llm/inline", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.InlineLLM)
-	api.POST("/upload", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.Upload)
 	api.POST("/uploads", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.Upload)
 }
 

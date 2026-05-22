@@ -69,27 +69,31 @@ func CanReadTask(claims *auth.Claims, task model.Task) bool {
 	return false
 }
 
+// ClaimDenyReason:CanClaimNew 拒绝时的业务原因枚举,不携带 HTTP 层细节。
+// HTTP 状态码 / error code / message 由 handler 层根据此枚举映射。
+type ClaimDenyReason string
+
+const (
+	ClaimDenyNotLabeler       ClaimDenyReason = "not_labeler"
+	ClaimDenyTaskNotPublished ClaimDenyReason = "task_not_published"
+)
+
 // ClaimDecision 描述 ClaimItem 路径 B(尝试领取新题)的判定结果。
+// Allowed=true 时 Reason / TaskStatus 字段无意义。
 type ClaimDecision struct {
-	Allowed bool
-	// HTTPStatus / Code / Message 用于直接构造错误响应。Allowed=true 时这三个字段为零值。
-	HTTPStatus int
-	Code       string
-	Message    string
+	Allowed    bool
+	Reason     ClaimDenyReason
+	TaskStatus string // 拒绝时的 task.Status 快照,handler 拼错误消息用
 }
 
 // CanClaimNew:labeler 尝试领取一道新 item 时的前置校验。
 // 已经在干的 item(claimed_by=self)即使 task 暂停也允许 resume,那条路径不走这个函数。
 func CanClaimNew(claims *auth.Claims, task model.Task) ClaimDecision {
 	if !HasRole(claims, RoleLabeler) {
-		return ClaimDecision{HTTPStatus: 403, Code: "FORBIDDEN", Message: "only labeler can claim items"}
+		return ClaimDecision{Reason: ClaimDenyNotLabeler}
 	}
 	if task.Status != TaskStatusPublished {
-		return ClaimDecision{
-			HTTPStatus: 409,
-			Code:       "CONFLICT",
-			Message:    "task is not accepting new claims (status=" + task.Status + ")",
-		}
+		return ClaimDecision{Reason: ClaimDenyTaskNotPublished, TaskStatus: task.Status}
 	}
 	return ClaimDecision{Allowed: true}
 }
