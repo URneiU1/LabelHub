@@ -35,3 +35,27 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 ```
 
 详见 `docs/PLAN.md`。
+
+## 开发记录
+
+每次完成代码改动后,需要同步更新本节,并按实际情况维护 `CLAUDE.md` / `CODEX.md`:
+
+- 本次完成: 写清楚做了哪些功能、修复或重构。
+- 仍需提升: 写清楚当前已知风险、体验问题、技术债或 warning。
+- 下一步: 写清楚下一轮最应该推进的任务。
+- 验证记录: 写清楚已跑过的测试、lint、build 或手动验证。
+
+### 最近完成
+
+- 2026-05-22 `0b871d5`: 修复安全和边界问题,包括 ShowItem URL 白名单、reviewer/owner 审核资源边界、upload task 权限与 MIME/content 校验、template/answer body 限制、CORS 显式 origin、submission template_version snapshot。
+- 2026-05-22 `92f08ac`: 完成 S2 Day2 SchemaRenderer runtime,支持官方 schema 解析、核心 widget 渲染、答案校验和 renderer 单测。
+
+### 仍需提升
+
+- 前端 build 仍有 `lottie-web` 依赖的 eval warning 和 chunk size warning,不是安全修复引入,但后续需要通过依赖替换或分包处理。
+- Plaza / Reviewer 当前仍是旧工作台表单,已补 URL 安全边界,但还未完全切换到 SchemaRenderer 驱动。
+
+### 下一步
+
+- 推进 S2 后续: 将 SchemaRenderer 接入 labeler/reviewer 主流程,再进入 Designer 的 append/delete/简易属性编辑能力。
+- 持续补充权限边界测试,尤其是 owner/reviewer/admin 多角色交叉场景。
