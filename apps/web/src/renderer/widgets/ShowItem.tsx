@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
+import { isSafeURL } from '../../shared/security/url'
 import { isRecord, resolvePath, textValue } from '../path'
 import type { ShowItemMode, WidgetProps } from '../types'
 
@@ -155,18 +156,6 @@ function mediaURL(value: unknown) {
     return textValue(value.media_url) || textValue(value.url)
   }
   return ''
-}
-
-function isSafeURL(value: string) {
-  if (!value) {
-    return false
-  }
-  try {
-    const url = new URL(value, window.location.origin)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
 }
 
 function markdownText(value: unknown) {

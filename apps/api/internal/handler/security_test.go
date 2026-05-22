@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -197,6 +198,52 @@ func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 	}
 }
 
+func TestReviewerQueueOwnerScopedToOwnTasks(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. JOIN tasks ON tasks.id = submissions.task_id.+tasks.owner_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status"}).
+			AddRow(501, 1, 11, "human_reviewing"))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestReviewSubmissionOwnerCannotReviewOtherTask(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT tasks.id, tasks.owner_id FROM .tasks. JOIN submissions ON submissions.task_id = tasks.id.+submissions.id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).
+			AddRow(1, 99))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/submissions/501/review", map[string]any{
+		"verdict": "approve",
+	}))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // MEDIUM 3 回归:同样的 payload 两次 hash 必须一样(否则会建出重复 item)。
 func TestPayloadHashExternalID_DeterministicSameInput(t *testing.T) {
 	raw := []byte(`{"prompt":"什么是光合作用","model_answer":"植物利用阳光合成有机物"}`)
@@ -252,5 +299,33 @@ func TestRespondItem_TemplateDBErrorReturns500(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSubmitItemRejectsOversizedAnswerBody(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
+			AddRow(1, 1, "published"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
+			AddRow(11, 1, 7, itemStatusClaimed))
+
+	r := newGinWithClaims(claims)
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/items/11/submit", map[string]any{
+		"answer": map[string]any{"blob": strings.Repeat("x", int(maxAnswerJSONBytes)+1)},
+	}))
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
 	}
 }

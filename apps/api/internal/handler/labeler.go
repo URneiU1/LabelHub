@@ -171,13 +171,16 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 		return
 	}
 	var req answerRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "answer is required")
+	if !bindLimitedJSON(c, &req, maxAnswerJSONBytes) {
 		return
 	}
 	answerJSON, err := json.Marshal(req.Answer)
 	if err != nil {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "answer must be valid JSON")
+		return
+	}
+	if int64(len(answerJSON)) > maxAnswerJSONBytes {
+		httpx.Error(c, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "answer is too large")
 		return
 	}
 

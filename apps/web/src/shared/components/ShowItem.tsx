@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { isSafeURL } from '../security/url'
 
 export type RawPayload = Record<string, unknown>
 
@@ -54,14 +55,14 @@ function renderMedia(mediaType: string, mediaURL: string, markdown: string) {
   if (mediaType === 'video' && mediaURL) {
     return (
       <Field label="视频素材">
-        <video controls src={mediaURL} style={mediaStyle} />
+        {isSafeURL(mediaURL) ? <video controls src={mediaURL} style={mediaStyle} /> : <EmptyMedia />}
       </Field>
     )
   }
   if (mediaType === 'image' && mediaURL) {
     return (
       <Field label="图片素材">
-        <img src={mediaURL} alt="任务素材" style={imageStyle} />
+        {isSafeURL(mediaURL) ? <img src={mediaURL} alt="任务素材" style={imageStyle} /> : <EmptyMedia />}
       </Field>
     )
   }
@@ -83,20 +84,20 @@ function renderMarkdown(markdown: string) {
     }
 
     const video = value.match(/<video[^>]*src=["']([^"']+)["'][^>]*>/i)
-    if (video) {
+    if (video && isSafeURL(video[1])) {
       return <video key={index} controls src={video[1]} style={mediaStyle} />
     }
 
     const image = value.match(/!\[([^\]]*)\]\(([^)]+)\)/)
-    if (image) {
+    if (image && isSafeURL(image[2])) {
       return <img key={index} src={image[2]} alt={image[1] || 'markdown 图片'} style={imageStyle} />
     }
 
     const link = value.match(/\[([^\]]+)\]\(([^)]+)\)/)
-    if (link && link[2].endsWith('.mp4')) {
+    if (link && isSafeURL(link[2]) && link[2].endsWith('.mp4')) {
       return <video key={index} controls src={link[2]} style={mediaStyle} />
     }
-    if (link) {
+    if (link && isSafeURL(link[2])) {
       return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>
     }
 
@@ -115,6 +116,10 @@ function renderMarkdown(markdown: string) {
 
 function textValue(value: unknown) {
   return typeof value === 'string' ? value : ''
+}
+
+function EmptyMedia() {
+  return <div style={emptyMediaStyle}>未配置素材</div>
 }
 
 const panelStyle: CSSProperties = {
@@ -163,6 +168,15 @@ const imageStyle: CSSProperties = {
   maxHeight: 360,
   objectFit: 'contain',
   border: '1px solid var(--color-border-light)',
+  background: 'var(--color-bg)',
+}
+
+const emptyMediaStyle: CSSProperties = {
+  minHeight: 96,
+  display: 'grid',
+  placeItems: 'center',
+  color: 'var(--color-text-secondary)',
+  border: '1px dashed var(--color-border)',
   background: 'var(--color-bg)',
 }
 

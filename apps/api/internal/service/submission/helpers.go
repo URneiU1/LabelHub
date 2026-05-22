@@ -41,7 +41,7 @@ func findOrCreateSubmission(db *gorm.DB, tx *gorm.DB, task model.Task, item mode
 	}
 	templateVersion := 1
 	if task.TemplateID != nil {
-		if template, err := currentTemplate(db, task.ID); err == nil {
+		if template, err := templateByID(db, task.ID, *task.TemplateID); err == nil {
 			templateVersion = template.Version
 		}
 	}
@@ -55,9 +55,9 @@ func findOrCreateSubmission(db *gorm.DB, tx *gorm.DB, task model.Task, item mode
 	return submission, tx.Create(&submission).Error
 }
 
-func currentTemplate(db *gorm.DB, taskID uint64) (model.TaskTemplate, error) {
+func templateByID(db *gorm.DB, taskID uint64, templateID uint64) (model.TaskTemplate, error) {
 	var template model.TaskTemplate
-	err := db.Where("task_id = ?", taskID).Order("version DESC").First(&template).Error
+	err := db.Where("id = ? AND task_id = ?", templateID, taskID).First(&template).Error
 	return template, err
 }
 

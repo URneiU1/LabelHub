@@ -38,9 +38,14 @@ func validateTemplateSchema(raw string) []ValidationError {
 		errs = append(errs, ValidationError{Field: "fields", Message: "fields must be non-empty"})
 		return errs
 	}
+	if len(parsed.Fields) > maxTemplateFields {
+		errs = append(errs, ValidationError{Field: "fields", Message: fmt.Sprintf("fields must be <= %d", maxTemplateFields)})
+		return errs
+	}
 	seenNames := make(map[string]int, len(parsed.Fields))
 	for i, f := range parsed.Fields {
 		path := fmt.Sprintf("fields[%d]", i)
+		errs = append(errs, validateTemplateFieldLimits(path, f)...)
 		name, _ := f["name"].(string)
 		if name == "" {
 			errs = append(errs, ValidationError{Field: path + ".name", Message: "name is required"})
@@ -75,6 +80,19 @@ func validateTemplateSchema(raw string) []ValidationError {
 		if hasMin && hasMax && minOK && maxOK && minLen > maxLen {
 			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "min > max"})
 		}
+	}
+	return errs
+}
+
+func validateTemplateFieldLimits(path string, f map[string]any) []ValidationError {
+	var errs []ValidationError
+	for key, raw := range f {
+		if value, ok := raw.(string); ok && len(value) > maxTemplateStringBytes {
+			errs = append(errs, ValidationError{Field: path + "." + key, Message: fmt.Sprintf("%s must be <= %d bytes", key, maxTemplateStringBytes)})
+		}
+	}
+	if options, ok := f["options"].([]any); ok && len(options) > maxTemplateOptions {
+		errs = append(errs, ValidationError{Field: path + ".options", Message: fmt.Sprintf("options must be <= %d", maxTemplateOptions)})
 	}
 	return errs
 }

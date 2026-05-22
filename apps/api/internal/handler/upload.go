@@ -1,21 +1,30 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"labelhub-api/internal/auth"
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/policy"
+	"labelhub-api/internal/statemachine"
 )
 
 const (
@@ -67,14 +76,34 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	mime := file.Header.Get("Content-Type")
-	ext, ok := allowedUploadMIME[mime]
-	if !ok {
-		httpx.ErrorWithDetails(c, http.StatusBadRequest, "VALIDATION_ERROR",
-			"unsupported MIME type", gin.H{"mime": mime, "allowed": allowedMIMEKeys()})
+	var task model.Task
+	if err := h.db.First(&task, taskID).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
 		return
 	}
-	if _, isImage := imageMIMEs[mime]; isImage && file.Size > uploadImageMaxBytes {
+	claims, _ := middleware.Claims(c)
+	allowed, err := h.canUploadToTask(claims, task)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check upload access")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "upload is not allowed for this task")
+		return
+	}
+
+	if file.Size <= 0 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "file must not be empty")
+		return
+	}
+	declaredMIME := normalizeMIME(file.Header.Get("Content-Type"))
+	ext, ok := allowedUploadMIME[declaredMIME]
+	if !ok {
+		httpx.ErrorWithDetails(c, http.StatusBadRequest, "VALIDATION_ERROR",
+			"unsupported MIME type", gin.H{"mime": declaredMIME, "allowed": allowedMIMEKeys()})
+		return
+	}
+	if _, isImage := imageMIMEs[declaredMIME]; isImage && file.Size > uploadImageMaxBytes {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "image must be <= 5MB")
 		return
 	}
@@ -82,8 +111,10 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "file must be <= 10MB")
 		return
 	}
-
-	claims, _ := middleware.Claims(c)
+	if !uploadContentMatches(file, declaredMIME) {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "file content does not match declared MIME type")
+		return
+	}
 	key := storageKey(file.Filename) + ext
 	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
 	dest := filepath.Join(uploadDir, strconv.FormatUint(taskID, 10), key)
@@ -100,7 +131,7 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		TaskID:       taskID,
 		StorageKey:   key,
 		OriginalName: filepath.Base(file.Filename),
-		MimeType:     mime,
+		MimeType:     declaredMIME,
 		SizeBytes:    uint64(file.Size),
 		Status:       "temp",
 		CreatedBy:    claims.UserID,
@@ -111,6 +142,27 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, uploaded)
+}
+
+func (h UploadHandler) canUploadToTask(claims *auth.Claims, task model.Task) (bool, error) {
+	if policy.HasRole(claims, policy.RoleAdmin) || policy.IsTaskOwner(claims, task) {
+		return true, nil
+	}
+	if policy.HasRole(claims, policy.RoleLabeler) {
+		var count int64
+		err := h.db.Model(&model.TaskItem{}).
+			Where("task_id = ? AND claimed_by = ? AND status = ?", task.ID, claims.UserID, itemStatusClaimed).
+			Count(&count).Error
+		return count > 0, err
+	}
+	if policy.HasRole(claims, policy.RoleReviewer) {
+		var count int64
+		err := h.db.Model(&model.Submission{}).
+			Where("task_id = ? AND status = ?", task.ID, statemachine.StateHumanReviewing).
+			Count(&count).Error
+		return count > 0, err
+	}
+	return false, nil
 }
 
 // --- upload-internal helpers(被 s1_test.go 引用,故保留包级符号)---
@@ -128,6 +180,54 @@ func allowedMIMEKeys() []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func normalizeMIME(value string) string {
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	return strings.ToLower(strings.TrimSpace(mediaType))
+}
+
+func uploadContentMatches(file *multipart.FileHeader, declaredMIME string) bool {
+	src, err := file.Open()
+	if err != nil {
+		return false
+	}
+	defer src.Close()
+
+	content, err := io.ReadAll(io.LimitReader(src, uploadMaxBytes+1))
+	if err != nil || int64(len(content)) > uploadMaxBytes {
+		return false
+	}
+	return uploadSampleMatches(declaredMIME, content)
+}
+
+func uploadSampleMatches(declaredMIME string, sample []byte) bool {
+	trimmed := bytes.TrimSpace(sample)
+	if len(trimmed) == 0 {
+		return false
+	}
+	detected := http.DetectContentType(sample)
+	switch declaredMIME {
+	case "image/png", "image/jpeg", "application/pdf":
+		return detected == declaredMIME
+	case "image/webp":
+		return isWebPSample(sample)
+	case "text/plain":
+		return strings.HasPrefix(detected, "text/plain")
+	case "application/json":
+		return json.Valid(trimmed)
+	default:
+		return false
+	}
+}
+
+func isWebPSample(sample []byte) bool {
+	return len(sample) >= 12 &&
+		string(sample[0:4]) == "RIFF" &&
+		string(sample[8:12]) == "WEBP"
 }
 
 func storageKey(name string) string {

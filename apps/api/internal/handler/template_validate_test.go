@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -100,5 +101,29 @@ func TestValidateTemplateSchema(t *testing.T) {
 				t.Errorf("Message %q does not contain %q", errs[0].Message, tc.wantMsg)
 			}
 		})
+	}
+}
+
+func TestValidateTemplateSchemaLimits(t *testing.T) {
+	fields := make([]map[string]any, maxTemplateFields+1)
+	for i := range fields {
+		fields[i] = map[string]any{"name": "f", "widget": "Input"}
+	}
+	raw, _ := json.Marshal(map[string]any{"fields": fields})
+	errs := validateTemplateSchema(string(raw))
+	if len(errs) == 0 || errs[0].Field != "fields" {
+		t.Fatalf("expected fields limit error, got %+v", errs)
+	}
+
+	options := make([]any, maxTemplateOptions+1)
+	for i := range options {
+		options[i] = map[string]any{"label": "A", "value": i}
+	}
+	raw, _ = json.Marshal(map[string]any{"fields": []map[string]any{{
+		"name": "choice", "widget": "Radio", "options": options,
+	}}})
+	errs = validateTemplateSchema(string(raw))
+	if len(errs) == 0 || errs[0].Field != "fields[0].options" {
+		t.Fatalf("expected options limit error, got %+v", errs)
 	}
 }

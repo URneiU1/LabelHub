@@ -177,8 +177,7 @@ func (h TemplateHandler) createTemplateVersion(taskID uint64, createdBy uint64, 
 
 func bindCanonicalTemplateSchema(c *gin.Context, defaultTitle string) ([]byte, bool) {
 	var req templateSchemaRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "fields are required")
+	if !bindLimitedJSON(c, &req, maxTemplateSchemaBytes) {
 		return nil, false
 	}
 	if req.Layout == "" {
@@ -190,6 +189,10 @@ func bindCanonicalTemplateSchema(c *gin.Context, defaultTitle string) ([]byte, b
 	}
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = defaultTitle
+	}
+	if len(req.Title) > maxTemplateStringBytes {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "title is too long")
+		return nil, false
 	}
 	raw, err := json.Marshal(canonicalTemplateSchema{
 		Title:  req.Title,

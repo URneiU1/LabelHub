@@ -11,6 +11,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/policy"
 	"labelhub-api/internal/service/review"
 	"labelhub-api/internal/statemachine"
 )
@@ -46,8 +47,13 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing}})
 		return
 	}
+	claims, _ := middleware.Claims(c)
 	var submissions []model.Submission
-	if err := h.db.Where("status = ?", status).Order("updated_at ASC").Find(&submissions).Error; err != nil {
+	query := h.db.Model(&model.Submission{}).Where("submissions.status = ?", status)
+	if !policy.HasRole(claims, policy.RoleAdmin) && !policy.HasRole(claims, policy.RoleReviewer) {
+		query = query.Joins("JOIN tasks ON tasks.id = submissions.task_id").Where("tasks.owner_id = ?", claims.UserID)
+	}
+	if err := query.Order("submissions.updated_at ASC").Find(&submissions).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review queue")
 		return
 	}
@@ -69,6 +75,9 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 		return
 	}
 	claims, _ := middleware.Claims(c)
+	if !h.enforceCanReviewSubmission(c, submissionID) {
+		return
+	}
 
 	result, err := review.Apply(h.db, review.ApplyInput{
 		SubmissionID: submissionID,
@@ -93,4 +102,35 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 	}
 
 	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status})
+}
+
+func (h ReviewerHandler) enforceCanReviewSubmission(c *gin.Context, submissionID uint64) bool {
+	claims, _ := middleware.Claims(c)
+	if policy.HasRole(claims, policy.RoleAdmin) || policy.HasRole(claims, policy.RoleReviewer) {
+		return true
+	}
+	if !policy.HasRole(claims, policy.RoleOwner) {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "review access denied")
+		return false
+	}
+
+	var task model.Task
+	err := h.db.Table("tasks").
+		Select("tasks.id, tasks.owner_id").
+		Joins("JOIN submissions ON submissions.task_id = tasks.id").
+		Where("submissions.id = ?", submissionID).
+		First(&task).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
+			return false
+		}
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission owner")
+		return false
+	}
+	if policy.IsTaskOwner(claims, task) {
+		return true
+	}
+	httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "submission does not belong to current owner")
+	return false
 }

@@ -32,7 +32,7 @@ func CORS() gin.HandlerFunc {
 func originAllowed(origin string, allowed []string) bool {
 	for _, item := range allowed {
 		item = strings.TrimSpace(item)
-		if item == "*" || item == origin {
+		if item == origin {
 			return true
 		}
 	}
