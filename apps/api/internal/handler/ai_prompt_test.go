@@ -1,0 +1,127 @@
+package handler
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+
+	"labelhub-api/internal/auth"
+)
+
+func TestCreateAIPromptRejectsNonOwner(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 99, "Task", "draft"))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner2", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-prompts", validAIPromptBody()))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestCreateAIPromptBumpsVersionAndUpdatesTaskPromptID(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectQuery(`(?is)^SELECT COALESCE.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"COALESCE(MAX(version),0)"}).AddRow(2))
+	mock.ExpectExec(`(?is)^INSERT INTO .ai_prompt_configs.`).
+		WillReturnResult(sqlmock.NewResult(33, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .ai_prompt_id.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-prompts", validAIPromptBody()))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	prompt := data["prompt"].(map[string]any)
+	if prompt["id"] != float64(33) {
+		t.Fatalf("created id = %v, want 33", prompt["id"])
+	}
+	if prompt["version"] != float64(3) {
+		t.Fatalf("version = %v, want 3", prompt["version"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestAIPromptDryRunUsesMockProviderWithoutMutatingSubmissionState(t *testing.T) {
+	t.Setenv("LLM_PROVIDER", "mock")
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model", "created_by"}).
+			AddRow(33, 1, 3, "review {{answer.summary}}", `[{"name":"相关性"}]`, 80, 60, "mock-model", 7))
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
+		WillReturnResult(sqlmock.NewResult(44, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-prompts/33/dry-run", map[string]any{
+		"payload": map[string]any{"prompt": "question"},
+		"answer":  map[string]any{"summary": "ok"},
+	}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if data["provider"] != "mock" {
+		t.Fatalf("provider = %v, want mock", data["provider"])
+	}
+	result := data["result"].(map[string]any)
+	if result["verdict"] == "" || result["overall_score"] == nil {
+		t.Fatalf("missing structured result: %v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func validAIPromptBody() map[string]any {
+	return map[string]any{
+		"prompt_template": "请根据 {{payload.prompt}} 和 {{answer.summary}} 预审。",
+		"dimensions": []map[string]any{
+			{"name": "相关性", "description": "是否相关", "weight": 1},
+		},
+		"pass_threshold": 80,
+		"uncertain_min":  60,
+		"model":          "mock-model",
+	}
+}

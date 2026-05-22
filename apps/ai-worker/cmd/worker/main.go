@@ -35,7 +35,11 @@ func main() {
 		asynq.Config{Concurrency: 2},
 	)
 
-	handlers := workerHandlers{logger: logger, db: database, evaluator: deterministicEvaluator{}}
+	evaluator, err := newEvaluatorFromEnv()
+	if err != nil {
+		logger.Fatal("configure llm provider", zap.Error(err))
+	}
+	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("ai:review", handlers.handleAIReview)
 	mux.HandleFunc("noop:ping", handlers.handleNoop)

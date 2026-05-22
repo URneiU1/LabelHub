@@ -7,7 +7,10 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/hibiken/asynq v0.26.0
 	go.uber.org/zap v1.28.0
+	labelhub.local/llmreview v0.0.0
 )
+
+replace labelhub.local/llmreview => ../../pkg/llmreview
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

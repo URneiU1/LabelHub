@@ -15,4 +15,5 @@ func registerAllHandlers(r gin.IRouter, db *gorm.DB) {
 	NewLLMHandler().Register(r)
 	NewExportHandler(db).Register(r)
 	NewTemplateHandler(db).Register(r)
+	NewAIPromptHandler(db).Register(r)
 }

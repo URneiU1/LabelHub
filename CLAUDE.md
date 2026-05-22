@@ -10,12 +10,12 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: P1/P2 edge hardening is implemented and verified. FileUpload can reuse an already attached file when a revising submission is resubmitted, but only if that file belongs to the same task/user/submission history. AI worker duplicate replay now no-ops after finalized reviews, failover cannot mark succeeded reviews dead, and the API process has an AI review sweeper for stuck pending/running reviews.
-- Current focus: continue S2 Designer buildout, then S3 AI product layer.
-- Next priority: Designer append/delete/simple property editing, followed by Owner AI Prompt/golden dry-run UI and real LLM provider integration.
+- Latest completed work: S3 AI product layer part1 is implemented and verified. The worker now supports OpenAI-compatible Function Calling with strict Go-side validation and token/latency/raw_response recording, while keeping deterministic/mock fallback. Owner can create versioned AI prompts and run scoped dry-runs without mutating formal submission state.
+- Current focus: continue S2 Designer buildout and the remaining S3 product surface.
+- Next priority: Designer append/delete/simple property editing, followed by task-level AI enable controls, golden sample management, and Reviewer AI verdict/score display.
 
 ## Known Follow-Ups
 
-- AI queue/failover/sweeper is closed, but worker still uses deterministic evaluator; add real Doubao/OpenAI-compatible provider and Function Calling validation before claiming S3 complete.
+- AI queue/failover/provider is closed for the first S3 slice, but S3 is not product-complete until prompt enable controls, golden sample management, and Reviewer AI verdict display are added.
 - Add FileUpload download/preview authorization and orphan temp-file cleanup.
 - Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

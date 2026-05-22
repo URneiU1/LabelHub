@@ -13,7 +13,10 @@ require (
 	golang.org/x/crypto v0.48.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
+	labelhub.local/llmreview v0.0.0
 )
+
+replace labelhub.local/llmreview => ../../pkg/llmreview
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

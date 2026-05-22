@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"time"
 
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
+	"labelhub.local/llmreview"
 )
 
 func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error {
@@ -33,7 +33,7 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 
 	reviewCtx, cancel := context.WithTimeout(ctx, aiReviewTimeout())
 	defer cancel()
-	answer, err := h.loadRevisionAnswer(reviewCtx, payload.RevisionID)
+	input, err := h.loadReviewInput(reviewCtx, payload)
 	if err != nil {
 		if shouldFailover(ctx) {
 			if failErr := h.failover(ctx, payload, err); failErr != nil {
@@ -44,7 +44,7 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 		_ = h.markFailed(ctx, payload, err)
 		return err
 	}
-	result, err := h.evaluator.Evaluate(reviewCtx, payload, answer)
+	result, err := h.evaluator.Evaluate(reviewCtx, payload, input)
 	if err != nil {
 		if shouldFailover(ctx) {
 			if failErr := h.failover(ctx, payload, err); failErr != nil {
@@ -76,48 +76,82 @@ type aiReviewPayload struct {
 }
 
 type aiEvaluation struct {
-	Verdict     string
-	Score       float64
-	Reason      string
-	Dimensions  string
-	RawResponse string
-	LatencyMS   int
+	Verdict      string
+	Score        float64
+	Reason       string
+	Dimensions   string
+	RawResponse  string
+	TokensInput  int
+	TokensOutput int
+	LatencyMS    int
+}
+
+type aiReviewInput struct {
+	Prompt              llmreview.PromptConfig
+	AnswerJSON          string
+	PayloadJSON         string
+	BaselineDescription string
 }
 
 type aiEvaluator interface {
-	Evaluate(ctx context.Context, payload aiReviewPayload, answer string) (aiEvaluation, error)
+	Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error)
 }
 
 type deterministicEvaluator struct{}
 
-func (deterministicEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, answer string) (aiEvaluation, error) {
-	if os.Getenv("AI_WORKER_FORCE_FAIL") == "1" {
+func (deterministicEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
+	if envOrDefault("AI_WORKER_FORCE_FAIL", "") == "1" {
 		return aiEvaluation{}, errors.New("forced ai worker failure")
 	}
-	start := time.Now()
-	select {
-	case <-ctx.Done():
-		return aiEvaluation{}, ctx.Err()
-	default:
+	return evaluateWithProvider(ctx, llmreview.MockProvider{}, payload, input)
+}
+
+type providerEvaluator struct {
+	provider llmreview.Provider
+}
+
+func (e providerEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
+	return evaluateWithProvider(ctx, e.provider, payload, input)
+}
+
+func newEvaluatorFromEnv() (aiEvaluator, error) {
+	provider, cfg, err := llmreview.NewProviderFromEnv(nil)
+	if err != nil {
+		return nil, err
 	}
-	score := 75.0
-	verdict := "uncertain"
-	if len(answer) <= 2 {
-		score = 50
+	if cfg.Provider == "mock" || cfg.Provider == "deterministic" {
+		return deterministicEvaluator{}, nil
 	}
-	dimensions := `[{"name":"结构完整性","score":75,"reason":"deterministic precheck completed; route to human review for final decision"}]`
-	raw, _ := json.Marshal(map[string]any{
-		"mode":             "deterministic",
-		"prompt_config_id": payload.PromptConfigID,
-		"prompt_version":   payload.PromptVersion,
+	return providerEvaluator{provider: provider}, nil
+}
+
+func evaluateWithProvider(ctx context.Context, provider llmreview.Provider, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
+	result, err := provider.Evaluate(ctx, input.Prompt, llmreview.EvaluationInput{
+		SubmissionID:        payload.SubmissionID,
+		RevisionID:          payload.RevisionID,
+		PromptConfigID:      payload.PromptConfigID,
+		PromptVersion:       payload.PromptVersion,
+		IdempotencyKey:      payload.IdempotencyKey,
+		PayloadJSON:         input.PayloadJSON,
+		AnswerJSON:          input.AnswerJSON,
+		BaselineDescription: input.BaselineDescription,
 	})
+	if err != nil {
+		return aiEvaluation{}, err
+	}
+	dimensions, err := json.Marshal(result.Dimensions)
+	if err != nil {
+		return aiEvaluation{}, err
+	}
 	return aiEvaluation{
-		Verdict:     verdict,
-		Score:       score,
-		Reason:      "AI precheck completed; human review required for final verdict.",
-		Dimensions:  dimensions,
-		RawResponse: string(raw),
-		LatencyMS:   int(time.Since(start).Milliseconds()),
+		Verdict:      result.Verdict,
+		Score:        result.OverallScore,
+		Reason:       result.Reason,
+		Dimensions:   string(dimensions),
+		RawResponse:  result.RawResponse,
+		TokensInput:  result.TokensInput,
+		TokensOutput: result.TokensOutput,
+		LatencyMS:    result.LatencyMS,
 	}, nil
 }
 
@@ -155,10 +189,39 @@ func (h workerHandlers) markFailed(ctx context.Context, payload aiReviewPayload,
 	return err
 }
 
-func (h workerHandlers) loadRevisionAnswer(ctx context.Context, revisionID uint64) (string, error) {
-	var answer string
-	err := h.db.QueryRowContext(ctx, `SELECT answer FROM submission_revisions WHERE id = ?`, revisionID).Scan(&answer)
-	return answer, err
+func (h workerHandlers) loadReviewInput(ctx context.Context, payload aiReviewPayload) (aiReviewInput, error) {
+	var input aiReviewInput
+	var dimensionsRaw string
+	err := h.db.QueryRowContext(ctx, `
+SELECT sr.answer, ti.payload, COALESCE(t.baseline_description,''), cfg.prompt_template, cfg.dimensions, cfg.pass_threshold, cfg.uncertain_min, cfg.model
+FROM submission_revisions sr
+JOIN submissions s ON s.id = sr.submission_id
+JOIN task_items ti ON ti.id = s.item_id
+JOIN tasks t ON t.id = s.task_id
+JOIN ai_prompt_configs cfg ON cfg.id = ? AND cfg.task_id = t.id AND cfg.version = ?
+WHERE sr.id = ? AND sr.submission_id = ?`,
+		payload.PromptConfigID, payload.PromptVersion, payload.RevisionID, payload.SubmissionID,
+	).Scan(
+		&input.AnswerJSON,
+		&input.PayloadJSON,
+		&input.BaselineDescription,
+		&input.Prompt.PromptTemplate,
+		&dimensionsRaw,
+		&input.Prompt.PassThreshold,
+		&input.Prompt.UncertainMin,
+		&input.Prompt.Model,
+	)
+	if err != nil {
+		return aiReviewInput{}, err
+	}
+	dimensions, err := llmreview.ParseDimensions(dimensionsRaw)
+	if err != nil {
+		return aiReviewInput{}, err
+	}
+	input.Prompt.ID = payload.PromptConfigID
+	input.Prompt.Version = payload.PromptVersion
+	input.Prompt.Dimensions = dimensions
+	return input, nil
 }
 
 func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, result aiEvaluation) error {
@@ -168,6 +231,13 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 	defer rollbackUnlessCommitted(tx)
 
+	reviewStatus, err := lockedAIReviewStatus(ctx, tx, payload.IdempotencyKey)
+	if err != nil {
+		return err
+	}
+	if !canFinalizeAIReview(reviewStatus) {
+		return tx.Commit()
+	}
 	status, currentRevisionID, err := lockedSubmissionState(ctx, tx, payload.SubmissionID)
 	if err != nil {
 		return err
@@ -177,11 +247,15 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, latency_ms = ?, finished_at = ? WHERE idempotency_key = ?`,
-		result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.LatencyMS, now, payload.IdempotencyKey,
-	); err != nil {
+	reviewRes, err := tx.ExecContext(ctx,
+		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, finished_at = ? WHERE idempotency_key = ? AND status IN ('pending','running','failed')`,
+		result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey,
+	)
+	if err != nil {
 		return err
+	}
+	if rows, _ := reviewRes.RowsAffected(); rows != 1 {
+		return errors.New("ai review completion lost review update race")
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE submissions SET status = 'human_reviewing', ai_verdict = ?, ai_score = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`,
@@ -210,16 +284,27 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	defer rollbackUnlessCommitted(tx)
 
+	reviewStatus, err := lockedAIReviewStatus(ctx, tx, payload.IdempotencyKey)
+	if err != nil {
+		return err
+	}
+	if !canFinalizeAIReview(reviewStatus) {
+		return tx.Commit()
+	}
 	status, currentRevisionID, err := lockedSubmissionState(ctx, tx, payload.SubmissionID)
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx,
+	deadRes, err := tx.ExecContext(ctx,
 		`UPDATE ai_reviews SET status = 'dead', error_msg = ?, finished_at = ? WHERE idempotency_key = ? AND status IN ('pending','running','failed')`,
 		cause.Error(), now, payload.IdempotencyKey,
-	); err != nil {
+	)
+	if err != nil {
 		return err
+	}
+	if rows, _ := deadRes.RowsAffected(); rows != 1 {
+		return tx.Commit()
 	}
 	if status != "ai_reviewing" || !currentRevisionID.Valid || uint64(currentRevisionID.Int64) != payload.RevisionID {
 		return tx.Commit()
@@ -247,6 +332,24 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 		zap.Error(cause),
 	)
 	return tx.Commit()
+}
+
+func lockedAIReviewStatus(ctx context.Context, tx *sql.Tx, idempotencyKey string) (string, error) {
+	var status string
+	err := tx.QueryRowContext(ctx,
+		`SELECT status FROM ai_reviews WHERE idempotency_key = ? FOR UPDATE`,
+		idempotencyKey,
+	).Scan(&status)
+	return status, err
+}
+
+func canFinalizeAIReview(status string) bool {
+	switch status {
+	case "pending", "running", "failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func lockedSubmissionState(ctx context.Context, tx *sql.Tx, submissionID uint64) (string, sql.NullInt64, error) {

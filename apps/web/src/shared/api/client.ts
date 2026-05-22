@@ -100,6 +100,8 @@ export type Task = {
   status: string
   totalItems: number
   finishedItems: number
+  aiPromptId?: number | null
+  aiReviewEnabled?: boolean
 }
 
 export type TaskItem = {

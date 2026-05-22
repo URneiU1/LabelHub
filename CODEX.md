@@ -24,11 +24,12 @@ After every code-writing turn:
 - P1 safety defaults now recheck labeler item ownership inside the submission service transaction and make AI review disabled by default at schema/model/migration level.
 - P1/P2 closeout is in place: FileUpload submit attaches uploaded files to the revision; Go/TS schema validators are aligned; Labeler/Reviewer page tests cover schema runtime; AI submit writes pending `ai_reviews` and `ai:review` outbox; API publisher and worker consume/failover path move AI-reviewed submissions to `human_reviewing`.
 - P1/P2 edge hardening is in place: revising submissions may reuse attached FileUpload keys from the same submission history; AI worker finalized duplicate tasks no-op instead of replaying; API-side AI sweeper moves stale pending/running reviews out of `ai_reviewing`.
+- S3 AI product layer part1 is in place: shared `llmreview` provides mock + OpenAI-compatible Function Calling, worker records structured verdict/score/dimensions/reason with token/latency/raw_response metadata, and Owner can version AI prompts plus run scoped dry-runs.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Add real Doubao/OpenAI-compatible LLM provider, Function Calling schema validation, golden dry-run flow, and Reviewer AI verdict display before marking S3 complete.
+- Add task-level AI review enable/disable controls, golden sample management, and Reviewer AI verdict display before marking S3 complete.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.
