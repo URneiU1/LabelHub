@@ -5,7 +5,6 @@ package handler
 // Phase 4 把剩余 jsonx / hasRole / parseIDParam 等散到对应包,删掉本文件。
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -133,30 +132,6 @@ func hasRole(roles []string, target string) bool {
 	return false
 }
 
-func createAuditLog(tx *gorm.DB, entityType string, entityID uint64, from string, to string, actorType string, actorID *uint64, event string, payload map[string]any) error {
-	var payloadValue *string
-	if payload != nil {
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		value := string(raw)
-		payloadValue = &value
-	}
-
-	audit := model.AuditLog{
-		EntityType: entityType,
-		EntityID:   entityID,
-		FromState:  nullString(from),
-		ToState:    to,
-		ActorType:  actorType,
-		ActorID:    actorID,
-		Event:      event,
-		Payload:    payloadValue,
-	}
-	return tx.Create(&audit).Error
-}
-
 func mustJSON(raw string) any {
 	var value any
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
@@ -197,14 +172,8 @@ func unwrapJSONPointer(raw *string) any {
 	return mustJSON(*raw)
 }
 
-func nextRevisionNo(tx *gorm.DB, submissionID uint64) (int, error) {
-	var maxRevision sql.NullInt64
-	if err := tx.Model(&model.SubmissionRevision{}).Where("submission_id = ?", submissionID).Select("MAX(revision_no)").Scan(&maxRevision).Error; err != nil {
-		return 0, err
-	}
-	return nextRevisionFromMax(maxRevision.Valid, maxRevision.Int64), nil
-}
-
+// nextRevisionFromMax 兼容垫片:s1_test.go 单测此契约,Phase 4 把测试搬到 service/submission
+// 后删本垫片。生产路径已不走这里,改由 submission.Save 内部调 service 包私有同名函数。
 func nextRevisionFromMax(valid bool, max int64) int {
 	if !valid {
 		return 1

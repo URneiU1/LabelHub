@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/policy"
-	"labelhub-api/internal/statemachine"
+	"labelhub-api/internal/service/submission"
 )
 
 // LabelerHandler 封装 labeler 角色端点:任务广场、领单、作答(draft / submit)、我的提交。
@@ -182,123 +181,32 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 		return
 	}
 
-	var response model.Submission
-	err = h.db.Transaction(func(tx *gorm.DB) error {
-		submission, err := h.findOrCreateSubmission(tx, task, item, claims.UserID)
-		if err != nil {
-			return err
-		}
-		from := submission.Status
-
-		revisionNo, err := nextRevisionNo(tx, submission.ID)
-		if err != nil {
-			return err
-		}
-		revision := model.SubmissionRevision{
-			SubmissionID: submission.ID,
-			RevisionNo:   revisionNo,
-			Answer:       string(answerJSON),
-			Draft:        draft,
-			CreatedBy:    claims.UserID,
-		}
-		if err := tx.Create(&revision).Error; err != nil {
-			return err
-		}
-
-		to := from
-		submitEvent := ""
-		dispatchEvent := ""
-		updates := map[string]any{"current_revision_id": revision.ID}
-		if !draft {
-			if from != statemachine.StateDraft && from != statemachine.StateRevising {
-				return errors.New("submission cannot be submitted from " + from)
-			}
-			if err := statemachine.Apply(from, statemachine.EventSubmit, statemachine.StateSubmitted); err != nil {
-				return err
-			}
-			submitEvent = statemachine.EventSubmit
-			to = statemachine.StateSubmitted
-			if task.AIReviewEnabled {
-				to = statemachine.StateAIReviewing
-				dispatchEvent = statemachine.EventEnqueue
-			} else {
-				to = statemachine.StateHumanReviewing
-				dispatchEvent = statemachine.EventSkipAI
-			}
-			if err := statemachine.Apply(statemachine.StateSubmitted, dispatchEvent, to); err != nil {
-				return err
-			}
-			for key, value := range resubmitClearedFields(to, time.Now().UTC()) {
-				updates[key] = value
-			}
-		} else if from != statemachine.StateDraft {
-			return errors.New("draft can only be saved before first submit")
-		}
-		if draft && from == statemachine.StateDraft {
-			if err := statemachine.Apply(from, statemachine.EventSave, statemachine.StateDraft); err != nil {
-				return err
-			}
-		}
-
-		if err := tx.Model(&model.Submission{}).Where("id = ?", submission.ID).Updates(updates).Error; err != nil {
-			return err
-		}
-		if task.AIReviewEnabled && !draft {
-			outbox := model.OutboxEvent{Topic: "ai.review.requested", Payload: fmt.Sprintf(`{"submission_id":%d,"revision_id":%d}`, submission.ID, revision.ID), Status: "pending"}
-			if err := tx.Create(&outbox).Error; err != nil {
-				return err
-			}
-		}
-		if !draft {
-			if err := createAuditLog(tx, "submission", submission.ID, from, statemachine.StateSubmitted, "user", &claims.UserID, submitEvent, nil); err != nil {
-				return err
-			}
-			if err := createAuditLog(tx, "submission", submission.ID, statemachine.StateSubmitted, to, "user", &claims.UserID, dispatchEvent, nil); err != nil {
-				return err
-			}
-		}
-		return tx.First(&response, submission.ID).Error
+	response, err := submission.Save(h.db, submission.SaveInput{
+		Task:      task,
+		Item:      item,
+		AnswerRaw: answerJSON,
+		UserID:    claims.UserID,
+		Draft:     draft,
 	})
 	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save answer")
+		switch {
+		case errors.Is(err, submission.ErrInvalidSubmit):
+			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
+		case errors.Is(err, submission.ErrDraftAfterSubmit):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", err.Error())
+		case errors.Is(err, submission.ErrInvalidTransition):
+			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
+		default:
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save answer")
+		}
 		return
 	}
 	httpx.OK(c, response)
 }
 
-func (h LabelerHandler) findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, labelerID uint64) (model.Submission, error) {
-	var submission model.Submission
-	err := tx.Where("item_id = ?", item.ID).First(&submission).Error
-	if err == nil {
-		return submission, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return model.Submission{}, err
-	}
-	templateVersion := 1
-	if task.TemplateID != nil {
-		// 历史实现:此查询走 h.db 而非传入的 tx,Phase 2 严格保持原行为不动。
-		// Phase 3 抽 service 层时再统一 tx vs db 的语义。
-		if template, err := currentTemplate(h.db, task.ID); err == nil {
-			templateVersion = template.Version
-		}
-	}
-	submission = model.Submission{
-		TaskID:          task.ID,
-		ItemID:          item.ID,
-		TemplateVersion: templateVersion,
-		LabelerID:       labelerID,
-		Status:          statemachine.StateDraft,
-	}
-	return submission, tx.Create(&submission).Error
-}
-
+// resubmitClearedFields / nextRevisionFromMax 在 s1_test.go 还有契约单测引用,
+// Phase 4 把这些测试搬到 service/submission 后会一并删本文件里的兼容垫片。
+// 这里转调 service 包,确保两边语义一致(单一来源)。
 func resubmitClearedFields(to string, now time.Time) map[string]any {
-	return map[string]any{
-		"status":        to,
-		"submitted_at":  now,
-		"ai_verdict":    nil,
-		"ai_score":      nil,
-		"human_verdict": nil,
-	}
+	return submission.ResubmitClearedFields(to, now)
 }

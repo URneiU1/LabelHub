@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/service/review"
 	"labelhub-api/internal/statemachine"
 )
 
@@ -63,86 +65,43 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "verdict is required")
 		return
 	}
-	event, to, humanVerdict, ok := reviewDecision(req.Verdict)
-	if !ok {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "verdict must be approve, reject, or revise")
-		return
-	}
 	if (req.Verdict == "reject" || req.Verdict == "revise") && len(strings.TrimSpace(req.Reason)) < 5 {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "reject/revise 必填详细理由(至少 5 个字符)")
 		return
 	}
 	claims, _ := middleware.Claims(c)
 
-	var submission model.Submission
-	if err := h.db.First(&submission, submissionID).Error; err != nil {
-		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
-		return
-	}
-	if err := statemachine.Apply(submission.Status, event, to); err != nil {
-		httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
-		return
-	}
-	if submission.CurrentRevisionID == nil {
-		httpx.Error(c, http.StatusConflict, "CONFLICT", "submission has no revision")
-		return
-	}
-
-	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		review := model.HumanReview{
-			SubmissionID: submission.ID,
-			RevisionID:   *submission.CurrentRevisionID,
-			ReviewerID:   claims.UserID,
-			Stage:        "first",
-			Verdict:      humanVerdict,
-			Reason:       nullString(req.Reason),
+	result, err := review.Apply(h.db, review.ApplyInput{
+		SubmissionID: submissionID,
+		Verdict:      req.Verdict,
+		Reason:       req.Reason,
+		ReviewerID:   claims.UserID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, review.ErrInvalidVerdict):
+			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "verdict must be approve, reject, or revise")
+		case errors.Is(err, review.ErrSubmissionNotFound):
+			httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
+		case errors.Is(err, review.ErrInvalidTransition):
+			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
+		case errors.Is(err, review.ErrNoRevision):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission has no revision")
+		default:
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to review submission")
 		}
-		if err := tx.Create(&review).Error; err != nil {
-			return err
-		}
-		updates := reviewUpdates(to, humanVerdict, time.Now().UTC())
-		if err := tx.Model(&model.Submission{}).Where("id = ?", submission.ID).Updates(updates).Error; err != nil {
-			return err
-		}
-		if to == statemachine.StateApproved || to == statemachine.StateRejected {
-			if err := tx.Model(&model.TaskItem{}).Where("id = ?", submission.ItemID).Updates(map[string]any{
-				"status":      itemStatusFinished,
-				"finished_at": time.Now().UTC(),
-			}).Error; err != nil {
-				return err
-			}
-			if to == statemachine.StateApproved {
-				if err := tx.Model(&model.Task{}).Where("id = ?", submission.TaskID).Update("finished_items", gorm.Expr("finished_items + 1")).Error; err != nil {
-					return err
-				}
-			}
-		}
-		return createAuditLog(tx, "submission", submission.ID, submission.Status, to, "user", &claims.UserID, event, map[string]any{"reason": req.Reason})
-	}); err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to review submission")
 		return
 	}
 
-	httpx.OK(c, gin.H{"submission_id": submission.ID, "status": to})
+	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status})
 }
 
+// reviewUpdates / reviewDecision 兼容垫片:s1_test.go 还测原契约,Phase 4 把测试搬走后删。
+// 单一来源在 service/review,这里只转调。
 func reviewUpdates(to string, humanVerdict string, now time.Time) map[string]any {
-	updates := map[string]any{"status": to, "human_verdict": humanVerdict}
-	if to == statemachine.StateApproved {
-		updates["approved_at"] = now
-	}
-	return updates
+	return review.UpdatesFor(to, humanVerdict, now)
 }
 
 func reviewDecision(verdict string) (event string, to string, humanVerdict string, ok bool) {
-	switch verdict {
-	case "approve":
-		return statemachine.EventApprove, statemachine.StateApproved, "approve", true
-	case "reject":
-		return statemachine.EventReject, statemachine.StateRejected, "reject", true
-	case "revise":
-		return statemachine.EventRevise, statemachine.StateRevising, "revise", true
-	default:
-		return "", "", "", false
-	}
+	return review.Decode(verdict)
 }
