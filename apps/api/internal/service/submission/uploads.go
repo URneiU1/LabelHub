@@ -43,24 +43,44 @@ func attachUploadedFiles(tx *gorm.DB, task model.Task, sub model.Submission, rev
 			}
 			return err
 		}
-		if file.TaskID != task.ID || file.CreatedBy != userID || file.Status != uploadedFileStatusTemp {
+		if file.TaskID != task.ID || file.CreatedBy != userID {
 			return ErrInvalidUploadedFile
 		}
-		res := tx.Model(&model.UploadedFile{}).
-			Where("id = ? AND status = ?", file.ID, uploadedFileStatusTemp).
-			Updates(map[string]any{
-				"submission_revision_id": revision.ID,
-				"status":                 uploadedFileStatusAttached,
-				"attached_at":            NowUTC(),
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 1 {
+		switch file.Status {
+		case uploadedFileStatusTemp:
+			res := tx.Model(&model.UploadedFile{}).
+				Where("id = ? AND status = ?", file.ID, uploadedFileStatusTemp).
+				Updates(map[string]any{
+					"submission_revision_id": revision.ID,
+					"status":                 uploadedFileStatusAttached,
+					"attached_at":            NowUTC(),
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return ErrInvalidUploadedFile
+			}
+		case uploadedFileStatusAttached:
+			if !attachedToSubmissionHistory(tx, file, sub.ID) {
+				return ErrInvalidUploadedFile
+			}
+		default:
 			return ErrInvalidUploadedFile
 		}
 	}
 	return nil
+}
+
+func attachedToSubmissionHistory(tx *gorm.DB, file model.UploadedFile, submissionID uint64) bool {
+	if file.SubmissionRevisionID == nil {
+		return false
+	}
+	var revision model.SubmissionRevision
+	err := tx.Select("id").
+		Where("id = ? AND submission_id = ?", *file.SubmissionRevisionID, submissionID).
+		First(&revision).Error
+	return err == nil
 }
 
 func uploadedFileKeys(tx *gorm.DB, taskID uint64, templateVersion int, answerRaw []byte) ([]string, error) {

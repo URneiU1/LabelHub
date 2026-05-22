@@ -23,6 +23,7 @@ After every code-writing turn:
 - Phase 2 runtime wiring now renders Labeler Plaza and Reviewer Queue from historical template schema, with real RichText/JSONEditor/FileUpload/LLMTrigger widgets and preserved `export_fields`/`x-*` schema metadata.
 - P1 safety defaults now recheck labeler item ownership inside the submission service transaction and make AI review disabled by default at schema/model/migration level.
 - P1/P2 closeout is in place: FileUpload submit attaches uploaded files to the revision; Go/TS schema validators are aligned; Labeler/Reviewer page tests cover schema runtime; AI submit writes pending `ai_reviews` and `ai:review` outbox; API publisher and worker consume/failover path move AI-reviewed submissions to `human_reviewing`.
+- P1/P2 edge hardening is in place: revising submissions may reuse attached FileUpload keys from the same submission history; AI worker finalized duplicate tasks no-op instead of replaying; API-side AI sweeper moves stale pending/running reviews out of `ai_reviewing`.
 
 ## Next Work
 

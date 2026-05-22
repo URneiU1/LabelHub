@@ -109,3 +109,71 @@ func TestAttachUploadedFilesRejectsOtherOwnerAndCrossTask(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachUploadedFilesAllowsAttachedFileFromSameSubmissionHistory(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	key := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	oldRevisionID := uint64(801)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 2, `{"fields":[{"name":"evidence","widget":"FileUpload"}]}`))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by", "submission_revision_id"}).
+			AddRow(301, 1, key, "attached", 7, oldRevisionID))
+	mock.ExpectQuery(`(?is)^SELECT .id. FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(oldRevisionID))
+	mock.ExpectCommit()
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return attachUploadedFiles(tx,
+			model.Task{ID: 1},
+			model.Submission{ID: 42, TaskID: 1, TemplateVersion: 2},
+			model.SubmissionRevision{ID: 901, SubmissionID: 42},
+			[]byte(`{"evidence":["`+key+`"]}`),
+			7,
+		)
+	})
+	if err != nil {
+		t.Fatalf("attached file from same submission history should be reusable, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestAttachUploadedFilesRejectsAttachedFileFromOtherSubmission(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	key := "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	oldRevisionID := uint64(801)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 2, `{"fields":[{"name":"evidence","widget":"FileUpload"}]}`))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by", "submission_revision_id"}).
+			AddRow(301, 1, key, "attached", 7, oldRevisionID))
+	mock.ExpectQuery(`(?is)^SELECT .id. FROM .submission_revisions.`).
+		WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectRollback()
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return attachUploadedFiles(tx,
+			model.Task{ID: 1},
+			model.Submission{ID: 42, TaskID: 1, TemplateVersion: 2},
+			model.SubmissionRevision{ID: 901, SubmissionID: 42},
+			[]byte(`{"evidence":["`+key+`"]}`),
+			7,
+		)
+	})
+	if !errors.Is(err, ErrInvalidUploadedFile) {
+		t.Fatalf("expected ErrInvalidUploadedFile, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}

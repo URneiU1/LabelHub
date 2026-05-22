@@ -18,8 +18,17 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 		h.logger.Warn("invalid ai review payload", zap.Error(err), zap.ByteString("payload", t.Payload()))
 		return nil
 	}
-	if err := h.markRunning(ctx, payload); err != nil {
+	claimed, err := h.markRunning(ctx, payload)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		h.logger.Info("ai review task already finalized or claimed elsewhere",
+			zap.Uint64("submission_id", payload.SubmissionID),
+			zap.Uint64("revision_id", payload.RevisionID),
+			zap.String("idempotency_key", payload.IdempotencyKey),
+		)
+		return nil
 	}
 
 	reviewCtx, cancel := context.WithTimeout(ctx, aiReviewTimeout())
@@ -123,12 +132,19 @@ func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
 	return payload, nil
 }
 
-func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload) error {
-	_, err := h.db.ExecContext(ctx,
+func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload) (bool, error) {
+	res, err := h.db.ExecContext(ctx,
 		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1 WHERE idempotency_key = ? AND status IN ('pending','failed')`,
 		payload.IdempotencyKey,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 func (h workerHandlers) markFailed(ctx context.Context, payload aiReviewPayload, cause error) error {
@@ -200,7 +216,7 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'dead', error_msg = ?, finished_at = ? WHERE idempotency_key = ?`,
+		`UPDATE ai_reviews SET status = 'dead', error_msg = ?, finished_at = ? WHERE idempotency_key = ? AND status IN ('pending','running','failed')`,
 		cause.Error(), now, payload.IdempotencyKey,
 	); err != nil {
 		return err

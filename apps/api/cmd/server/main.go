@@ -19,6 +19,7 @@ import (
 	"labelhub-api/internal/db"
 	"labelhub-api/internal/handler"
 	"labelhub-api/internal/middleware"
+	"labelhub-api/internal/service/aireview"
 	"labelhub-api/internal/service/outbox"
 )
 
@@ -39,6 +40,7 @@ func main() {
 	outboxCtx, stopOutbox := context.WithCancel(context.Background())
 	defer stopOutbox()
 	startOutboxPublisher(outboxCtx, database, logger)
+	startAIReviewSweeper(outboxCtx, database, logger)
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -127,6 +129,40 @@ func outboxInterval() time.Duration {
 
 func outboxBatch() int {
 	batch, err := strconv.Atoi(envOrDefault("OUTBOX_BATCH", "20"))
+	if err != nil || batch <= 0 {
+		return 20
+	}
+	return batch
+}
+
+func startAIReviewSweeper(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
+	if envOrDefault("AI_REVIEW_SWEEPER_ENABLED", "true") == "false" {
+		logger.Info("ai review sweeper disabled")
+		return
+	}
+	sweeper := aireview.NewSweeper(database, logger, aiReviewSweeperInterval(), aiReviewStallTimeout(), aiReviewSweeperBatch())
+	go sweeper.Run(ctx)
+	logger.Info("ai review sweeper started", zap.Duration("timeout", aiReviewStallTimeout()))
+}
+
+func aiReviewSweeperInterval() time.Duration {
+	ms, err := strconv.Atoi(envOrDefault("AI_REVIEW_SWEEPER_INTERVAL_MS", "60000"))
+	if err != nil || ms <= 0 {
+		return time.Minute
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func aiReviewStallTimeout() time.Duration {
+	ms, err := strconv.Atoi(envOrDefault("AI_REVIEW_STALL_TIMEOUT_MS", "300000"))
+	if err != nil || ms <= 0 {
+		return 5 * time.Minute
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func aiReviewSweeperBatch() int {
+	batch, err := strconv.Atoi(envOrDefault("AI_REVIEW_SWEEPER_BATCH", "20"))
 	if err != nil || batch <= 0 {
 		return 20
 	}

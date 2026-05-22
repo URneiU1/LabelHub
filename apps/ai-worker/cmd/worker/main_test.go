@@ -54,6 +54,66 @@ func TestFailoverMovesAIReviewingSubmissionToHumanReview(t *testing.T) {
 	}
 }
 
+func TestMarkRunningReturnsFalseForFinalizedDuplicateTask(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	payload := aiReviewPayload{
+		SubmissionID:   42,
+		RevisionID:     901,
+		PromptConfigID: 7,
+		PromptVersion:  2,
+		IdempotencyKey: "idem",
+	}
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}}
+	claimed, err := handler.markRunning(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("markRunning returned error: %v", err)
+	}
+	if claimed {
+		t.Fatal("duplicate finalized task must not be claimed")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestFailoverDoesNotMarkSucceededReviewDead(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	payload := aiReviewPayload{
+		SubmissionID:   42,
+		RevisionID:     901,
+		PromptConfigID: 7,
+		PromptVersion:  2,
+		IdempotencyKey: "idem",
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("human_reviewing", 901))
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'dead'.+status IN \('pending','running','failed'\)`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}}
+	if err := handler.failover(context.Background(), payload, errors.New("late replay failure")); err != nil {
+		t.Fatalf("failover returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestCompleteMovesSubmissionToHumanReviewWithAIVerdict(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
