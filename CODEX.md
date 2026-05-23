@@ -31,11 +31,12 @@ After every code-writing turn:
 - S3 AI P1 hardening is in place: AI worker payload/idempotency anchors are verified and bound through running/completion/failover updates; retryable worker failures return reviews to `failed`; submission submit locks/reloads task before AI planning and rejects invalid active prompts; LLM verdict/score threshold mismatches are rejected; Owner Dashboard ignores stale prompt loads and disables prompt actions while loading failed or is in flight.
 - S3 AI review follow-ups are in place: Owner Dashboard action responses are task/action guarded after task switches; provider HTTP error bodies are not exposed in persisted error messages; LLM schema/threshold validation errors are non-retryable and fail over directly to human review; HTTP 422 coverage exists for invalid active prompts and disallowed active models.
 - Owner Dashboard same-task task-list clicks are no-ops, so they no longer invalidate the current in-flight save/settings/dry-run guard or leave loading stuck.
+- Golden sample persistence API is in place for owner/admin users: list/create/delete samples under a task, validate expected verdicts and same-task prompt links, hash canonical payload JSON for duplicate protection, and return 409 for duplicate task payloads.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Add golden sample persistence shape before golden sample management UI and Reviewer AI verdict display.
+- Link golden samples to AI dry-run persistence before golden sample management UI and Reviewer AI verdict display.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.
