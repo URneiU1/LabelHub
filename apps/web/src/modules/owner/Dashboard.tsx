@@ -38,10 +38,10 @@ export default function OwnerDashboard() {
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
   const [promptTemplate, setPromptTemplate] = useState('请根据 payload 和 answer 完成结构化预审。')
-  const [dimensionsText, setDimensionsText] = useState('相关性\n准确性\n格式合规')
+  const [dimensionsText, setDimensionsText] = useState(defaultDimensionsJSON)
   const [passThreshold, setPassThreshold] = useState('80')
   const [uncertainMin, setUncertainMin] = useState('60')
-  const [model, setModel] = useState('mock-model')
+  const [model, setModel] = useState('')
   const [samplePayload, setSamplePayload] = useState('{"prompt":"示例题目"}')
   const [sampleAnswer, setSampleAnswer] = useState('{"summary":"示例答案"}')
   const [dryRun, setDryRun] = useState<AIDryRunResult | null>(null)
@@ -61,7 +61,7 @@ export default function OwnerDashboard() {
 
   const fillPromptForm = useCallback((prompt: AIPromptConfig) => {
     setPromptTemplate(prompt.promptTemplate)
-    setDimensionsText(dimensionsToText(prompt.dimensions))
+    setDimensionsText(formatDimensionsJSON(prompt.dimensions))
     setPassThreshold(String(prompt.passThreshold))
     setUncertainMin(String(prompt.uncertainMin))
     setModel(prompt.model)
@@ -117,9 +117,10 @@ export default function OwnerDashboard() {
     setSavingPrompt(true)
     setPromptError('')
     try {
+      const dimensions = parseDimensionsInput(dimensionsText)
       const data = await apiPost<{ prompt: AIPromptConfig, activePromptId: number }>(`/tasks/${selected.id}/ai-prompts`, {
         prompt_template: promptTemplate,
-        dimensions: dimensionsText.split('\n').map((name) => ({ name: name.trim() })).filter((dimension) => dimension.name),
+        dimensions,
         pass_threshold: Number(passThreshold),
         uncertain_min: Number(uncertainMin),
         model,
@@ -259,13 +260,28 @@ export default function OwnerDashboard() {
   )
 }
 
-function dimensionsToText(raw: string) {
+const defaultDimensionsJSON = JSON.stringify([
+  { name: '相关性', description: '是否相关', weight: 1 },
+  { name: '准确性', description: '是否准确', weight: 1 },
+  { name: '格式合规', description: '是否符合格式', weight: 1 },
+], null, 2)
+
+function formatDimensionsJSON(raw: string) {
   try {
-    const parsed = JSON.parse(raw) as Array<{ name?: string }>
-    return parsed.map((dimension) => dimension.name?.trim()).filter(Boolean).join('\n')
+    return JSON.stringify(JSON.parse(raw) as unknown, null, 2)
   } catch {
     return raw
   }
+}
+
+function parseDimensionsInput(raw: string): Array<Record<string, unknown>> {
+  const parsed = JSON.parse(raw) as unknown
+  if (!Array.isArray(parsed)) {
+    throw new Error('dimensions must be a JSON array')
+  }
+  return parsed.filter((dimension): dimension is Record<string, unknown> => {
+    return typeof dimension === 'object' && dimension !== null
+  })
 }
 
 const panelStyle: React.CSSProperties = {

@@ -279,6 +279,9 @@ func normalizeAIPromptRequest(req aiPromptRequest) (normalizedAIPromptRequest, e
 	if req.Model == "" {
 		req.Model = strings.TrimSpace(os.Getenv("LLM_MODEL"))
 	}
+	if req.Model == "" {
+		req.Model = "mock-model"
+	}
 	if !allowedModelName(req.Model) {
 		return normalizedAIPromptRequest{}, errors.New("model is not allowed")
 	}

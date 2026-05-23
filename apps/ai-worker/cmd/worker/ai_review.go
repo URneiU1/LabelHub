@@ -248,7 +248,7 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 
 	now := time.Now().UTC()
 	reviewRes, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, finished_at = ? WHERE idempotency_key = ? AND status IN ('pending','running','failed')`,
+		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND status IN ('pending','running','failed')`,
 		result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey,
 	)
 	if err != nil {

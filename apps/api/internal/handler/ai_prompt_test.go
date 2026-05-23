@@ -33,6 +33,8 @@ func TestCreateAIPromptRejectsNonOwner(t *testing.T) {
 }
 
 func TestCreateAIPromptBumpsVersionAndUpdatesTaskPromptID(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "doubao-seed-2.0-lite")
+	t.Setenv("LLM_MODEL", "doubao-seed-2.0-lite")
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
 
@@ -67,6 +69,9 @@ func TestCreateAIPromptBumpsVersionAndUpdatesTaskPromptID(t *testing.T) {
 	}
 	if prompt["version"] != float64(3) {
 		t.Fatalf("version = %v, want 3", prompt["version"])
+	}
+	if prompt["model"] != "doubao-seed-2.0-lite" {
+		t.Fatalf("model = %v, want env default", prompt["model"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -122,6 +127,5 @@ func validAIPromptBody() map[string]any {
 		},
 		"pass_threshold": 80,
 		"uncertain_min":  60,
-		"model":          "mock-model",
 	}
 }

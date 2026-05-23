@@ -59,10 +59,10 @@ describe('OwnerDashboard AI prompt flow', () => {
         id: 33,
         version: 1,
         promptTemplate: '请预审',
-        dimensions: '[{"name":"相关性"}]',
+        dimensions: '[{"name":"相关性","description":"是否相关","weight":0.8}]',
         passThreshold: 80,
         uncertainMin: 60,
-        model: 'mock-model',
+        model: 'doubao-seed-2.0-lite',
       },
       activePromptId: 33,
     })
@@ -76,6 +76,55 @@ describe('OwnerDashboard AI prompt flow', () => {
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-prompts', expect.objectContaining({
         prompt_template: '请预审',
+        model: '',
+      }))
+    })
+  })
+
+  it('preserves dimension description and weight when saving an existing prompt', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, aiPromptId: 33 }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: '请预审',
+            dimensions: '[{"name":"相关性","description":"是否相关","weight":0.8}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'doubao-seed-2.0-lite',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      prompt: {
+        id: 34,
+        version: 2,
+        promptTemplate: '请预审',
+        dimensions: '[{"name":"相关性","description":"是否相关","weight":0.8}]',
+        passThreshold: 80,
+        uncertainMin: 60,
+        model: 'doubao-seed-2.0-lite',
+      },
+      activePromptId: 34,
+    })
+
+    render(<OwnerDashboard />)
+
+    await screen.findByDisplayValue(/是否相关/)
+    await user.click(screen.getByRole('button', { name: '保存 AI Prompt' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-prompts', expect.objectContaining({
+        dimensions: [{ name: '相关性', description: '是否相关', weight: 0.8 }],
       }))
     })
   })

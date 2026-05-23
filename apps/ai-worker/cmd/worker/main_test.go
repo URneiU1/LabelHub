@@ -142,7 +142,7 @@ func TestCompleteMovesSubmissionToHumanReviewWithAIVerdict(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
 	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'`).
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+error_msg = NULL`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -177,7 +177,7 @@ func TestHandleAIReviewUsesProviderResultAndRecordsUsage(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
 	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+tokens_input = \?, tokens_output = \?`).
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+tokens_input = \?, tokens_output = \?.+error_msg = NULL`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -188,6 +188,52 @@ func TestHandleAIReviewUsesProviderResultAndRecordsUsage(t *testing.T) {
 	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: staticEvaluator{}}
 	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err != nil {
 		t.Fatalf("handleAIReview returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestCompleteClearsPreviousErrorMessageOnRetrySuccess(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	payload := aiReviewPayload{
+		SubmissionID:   42,
+		RevisionID:     901,
+		PromptConfigID: 7,
+		PromptVersion:  2,
+		IdempotencyKey: "idem",
+	}
+	result := aiEvaluation{
+		Verdict:      "pass",
+		Score:        88,
+		Reason:       "retry succeeded",
+		Dimensions:   `[{"name":"相关性","score":88,"reason":"ok"}]`,
+		RawResponse:  `{"provider":"mock"}`,
+		TokensInput:  12,
+		TokensOutput: 8,
+		LatencyMS:    3,
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT status FROM ai_reviews.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("failed"))
+	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+error_msg = NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}}
+	if err := handler.complete(context.Background(), payload, result); err != nil {
+		t.Fatalf("complete returned error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

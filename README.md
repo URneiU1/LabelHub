@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-23 `s3-ai-review-fixes`: 修复 S3 AI Prompt review 发现的问题:Owner 新 prompt 默认 model 不再硬编码 `mock-model`,由后端按 `LLM_MODEL`/fallback 决定并受 `LLM_ALLOWED_MODELS` 校验;Owner UI 改用 dimensions JSON textarea,重保存保留 `description`/`weight`;AI worker 成功重试写 `succeeded` 时清空旧 `error_msg`。
 - 2026-05-23 `s3-ai-product-layer-part1`: 完成 S3 AI 产品层第一段:新增共享 `llmreview` OpenAI-compatible provider,支持 `LLM_PROVIDER/LLM_BASE_URL/LLM_API_KEY/LLM_MODEL/LLM_ALLOWED_MODELS/LLM_TIMEOUT_MS`;worker 从 prompt version 读取 payload/answer/baseline,通过 Function Calling strict schema 取得结构化 verdict/score/dimensions/reason,Go 端严格校验并记录 tokens/latency/raw_response,未配置时保留 deterministic/mock fallback;Owner API 增加 `/tasks/:taskId/ai-prompts` GET/POST 和 `/tasks/:taskId/ai-prompts/:promptId/dry-run`,按 owner/admin + task ownership 校验,POST append-only 创建 version 并同事务更新 `tasks.ai_prompt_id`;Owner 页面增加 AI Prompt 编辑和 dry-run 结构化结果展示。
 - 2026-05-23 `p1-ai-edge-hardening`: 修复 P1/P2 边界复查问题:FileUpload 支持打回修改后复用同 submission 历史 revision 已 attached 的文件;AI worker duplicate replay 在 `markRunning` 抢不到 pending/failed 行时 no-op,且 failover 不再污染 succeeded 记录;API 侧新增 AI review sweeper,对超时停留在 `ai_reviewing` 的 pending/running 预审强制转 `human_reviewing` 并写 `ai_fail_max` audit。
 - 2026-05-23 `p1-p2-closeout`: 一次性补齐 P1/P2 审查项:FileUpload 在 submit 事务内把答案引用的 `storageKey` 校验并绑定到 `submission_revision_id`,非法 owner/cross-task/重复 key 有测试;前后端 schema 校验对齐 trim 后 name、严格 options、FileUpload `maxFiles`、LLMTrigger `target_field`;Labeler/Reviewer 增加页面级 schema runtime 回归;AI submit 事务创建 pending `ai_reviews` + `ai:review` outbox,API 后台 publisher 投递 Asynq,worker 幂等消费并在成功/失败后流转到 `human_reviewing`。
@@ -70,6 +71,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-23 S3 AI review fixes: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI product layer part1: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 P1/P2 edge hardening: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 P1/P2 closeout: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

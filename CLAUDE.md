@@ -10,7 +10,7 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 AI product layer part1 is implemented and verified. The worker now supports OpenAI-compatible Function Calling with strict Go-side validation and token/latency/raw_response recording, while keeping deterministic/mock fallback. Owner can create versioned AI prompts and run scoped dry-runs without mutating formal submission state.
+- Latest completed work: S3 AI product layer part1 plus review fixes are implemented and verified. Owner prompt creation no longer sends a hardcoded mock model, dimensions metadata survives re-save, and AI worker retry success clears stale `error_msg`.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
 - Next priority: Designer append/delete/simple property editing, followed by task-level AI enable controls, golden sample management, and Reviewer AI verdict/score display.
 
