@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-23 `s3-ai-prompt-form-reset`: 修复 Owner Dashboard 跨任务 AI Prompt 表单残留:切换到无 prompt 的任务或 prompt 加载失败时,表单会重置为默认 prompt_template/dimensions/thresholds/空 model,避免把上一任务 prompt 误保存到当前任务。
 - 2026-05-23 `s3-ai-review-controls`: 完成任务级 AI review 启用/关闭控制:新增 owner/admin `POST /tasks/:taskId/ai-review-settings`,复用 `loadOwnedTask` 权限边界,启用前校验 active `ai_prompt_id` 且 prompt 属于当前 task,关闭时只更新 `tasks.ai_review_enabled=false` 并保留 prompt history;Owner Dashboard 在 AI Prompt 区块展示当前状态,无 active prompt 时禁用启用动作,有 prompt 时可启用或关闭并本地更新状态;submission flow 回归确认 `ai_review_enabled=false` 即使有 prompt 也跳过 AI。
 - 2026-05-23 `s3-ai-review-fixes`: 修复 S3 AI Prompt review 发现的问题:Owner 新 prompt 默认 model 不再硬编码 `mock-model`,由后端按 `LLM_MODEL`/fallback 决定并受 `LLM_ALLOWED_MODELS` 校验;Owner UI 改用 dimensions JSON textarea,重保存保留 `description`/`weight`;AI worker 成功重试写 `succeeded` 时清空旧 `error_msg`。
 - 2026-05-23 `s3-ai-product-layer-part1`: 完成 S3 AI 产品层第一段:新增共享 `llmreview` OpenAI-compatible provider,支持 `LLM_PROVIDER/LLM_BASE_URL/LLM_API_KEY/LLM_MODEL/LLM_ALLOWED_MODELS/LLM_TIMEOUT_MS`;worker 从 prompt version 读取 payload/answer/baseline,通过 Function Calling strict schema 取得结构化 verdict/score/dimensions/reason,Go 端严格校验并记录 tokens/latency/raw_response,未配置时保留 deterministic/mock fallback;Owner API 增加 `/tasks/:taskId/ai-prompts` GET/POST 和 `/tasks/:taskId/ai-prompts/:promptId/dry-run`,按 owner/admin + task ownership 校验,POST append-only 创建 version 并同事务更新 `tasks.ai_prompt_id`;Owner 页面增加 AI Prompt 编辑和 dry-run 结构化结果展示。
@@ -72,6 +73,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-23 S3 AI prompt form reset: `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI review controls: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI review fixes: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI product layer part1: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

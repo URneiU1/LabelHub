@@ -42,11 +42,11 @@ export default function OwnerDashboard() {
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
   const [aiReviewEnabled, setAIReviewEnabled] = useState(false)
-  const [promptTemplate, setPromptTemplate] = useState('请根据 payload 和 answer 完成结构化预审。')
+  const [promptTemplate, setPromptTemplate] = useState(defaultPromptTemplate)
   const [dimensionsText, setDimensionsText] = useState(defaultDimensionsJSON)
-  const [passThreshold, setPassThreshold] = useState('80')
-  const [uncertainMin, setUncertainMin] = useState('60')
-  const [model, setModel] = useState('')
+  const [passThreshold, setPassThreshold] = useState(defaultPassThreshold)
+  const [uncertainMin, setUncertainMin] = useState(defaultUncertainMin)
+  const [model, setModel] = useState(defaultModel)
   const [samplePayload, setSamplePayload] = useState('{"prompt":"示例题目"}')
   const [sampleAnswer, setSampleAnswer] = useState('{"summary":"示例答案"}')
   const [dryRun, setDryRun] = useState<AIDryRunResult | null>(null)
@@ -73,6 +73,14 @@ export default function OwnerDashboard() {
     setModel(prompt.model)
   }, [])
 
+  const resetPromptFormToDefaults = useCallback(() => {
+    setPromptTemplate(defaultPromptTemplate)
+    setDimensionsText(defaultDimensionsJSON)
+    setPassThreshold(defaultPassThreshold)
+    setUncertainMin(defaultUncertainMin)
+    setModel(defaultModel)
+  }, [])
+
   const loadPrompts = useCallback(async (taskId: number) => {
     setPrompts([])
     setActivePromptId(null)
@@ -89,15 +97,18 @@ export default function OwnerDashboard() {
       const latest = data.prompts[0]
       if (latest) {
         fillPromptForm(latest)
+      } else {
+        resetPromptFormToDefaults()
       }
     } catch (error) {
       setPrompts([])
       setActivePromptId(null)
       setAIReviewEnabled(false)
       setDryRun(null)
+      resetPromptFormToDefaults()
       setPromptError(error instanceof Error ? error.message : '加载 AI Prompt 失败')
     }
-  }, [fillPromptForm])
+  }, [fillPromptForm, resetPromptFormToDefaults])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -301,6 +312,11 @@ export default function OwnerDashboard() {
     </div>
   )
 }
+
+const defaultPromptTemplate = '请根据 payload 和 answer 完成结构化预审。'
+const defaultPassThreshold = '80'
+const defaultUncertainMin = '60'
+const defaultModel = ''
 
 const defaultDimensionsJSON = JSON.stringify([
   { name: '相关性', description: '是否相关', weight: 1 },

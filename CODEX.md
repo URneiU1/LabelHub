@@ -27,6 +27,7 @@ After every code-writing turn:
 - S3 AI product layer part1 is in place: shared `llmreview` provides mock + OpenAI-compatible Function Calling, worker records structured verdict/score/dimensions/reason with token/latency/raw_response metadata, and Owner can version AI prompts plus run scoped dry-runs.
 - S3 review fixes are in place: Owner prompt create now defaults model server-side, dimensions metadata survives UI re-save, and worker retry success clears stale `error_msg`.
 - S3 task-level AI review controls are in place: owner/admin can toggle `tasks.ai_review_enabled` via `POST /tasks/:taskId/ai-review-settings`; enabling requires an active prompt for the task, disabling keeps prompt history, and Owner Dashboard reflects the status inline.
+- Owner Dashboard now resets the AI Prompt form to defaults when switching to a task with no prompts or when prompt loading fails, preventing accidental cross-task prompt copies.
 
 ## Next Work
 

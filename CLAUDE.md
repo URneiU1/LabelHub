@@ -10,7 +10,7 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 AI product layer part1 plus task-level controls are implemented and verified. Owner can create/version prompts, dry-run them, and toggle task AI review through owner/admin settings; enabling requires an active task prompt and disabling keeps prompt history.
+- Latest completed work: S3 AI product layer part1 plus task-level controls are implemented and verified. Owner can create/version prompts, dry-run them, and toggle task AI review through owner/admin settings; the prompt form now resets on no-prompt task switches to avoid cross-task copies.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
 - Next priority: Designer append/delete/simple property editing, followed by golden sample management and Reviewer AI verdict/score display.
 
