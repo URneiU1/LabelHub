@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	mysqlerr "github.com/go-sql-driver/mysql"
@@ -15,6 +16,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub.local/llmreview"
 )
 
 type GoldenSampleHandler struct {
@@ -29,6 +31,7 @@ func (h GoldenSampleHandler) Register(api gin.IRouter) {
 	api.GET("/tasks/:taskId/golden-samples", middleware.RequireRoles("owner", "admin"), h.List)
 	api.POST("/tasks/:taskId/golden-samples", middleware.RequireRoles("owner", "admin"), h.Create)
 	api.DELETE("/tasks/:taskId/golden-samples/:sampleId", middleware.RequireRoles("owner", "admin"), h.Delete)
+	api.POST("/tasks/:taskId/golden-samples/:sampleId/dry-run", middleware.RequireRoles("owner", "admin"), h.DryRun)
 }
 
 type goldenSampleRequest struct {
@@ -37,6 +40,10 @@ type goldenSampleRequest struct {
 	ExpectedVerdict string  `json:"expected_verdict"`
 	Notes           string  `json:"notes"`
 	AIPromptID      *uint64 `json:"ai_prompt_id"`
+}
+
+type goldenSampleDryRunRequest struct {
+	AIPromptID *uint64 `json:"ai_prompt_id"`
 }
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
@@ -132,6 +139,108 @@ func (h GoldenSampleHandler) Delete(c *gin.Context) {
 	httpx.OK(c, gin.H{"deleted": true})
 }
 
+func (h GoldenSampleHandler) DryRun(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	sampleID, ok := parseIDParam(c, "sampleId")
+	if !ok {
+		return
+	}
+	var req goldenSampleDryRunRequest
+	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
+		return
+	}
+
+	var sample model.GoldenSample
+	if err := h.db.Where("id = ? AND task_id = ?", sampleID, task.ID).First(&sample).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "golden sample not found")
+		return
+	}
+
+	promptID := req.AIPromptID
+	if promptID == nil {
+		promptID = sample.AIPromptID
+	}
+	if promptID == nil {
+		promptID = task.AIPromptID
+	}
+	if promptID == nil {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "active ai_prompt_id is required")
+		return
+	}
+
+	var prompt model.AIPromptConfig
+	if err := h.db.Where("id = ? AND task_id = ?", *promptID, task.ID).First(&prompt).Error; err != nil {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai_prompt_id must belong to task")
+		return
+	}
+	dimensions, err := llmreview.ParseDimensions(prompt.Dimensions)
+	if err != nil {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt dimensions are invalid")
+		return
+	}
+	if !llmreview.AllowedModelName(prompt.Model) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt model is not allowed")
+		return
+	}
+
+	provider, _, err := llmreview.NewProviderFromEnv(nil)
+	if err != nil {
+		if _, recordErr := h.recordGoldenSampleDryRun(c, task.ID, prompt, sample, "failed", nil, err); recordErr != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
+			return
+		}
+		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "llm provider is not configured")
+		return
+	}
+	result, err := provider.Evaluate(c.Request.Context(), llmreview.PromptConfig{
+		ID:             prompt.ID,
+		Version:        prompt.Version,
+		PromptTemplate: prompt.PromptTemplate,
+		Dimensions:     dimensions,
+		PassThreshold:  prompt.PassThreshold,
+		UncertainMin:   prompt.UncertainMin,
+		Model:          prompt.Model,
+	}, llmreview.EvaluationInput{
+		TaskID:              task.ID,
+		PromptConfigID:      prompt.ID,
+		PromptVersion:       prompt.Version,
+		PayloadJSON:         sample.Payload,
+		AnswerJSON:          sample.ExpectedAnswer,
+		BaselineDescription: task.BaselineDescription.String,
+	})
+	if err != nil {
+		if _, recordErr := h.recordGoldenSampleDryRun(c, task.ID, prompt, sample, "failed", nil, err); recordErr != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
+			return
+		}
+		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "ai golden sample dry-run failed")
+		return
+	}
+	if err := llmreview.ValidateThresholdConsistency(result, llmreview.PromptConfig{PassThreshold: prompt.PassThreshold, UncertainMin: prompt.UncertainMin}); err != nil {
+		if _, recordErr := h.recordGoldenSampleDryRun(c, task.ID, prompt, sample, "failed", nil, err); recordErr != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
+			return
+		}
+		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "ai golden sample dry-run failed")
+		return
+	}
+	dryRunID, err := h.recordGoldenSampleDryRun(c, task.ID, prompt, sample, "succeeded", &result, nil)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
+		return
+	}
+	matchedExpected := result.Verdict == sample.ExpectedVerdict
+	httpx.OK(c, gin.H{
+		"provider":        result.Provider,
+		"result":          result,
+		"matchedExpected": matchedExpected,
+		"dryRunId":        dryRunID,
+	})
+}
+
 func validGoldenSampleVerdict(verdict string) bool {
 	switch verdict {
 	case "pass", "reject", "uncertain":
@@ -139,6 +248,47 @@ func validGoldenSampleVerdict(verdict string) bool {
 	default:
 		return false
 	}
+}
+
+func (h GoldenSampleHandler) recordGoldenSampleDryRun(c *gin.Context, taskID uint64, prompt model.AIPromptConfig, sample model.GoldenSample, status string, result *llmreview.EvaluationResult, cause error) (uint64, error) {
+	var raw *string
+	var actualVerdict model.NullString
+	var matchedExpected *bool
+	if result != nil {
+		bytes, err := json.Marshal(result)
+		if err != nil {
+			return 0, err
+		}
+		text := string(bytes)
+		raw = &text
+		actualVerdict = model.StringFrom(result.Verdict)
+		matched := result.Verdict == sample.ExpectedVerdict
+		matchedExpected = &matched
+	}
+	payloadSnapshot := sample.Payload
+	expectedAnswerSnapshot := sample.ExpectedAnswer
+	run := model.AIDryRun{
+		TaskID:                 taskID,
+		AIPromptID:             prompt.ID,
+		GoldenSampleID:         &sample.ID,
+		PromptVersion:          prompt.Version,
+		PayloadSnapshot:        &payloadSnapshot,
+		ExpectedAnswerSnapshot: &expectedAnswerSnapshot,
+		ExpectedVerdict:        model.StringFrom(sample.ExpectedVerdict),
+		ActualVerdict:          actualVerdict,
+		MatchedExpected:        matchedExpected,
+		Status:                 status,
+		Result:                 raw,
+		CreatedBy:              currentUserID(c),
+		FinishedAt:             model.TimeFrom(time.Now().UTC()),
+	}
+	if cause != nil {
+		run.ErrorMsg = model.StringFrom(llmreview.SafeErrorMessage(cause))
+	}
+	if err := h.db.Create(&run).Error; err != nil {
+		return 0, err
+	}
+	return run.ID, nil
 }
 
 func goldenSamplePayloadHash(payloadJSON []byte) string {

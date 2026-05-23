@@ -10,12 +10,13 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 golden sample persistence API is implemented. Owner/admin users can list, create, and delete task-scoped golden samples; create validates required JSON payload/expected answer, expected verdict enum, same-task optional prompt link, and duplicate payload hashes.
+- Latest completed work: S3 golden sample dry-run linking is implemented. `ai_dry_runs` now persists golden sample links, prompt version, input snapshots, expected/actual verdict, matched flags, and finished timestamps; owner/admin users can run a task-scoped sample through the existing provider path with sanitized failure recording and sample-pinned prompt support.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
-- Next priority: Designer append/delete/simple property editing, followed by golden sample dry-run linking, golden sample management, and Reviewer AI verdict/score display.
+- Next priority: Designer append/delete/simple property editing, followed by Owner UI golden sample manager + batch run result table, then Reviewer AI verdict/score display.
 
 ## Known Follow-Ups
 
-- AI queue/failover/provider and prompt enable controls are closed for the first S3 slices, but S3 is not product-complete until golden sample dry-run linking/management and Reviewer AI verdict display are added.
+- AI queue/failover/provider and prompt enable controls are closed for the first S3 slices, but S3 is not product-complete until golden sample management/batch results and Reviewer AI verdict display are added.
+- Batch golden sample dry-run endpoint is deferred until the UI/result-table requirements are clearer; single-sample persistence now provides the data shape without committing to partial-failure semantics.
 - Add FileUpload download/preview authorization and orphan temp-file cleanup.
 - Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

@@ -294,15 +294,22 @@ func (GoldenSample) TableName() string { return "golden_samples" }
 // 17. ai_dry_runs
 // ============================================================
 type AIDryRun struct {
-	ID         uint64     `gorm:"primaryKey" json:"id"`
-	TaskID     uint64     `json:"taskId"`
-	AIPromptID uint64     `gorm:"column:ai_prompt_id" json:"aiPromptId"`
-	Status     string     `gorm:"default:queued" json:"status"`
-	Result     *string    `gorm:"type:json" json:"result"`
-	ErrorMsg   NullString `json:"errorMsg"`
-	CreatedBy  uint64     `json:"createdBy"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	FinishedAt NullTime   `json:"finishedAt"`
+	ID                     uint64     `gorm:"primaryKey" json:"id"`
+	TaskID                 uint64     `json:"taskId"`
+	AIPromptID             uint64     `gorm:"column:ai_prompt_id" json:"aiPromptId"`
+	GoldenSampleID         *uint64    `gorm:"column:golden_sample_id" json:"goldenSampleId"`
+	PromptVersion          int        `gorm:"default:1" json:"promptVersion"`
+	PayloadSnapshot        *string    `gorm:"type:json" json:"payloadSnapshot"`
+	ExpectedAnswerSnapshot *string    `gorm:"type:json" json:"expectedAnswerSnapshot"`
+	ExpectedVerdict        NullString `json:"expectedVerdict"`
+	ActualVerdict          NullString `json:"actualVerdict"`
+	MatchedExpected        *bool      `json:"matchedExpected"`
+	Status                 string     `gorm:"default:queued" json:"status"`
+	Result                 *string    `gorm:"type:json" json:"result"`
+	ErrorMsg               NullString `json:"errorMsg"`
+	CreatedBy              uint64     `json:"createdBy"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	FinishedAt             NullTime   `json:"finishedAt"`
 }
 
 func (AIDryRun) TableName() string { return "ai_dry_runs" }

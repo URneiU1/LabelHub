@@ -32,11 +32,13 @@ After every code-writing turn:
 - S3 AI review follow-ups are in place: Owner Dashboard action responses are task/action guarded after task switches; provider HTTP error bodies are not exposed in persisted error messages; LLM schema/threshold validation errors are non-retryable and fail over directly to human review; HTTP 422 coverage exists for invalid active prompts and disallowed active models.
 - Owner Dashboard same-task task-list clicks are no-ops, so they no longer invalidate the current in-flight save/settings/dry-run guard or leave loading stuck.
 - Golden sample persistence API is in place for owner/admin users: list/create/delete samples under a task, validate expected verdicts and same-task prompt links, hash canonical payload JSON for duplicate protection, and return 409 for duplicate task payloads.
+- Golden sample single-sample dry-run linking is in place: `ai_dry_runs` now stores sample links, prompt version, input snapshots, expected/actual verdicts, matched flags, and finished timestamps; `POST /tasks/:taskId/golden-samples/:sampleId/dry-run` runs through the existing provider path, prefers a sample-pinned prompt before task active prompt, and records sanitized failures.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Link golden samples to AI dry-run persistence before golden sample management UI and Reviewer AI verdict display.
+- Build Owner UI golden sample manager and batch run result table before Reviewer AI verdict display.
+- Batch dry-run endpoint is intentionally deferred until the UI/result-table shape is clear, to avoid freezing partial-failure semantics before the product surface exists.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.

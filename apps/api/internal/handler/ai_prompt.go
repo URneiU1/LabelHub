@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	mysqlerr "github.com/go-sql-driver/mysql"
@@ -148,7 +149,7 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 
 	provider, _, err := llmreview.NewProviderFromEnv(nil)
 	if err != nil {
-		_ = h.recordDryRun(c, task.ID, prompt.ID, "failed", nil, err)
+		_ = h.recordDryRun(c, task.ID, prompt.ID, prompt.Version, "failed", nil, err)
 		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "llm provider is not configured")
 		return
 	}
@@ -169,16 +170,16 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 		BaselineDescription: task.BaselineDescription.String,
 	})
 	if err != nil {
-		_ = h.recordDryRun(c, task.ID, prompt.ID, "failed", nil, err)
+		_ = h.recordDryRun(c, task.ID, prompt.ID, prompt.Version, "failed", nil, err)
 		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "ai dry-run failed")
 		return
 	}
 	if err := llmreview.ValidateThresholdConsistency(result, llmreview.PromptConfig{PassThreshold: prompt.PassThreshold, UncertainMin: prompt.UncertainMin}); err != nil {
-		_ = h.recordDryRun(c, task.ID, prompt.ID, "failed", nil, err)
+		_ = h.recordDryRun(c, task.ID, prompt.ID, prompt.Version, "failed", nil, err)
 		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "ai dry-run failed")
 		return
 	}
-	if err := h.recordDryRun(c, task.ID, prompt.ID, "succeeded", &result, nil); err != nil {
+	if err := h.recordDryRun(c, task.ID, prompt.ID, prompt.Version, "succeeded", &result, nil); err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
 		return
 	}
@@ -290,7 +291,7 @@ func (h AIPromptHandler) updateAIReviewSettings(taskID uint64, enabled bool) (mo
 	return updated, err
 }
 
-func (h AIPromptHandler) recordDryRun(c *gin.Context, taskID uint64, promptID uint64, status string, result *llmreview.EvaluationResult, cause error) error {
+func (h AIPromptHandler) recordDryRun(c *gin.Context, taskID uint64, promptID uint64, promptVersion int, status string, result *llmreview.EvaluationResult, cause error) error {
 	var raw *string
 	if result != nil {
 		bytes, err := json.Marshal(result)
@@ -301,11 +302,13 @@ func (h AIPromptHandler) recordDryRun(c *gin.Context, taskID uint64, promptID ui
 		raw = &text
 	}
 	run := model.AIDryRun{
-		TaskID:     taskID,
-		AIPromptID: promptID,
-		Status:     status,
-		Result:     raw,
-		CreatedBy:  currentUserID(c),
+		TaskID:        taskID,
+		AIPromptID:    promptID,
+		PromptVersion: promptVersion,
+		Status:        status,
+		Result:        raw,
+		CreatedBy:     currentUserID(c),
+		FinishedAt:    model.TimeFrom(time.Now().UTC()),
 	}
 	if cause != nil {
 		run.ErrorMsg = model.StringFrom(llmreview.SafeErrorMessage(cause))
