@@ -277,6 +277,55 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByRole('button', { name: '启用 AI review' })).toBeDisabled()
   })
 
+  it('keeps same-task dry-run response current after clicking selected task again', async () => {
+    const user = userEvent.setup()
+    const dryRunResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, id: 1, title: 'Task A', aiPromptId: 33 }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: 'Task A prompt',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(dryRunResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await screen.findByDisplayValue('Task A prompt')
+    await user.click(screen.getByRole('button', { name: '运行 dry-run' }))
+    await user.click(screen.getByRole('button', { name: /Task A/ }))
+
+    await act(async () => {
+      dryRunResult.resolve({
+        provider: 'mock',
+        result: {
+          verdict: 'pass',
+          overall_score: 90,
+          dimensions: [{ name: '相关性', score: 90, reason: 'same task' }],
+          reason: 'same task result',
+        },
+      })
+      await dryRunResult.promise
+    })
+
+    expect(await screen.findByText('same task result')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '运行 dry-run' })).not.toBeDisabled()
+  })
+
   it('ignores stale save prompt responses after switching tasks', async () => {
     const user = userEvent.setup()
     const saveResult = deferred<unknown>()

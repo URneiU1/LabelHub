@@ -30,6 +30,7 @@ After every code-writing turn:
 - Owner Dashboard now resets the AI Prompt form to defaults when switching to a task with no prompts or when prompt loading fails, preventing accidental cross-task prompt copies.
 - S3 AI P1 hardening is in place: AI worker payload/idempotency anchors are verified and bound through running/completion/failover updates; retryable worker failures return reviews to `failed`; submission submit locks/reloads task before AI planning and rejects invalid active prompts; LLM verdict/score threshold mismatches are rejected; Owner Dashboard ignores stale prompt loads and disables prompt actions while loading failed or is in flight.
 - S3 AI review follow-ups are in place: Owner Dashboard action responses are task/action guarded after task switches; provider HTTP error bodies are not exposed in persisted error messages; LLM schema/threshold validation errors are non-retryable and fail over directly to human review; HTTP 422 coverage exists for invalid active prompts and disallowed active models.
+- Owner Dashboard same-task task-list clicks are no-ops, so they no longer invalidate the current in-flight save/settings/dry-run guard or leave loading stuck.
 
 ## Next Work
 

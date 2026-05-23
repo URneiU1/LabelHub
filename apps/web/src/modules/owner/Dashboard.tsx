@@ -156,6 +156,7 @@ export default function OwnerDashboard() {
   }
 
   function selectTask(task: Task) {
+    if (task.id === selectedTaskIdRef.current) return
     selectedTaskIdRef.current = task.id
     taskActionGeneration.current += 1
     setSelected(task)

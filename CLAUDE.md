@@ -10,7 +10,7 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 AI review follow-ups are implemented. Owner Dashboard ignores stale save/settings/dry-run responses after task switches, provider HTTP error bodies stay out of persisted/provider errors, LLM schema/threshold validation failures are marked non-retryable and fail over directly to human review, and HTTP 422 coverage exists for invalid active prompts and disallowed active models.
+- Latest completed work: S3 AI same-task action guard fix is implemented. Owner Dashboard same-task task-list clicks are now no-ops, so they do not invalidate current save/settings/dry-run guards or leave loading stuck; cross-task stale response guards remain intact.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
 - Next priority: Designer append/delete/simple property editing, followed by golden sample persistence shape, golden sample management, and Reviewer AI verdict/score display.
 

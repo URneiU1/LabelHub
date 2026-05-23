@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-23 `s3-ai-same-task-guard`: 修复 Owner Dashboard 同一 task 重复点击会让 in-flight action guard 失效的问题:当前已选 task 再点击直接 no-op,只在实际切换不同 task 时递增 action generation;补 deferred dry-run 回归,确认同 task 晚到 response 仍正常应用且 loading 复位。
 - 2026-05-23 `s3-ai-review-followups`: 完成 S3 AI review P2 cleanup:Owner Dashboard 的 save prompt / AI review settings / dry-run 都加 task/action guard,切换 task 后晚到的 action response/error 不再污染当前任务 UI;OpenAI-compatible provider HTTP 400/401 error body 不进入 error message;LLM schema/threshold validation error 标记为 non-retryable,worker 遇到后直接 failover 到人工审核避免重复扣费;补 submit invalid active prompt 和 disallowed active model 的 422 HTTP 回归。
 - 2026-05-23 `s3-ai-p1-hardening`: 修复 S3 AI review P1 阻塞项:worker 校验 payload 与 idempotency key 一致,所有 claim/finalize/failover 更新绑定 submission/revision/prompt version,非最终失败回写 failed 以便 Asynq 重试;submission submit 事务内锁定并重载 task 后再决定 AI plan,enabled 但 active prompt 缺失/跨 task/模型不允许时明确拒绝提交;LLM verdict 与 score thresholds 不一致会被拒绝;Owner Dashboard 忽略过期 prompt 响应,加载中/失败时禁用保存、启停和 dry-run,失败 dry-run 清空旧结果;provider HTTP error body 不再写入 dry-run/worker error 持久化路径。
 - 2026-05-23 `s3-ai-prompt-form-reset`: 修复 Owner Dashboard 跨任务 AI Prompt 表单残留:切换到无 prompt 的任务或 prompt 加载失败时,表单会重置为默认 prompt_template/dimensions/thresholds/空 model,避免把上一任务 prompt 误保存到当前任务。
@@ -75,6 +76,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-23 S3 AI same-task guard: `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI review followups: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI P1 hardening: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI prompt form reset: `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
