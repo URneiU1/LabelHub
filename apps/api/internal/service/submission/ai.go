@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/model"
+	"labelhub.local/llmreview"
 )
 
 const aiReviewTopic = "ai:review"
@@ -31,16 +32,22 @@ type aiReviewTaskPayload struct {
 }
 
 func buildAIReviewPlan(tx *gorm.DB, task model.Task, sub model.Submission, revision model.SubmissionRevision) (aiReviewPlan, error) {
-	if !task.AIReviewEnabled || task.AIPromptID == nil {
+	if !task.AIReviewEnabled {
 		return aiReviewPlan{}, nil
+	}
+	if task.AIPromptID == nil {
+		return aiReviewPlan{}, ErrInvalidAIPrompt
 	}
 	var prompt model.AIPromptConfig
 	err := tx.Where("id = ? AND task_id = ?", *task.AIPromptID, task.ID).First(&prompt).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return aiReviewPlan{}, nil
+			return aiReviewPlan{}, ErrInvalidAIPrompt
 		}
 		return aiReviewPlan{}, err
+	}
+	if !llmreview.AllowedModelName(prompt.Model) {
+		return aiReviewPlan{}, ErrInvalidAIPrompt
 	}
 	key := aiReviewIdempotencyKey(sub.ID, revision.ID, prompt.ID, prompt.Version)
 	payload, err := json.Marshal(aiReviewTaskPayload{

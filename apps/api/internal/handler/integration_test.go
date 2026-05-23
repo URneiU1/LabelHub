@@ -201,6 +201,10 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 
 	mock.ExpectBegin()
 
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled"}).
+			AddRow(1, 1, "published", false, true))
+
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
 			AddRow(11, 1, claimedBy, itemStatusClaimed))

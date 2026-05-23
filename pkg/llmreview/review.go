@@ -247,6 +247,45 @@ func ValidateEvaluationResult(result EvaluationResult, allowedDimensions []strin
 	return nil
 }
 
+func ValidateThresholdConsistency(result EvaluationResult, prompt PromptConfig) error {
+	expected := VerdictUncertain
+	if result.OverallScore >= prompt.PassThreshold {
+		expected = VerdictPass
+	} else if result.OverallScore < prompt.UncertainMin {
+		expected = VerdictReject
+	}
+	if result.Verdict != expected {
+		return fmt.Errorf("verdict %q does not match score %.2f thresholds", result.Verdict, result.OverallScore)
+	}
+	return nil
+}
+
+func AllowedModelName(model string) bool {
+	if model == "" || len([]rune(model)) > 64 || strings.ContainsAny(model, " \t\r\n") {
+		return false
+	}
+	allowed := strings.TrimSpace(os.Getenv("LLM_ALLOWED_MODELS"))
+	if allowed == "" {
+		allowed = strings.TrimSpace(os.Getenv("LLM_MODEL"))
+	}
+	if allowed == "" {
+		allowed = "mock-model"
+	}
+	for _, candidate := range strings.Split(allowed, ",") {
+		if strings.TrimSpace(candidate) == model {
+			return true
+		}
+	}
+	return false
+}
+
+func SafeErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func validScore(score float64) bool {
 	return !math.IsNaN(score) && !math.IsInf(score, 0) && score >= 0 && score <= 100
 }
@@ -345,6 +384,9 @@ func (p OpenAICompatibleProvider) Evaluate(ctx context.Context, prompt PromptCon
 		}
 		result, err := p.call(ctx, body, model, input.IdempotencyKey, DimensionNames(prompt.Dimensions))
 		if err == nil {
+			if err := ValidateThresholdConsistency(result, prompt); err != nil {
+				return EvaluationResult{}, err
+			}
 			result.LatencyMS = int(time.Since(start).Milliseconds())
 			return result, nil
 		}
@@ -380,7 +422,7 @@ func (p OpenAICompatibleProvider) call(ctx context.Context, body []byte, model s
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			return EvaluationResult{}, retryableError{err: errors.New(msg)}
 		}
-		return EvaluationResult{}, fmt.Errorf("%s: %s", msg, truncateForError(responseBody))
+		return EvaluationResult{}, errors.New(msg)
 	}
 
 	var completion chatCompletionResponse

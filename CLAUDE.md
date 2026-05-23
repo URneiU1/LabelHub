@@ -10,12 +10,12 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 AI product layer part1 plus task-level controls are implemented and verified. Owner can create/version prompts, dry-run them, and toggle task AI review through owner/admin settings; the prompt form now resets on no-prompt task switches to avoid cross-task copies.
+- Latest completed work: S3 AI P1 hardening is implemented and verified. Worker payload/idempotency anchors are checked and bound through review updates, retryable worker failures return reviews to `failed`, submit-time AI planning uses a locked fresh task snapshot, invalid active prompts abort submit, verdict/threshold mismatches are rejected, and Owner Dashboard ignores stale prompt loads while disabling prompt actions during failed/in-flight loads.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
-- Next priority: Designer append/delete/simple property editing, followed by golden sample management and Reviewer AI verdict/score display.
+- Next priority: Designer append/delete/simple property editing, followed by golden sample persistence shape, golden sample management, and Reviewer AI verdict/score display.
 
 ## Known Follow-Ups
 
-- AI queue/failover/provider and prompt enable controls are closed for the first S3 slices, but S3 is not product-complete until golden sample management and Reviewer AI verdict display are added.
+- AI queue/failover/provider and prompt enable controls are closed for the first S3 slices, but S3 is not product-complete until golden sample persistence/management and Reviewer AI verdict display are added.
 - Add FileUpload download/preview authorization and orphan temp-file cleanup.
 - Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

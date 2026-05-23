@@ -64,3 +64,31 @@ func TestParseEvaluationArgumentsRequiresEveryConfiguredDimensionOnce(t *testing
 		t.Fatal("duplicate dimension must be rejected")
 	}
 }
+
+func TestValidateThresholdConsistencyRejectsMismatchedVerdict(t *testing.T) {
+	prompt := llmreview.PromptConfig{PassThreshold: 80, UncertainMin: 60}
+
+	err := llmreview.ValidateThresholdConsistency(llmreview.EvaluationResult{
+		Verdict:      "pass",
+		OverallScore: 10,
+	}, prompt)
+	if err == nil {
+		t.Fatal("pass with low score must be rejected")
+	}
+
+	err = llmreview.ValidateThresholdConsistency(llmreview.EvaluationResult{
+		Verdict:      "reject",
+		OverallScore: 95,
+	}, prompt)
+	if err == nil {
+		t.Fatal("reject with high score must be rejected")
+	}
+
+	err = llmreview.ValidateThresholdConsistency(llmreview.EvaluationResult{
+		Verdict:      "uncertain",
+		OverallScore: 75,
+	}, prompt)
+	if err != nil {
+		t.Fatalf("consistent uncertain result rejected: %v", err)
+	}
+}

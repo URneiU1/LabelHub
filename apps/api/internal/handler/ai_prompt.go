@@ -131,6 +131,10 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt dimensions are invalid")
 		return
 	}
+	if !llmreview.AllowedModelName(prompt.Model) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt model is not allowed")
+		return
+	}
 	payloadJSON, err := json.Marshal(req.Payload)
 	if err != nil {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "payload is invalid")
@@ -169,6 +173,11 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "ai dry-run failed")
 		return
 	}
+	if err := llmreview.ValidateThresholdConsistency(result, llmreview.PromptConfig{PassThreshold: prompt.PassThreshold, UncertainMin: prompt.UncertainMin}); err != nil {
+		_ = h.recordDryRun(c, task.ID, prompt.ID, "failed", nil, err)
+		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "ai dry-run failed")
+		return
+	}
 	if err := h.recordDryRun(c, task.ID, prompt.ID, "succeeded", &result, nil); err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
 		return
@@ -199,6 +208,10 @@ func (h AIPromptHandler) UpdateAIReviewSettings(c *gin.Context) {
 			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "active ai_prompt_id is required before enabling AI review")
 			return
 		}
+		if errors.Is(err, errAIReviewModelNotAllowed) {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt model is not allowed")
+			return
+		}
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update ai review settings")
 		return
 	}
@@ -210,6 +223,7 @@ func (h AIPromptHandler) UpdateAIReviewSettings(c *gin.Context) {
 
 var errAIPromptVersionConflict = errors.New("ai prompt version conflict")
 var errAIReviewActivePromptRequired = errors.New("ai review active prompt required")
+var errAIReviewModelNotAllowed = errors.New("ai review model not allowed")
 
 func (h AIPromptHandler) createPromptVersion(taskID uint64, createdBy uint64, req normalizedAIPromptRequest) (model.AIPromptConfig, error) {
 	var created model.AIPromptConfig
@@ -263,6 +277,9 @@ func (h AIPromptHandler) updateAIReviewSettings(taskID uint64, enabled bool) (mo
 				}
 				return err
 			}
+			if !llmreview.AllowedModelName(prompt.Model) {
+				return errAIReviewModelNotAllowed
+			}
 		}
 		if err := tx.Model(&model.Task{}).Where("id = ?", taskID).Update("ai_review_enabled", enabled).Error; err != nil {
 			return err
@@ -291,7 +308,7 @@ func (h AIPromptHandler) recordDryRun(c *gin.Context, taskID uint64, promptID ui
 		CreatedBy:  currentUserID(c),
 	}
 	if cause != nil {
-		run.ErrorMsg = model.StringFrom(cause.Error())
+		run.ErrorMsg = model.StringFrom(llmreview.SafeErrorMessage(cause))
 	}
 	return h.db.Create(&run).Error
 }
@@ -374,22 +391,7 @@ func validatePromptPlaceholders(template string) error {
 }
 
 func allowedModelName(model string) bool {
-	if model == "" || len([]rune(model)) > 128 || strings.ContainsAny(model, " \t\r\n") {
-		return false
-	}
-	allowed := strings.TrimSpace(os.Getenv("LLM_ALLOWED_MODELS"))
-	if allowed == "" {
-		allowed = strings.TrimSpace(os.Getenv("LLM_MODEL"))
-	}
-	if allowed == "" {
-		allowed = "mock-model"
-	}
-	for _, candidate := range strings.Split(allowed, ",") {
-		if strings.TrimSpace(candidate) == model {
-			return true
-		}
-	}
-	return false
+	return llmreview.AllowedModelName(model)
 }
 
 func currentUserID(c *gin.Context) uint64 {

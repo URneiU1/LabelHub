@@ -11,13 +11,35 @@ import (
 )
 
 func TestParseAIReviewPayloadRequiresAnchors(t *testing.T) {
-	_, err := parseAIReviewPayload([]byte(`{"submission_id":1,"revision_id":2,"prompt_config_id":3,"prompt_version":1,"idempotency_key":"k"}`))
+	validKey := aiReviewIdempotencyKey(1, 2, 3, 1)
+	_, err := parseAIReviewPayload([]byte(`{"submission_id":1,"revision_id":2,"prompt_config_id":3,"prompt_version":1,"idempotency_key":"` + validKey + `"}`))
 	if err != nil {
 		t.Fatalf("valid payload rejected: %v", err)
 	}
 	_, err = parseAIReviewPayload([]byte(`{"submission_id":1,"revision_id":2}`))
 	if err == nil {
 		t.Fatal("payload without prompt_config_id / idempotency_key must be rejected")
+	}
+	_, err = parseAIReviewPayload([]byte(`{"submission_id":1,"revision_id":2,"prompt_config_id":3,"prompt_version":1,"idempotency_key":"mismatch"}`))
+	if err == nil {
+		t.Fatal("mismatched idempotency key must be rejected")
+	}
+}
+
+func TestHandleAIReviewRejectsMismatchedIdempotencyWithoutDBClaim(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: failingEvaluator{}}
+	rawPayload := []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"mismatch"}`)
+	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err != nil {
+		t.Fatalf("handleAIReview returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected DB call for invalid payload: %v", err)
 	}
 }
 
@@ -81,6 +103,32 @@ func TestMarkRunningReturnsFalseForFinalizedDuplicateTask(t *testing.T) {
 	}
 	if claimed {
 		t.Fatal("duplicate finalized task must not be claimed")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestMarkFailedMovesRunningReviewBackToFailedForRetry(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	payload := aiReviewPayload{
+		SubmissionID:   42,
+		RevisionID:     901,
+		PromptConfigID: 7,
+		PromptVersion:  2,
+		IdempotencyKey: "idem",
+	}
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'failed'.+submission_id = \?.+revision_id = \?.+prompt_version = \?.+status IN \('pending','running','failed'\)`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}}
+	if err := handler.markFailed(context.Background(), payload, errors.New("provider failed")); err != nil {
+		t.Fatalf("markFailed returned error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -160,13 +208,14 @@ func TestCompleteMovesSubmissionToHumanReviewWithAIVerdict(t *testing.T) {
 }
 
 func TestHandleAIReviewUsesProviderResultAndRecordsUsage(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
 
-	rawPayload := []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"idem"}`)
+	rawPayload := validAIReviewPayloadJSON()
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?is)^SELECT sr.answer, ti.payload, COALESCE\(t.baseline_description,''\), cfg.prompt_template, cfg.dimensions, cfg.pass_threshold, cfg.uncertain_min, cfg.model`).
@@ -251,7 +300,7 @@ func TestHandleAIReviewFinalizedDuplicateDoesNotCallProvider(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: failingEvaluator{}}
-	rawPayload := []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"idem"}`)
+	rawPayload := validAIReviewPayloadJSON()
 	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err != nil {
 		t.Fatalf("handleAIReview returned error: %v", err)
 	}
@@ -261,13 +310,14 @@ func TestHandleAIReviewFinalizedDuplicateDoesNotCallProvider(t *testing.T) {
 }
 
 func TestHandleAIReviewProviderFailureFailsOverOnFinalAttempt(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
 
-	rawPayload := []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"idem"}`)
+	rawPayload := validAIReviewPayloadJSON()
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?is)^SELECT sr.answer, ti.payload, COALESCE\(t.baseline_description,''\), cfg.prompt_template, cfg.dimensions, cfg.pass_threshold, cfg.uncertain_min, cfg.model`).
@@ -318,4 +368,8 @@ func (failingEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, i
 
 func newAsynqTask(payload []byte) *asynq.Task {
 	return asynq.NewTask("ai:review", payload)
+}
+
+func validAIReviewPayloadJSON() []byte {
+	return []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"` + aiReviewIdempotencyKey(42, 901, 7, 2) + `"}`)
 }

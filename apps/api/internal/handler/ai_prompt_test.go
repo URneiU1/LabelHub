@@ -181,7 +181,7 @@ func TestUpdateAIReviewSettingsEnableWithActivePrompt(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
 			AddRow(1, 7, "Task", "draft", promptID, false))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).AddRow(promptID, 1, 3))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "model"}).AddRow(promptID, 1, 3, "mock-model"))
 	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .ai_review_enabled.`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()

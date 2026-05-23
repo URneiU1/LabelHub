@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-23 `s3-ai-p1-hardening`: 修复 S3 AI review P1 阻塞项:worker 校验 payload 与 idempotency key 一致,所有 claim/finalize/failover 更新绑定 submission/revision/prompt version,非最终失败回写 failed 以便 Asynq 重试;submission submit 事务内锁定并重载 task 后再决定 AI plan,enabled 但 active prompt 缺失/跨 task/模型不允许时明确拒绝提交;LLM verdict 与 score thresholds 不一致会被拒绝;Owner Dashboard 忽略过期 prompt 响应,加载中/失败时禁用保存、启停和 dry-run,失败 dry-run 清空旧结果;provider HTTP error body 不再写入 dry-run/worker error 持久化路径。
 - 2026-05-23 `s3-ai-prompt-form-reset`: 修复 Owner Dashboard 跨任务 AI Prompt 表单残留:切换到无 prompt 的任务或 prompt 加载失败时,表单会重置为默认 prompt_template/dimensions/thresholds/空 model,避免把上一任务 prompt 误保存到当前任务。
 - 2026-05-23 `s3-ai-review-controls`: 完成任务级 AI review 启用/关闭控制:新增 owner/admin `POST /tasks/:taskId/ai-review-settings`,复用 `loadOwnedTask` 权限边界,启用前校验 active `ai_prompt_id` 且 prompt 属于当前 task,关闭时只更新 `tasks.ai_review_enabled=false` 并保留 prompt history;Owner Dashboard 在 AI Prompt 区块展示当前状态,无 active prompt 时禁用启用动作,有 prompt 时可启用或关闭并本地更新状态;submission flow 回归确认 `ai_review_enabled=false` 即使有 prompt 也跳过 AI。
 - 2026-05-23 `s3-ai-review-fixes`: 修复 S3 AI Prompt review 发现的问题:Owner 新 prompt 默认 model 不再硬编码 `mock-model`,由后端按 `LLM_MODEL`/fallback 决定并受 `LLM_ALLOWED_MODELS` 校验;Owner UI 改用 dimensions JSON textarea,重保存保留 `description`/`weight`;AI worker 成功重试写 `succeeded` 时清空旧 `error_msg`。
@@ -61,18 +62,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- AI 预审已有真实 OpenAI-compatible provider、Owner dry-run 和任务级启停基础闭环,但 golden sample 管理、Reviewer AI verdict/score 展示还未做。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,但 golden sample 管理、Reviewer AI verdict/score 展示还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:进入 Designer 的 append/delete/简易属性编辑能力。
-- 推进 S3 下一段:golden sample 管理、Reviewer 展示 AI verdict/score。
+- 推进 S3 下一段前先补 P2 golden sample persistence shape,再做 golden sample 管理 UI 和 Reviewer AI verdict/score 展示。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-23 S3 AI P1 hardening: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI prompt form reset: `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI review controls: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI review fixes: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

@@ -365,6 +365,9 @@ func TestSubmitItemRechecksClaimOwnershipInsideTransaction(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
 			AddRow(11, 1, claimedBy, itemStatusClaimed))
 	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
+			AddRow(1, 1, "published"))
 	reassignedTo := uint64(8)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).

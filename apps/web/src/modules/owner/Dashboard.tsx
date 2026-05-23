@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPost, type Task } from '../../shared/api/client'
 
@@ -51,9 +51,12 @@ export default function OwnerDashboard() {
   const [sampleAnswer, setSampleAnswer] = useState('{"summary":"示例答案"}')
   const [dryRun, setDryRun] = useState<AIDryRunResult | null>(null)
   const [promptError, setPromptError] = useState('')
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [promptLoadFailed, setPromptLoadFailed] = useState(false)
   const [savingPrompt, setSavingPrompt] = useState(false)
   const [runningDryRun, setRunningDryRun] = useState(false)
   const [savingAIReviewSettings, setSavingAIReviewSettings] = useState(false)
+  const promptLoadSeq = useRef(0)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -82,18 +85,25 @@ export default function OwnerDashboard() {
   }, [])
 
   const loadPrompts = useCallback(async (taskId: number) => {
+    const requestSeq = promptLoadSeq.current + 1
+    promptLoadSeq.current = requestSeq
     setPrompts([])
     setActivePromptId(null)
     setAIReviewEnabled(false)
     setDryRun(null)
     setPromptError('')
+    setPromptLoading(true)
+    setPromptLoadFailed(false)
     try {
       const data = await apiGet<AIPromptsResponse>(`/tasks/${taskId}/ai-prompts`)
+      if (promptLoadSeq.current !== requestSeq) return
       setPrompts(data.prompts)
       setActivePromptId(data.activePromptId)
       setAIReviewEnabled(data.aiReviewEnabled)
       setDryRun(null)
       setPromptError('')
+      setPromptLoading(false)
+      setPromptLoadFailed(false)
       const latest = data.prompts[0]
       if (latest) {
         fillPromptForm(latest)
@@ -101,11 +111,14 @@ export default function OwnerDashboard() {
         resetPromptFormToDefaults()
       }
     } catch (error) {
+      if (promptLoadSeq.current !== requestSeq) return
       setPrompts([])
       setActivePromptId(null)
       setAIReviewEnabled(false)
       setDryRun(null)
       resetPromptFormToDefaults()
+      setPromptLoading(false)
+      setPromptLoadFailed(true)
       setPromptError(error instanceof Error ? error.message : '加载 AI Prompt 失败')
     }
   }, [fillPromptForm, resetPromptFormToDefaults])
@@ -133,7 +146,7 @@ export default function OwnerDashboard() {
   }
 
   async function savePrompt() {
-    if (!selected) return
+    if (!selected || promptLoading || promptLoadFailed) return
     setSavingPrompt(true)
     setPromptError('')
     try {
@@ -159,7 +172,7 @@ export default function OwnerDashboard() {
   }
 
   async function updateAIReviewSettings(enabled: boolean) {
-    if (!selected) return
+    if (!selected || promptLoading || promptLoadFailed) return
     const taskId = selected.id
     setSavingAIReviewSettings(true)
     setPromptError('')
@@ -179,9 +192,10 @@ export default function OwnerDashboard() {
   }
 
   async function runDryRun() {
-    if (!selected || !activePromptId) return
+    if (!selected || !activePromptId || promptLoading || promptLoadFailed) return
     setRunningDryRun(true)
     setPromptError('')
+    setDryRun(null)
     try {
       const data = await apiPost<AIDryRunResult>(`/tasks/${selected.id}/ai-prompts/${activePromptId}/dry-run`, {
         payload: JSON.parse(samplePayload) as Record<string, unknown>,
@@ -191,12 +205,15 @@ export default function OwnerDashboard() {
       Toast.success('dry-run 完成')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'dry-run 失败'
+      setDryRun(null)
       setPromptError(message)
       Toast.error(message)
     } finally {
       setRunningDryRun(false)
     }
   }
+
+  const promptActionDisabled = promptLoading || promptLoadFailed
 
   return (
     <div>
@@ -229,11 +246,11 @@ export default function OwnerDashboard() {
                 <div style={aiSettingsRowStyle}>
                   <span>AI review: {aiReviewEnabled ? '已启用' : '已关闭'}</span>
                   {aiReviewEnabled ? (
-                    <Button disabled={savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(false)}>
+                    <Button disabled={promptActionDisabled || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(false)}>
                       关闭 AI review
                     </Button>
                   ) : (
-                    <Button disabled={!activePromptId || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(true)}>
+                    <Button disabled={!activePromptId || promptActionDisabled || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(true)}>
                       启用 AI review
                     </Button>
                   )}
@@ -262,7 +279,7 @@ export default function OwnerDashboard() {
                     <input aria-label="model" value={model} onChange={(event) => setModel(event.target.value)} style={inputStyle} />
                   </label>
                 </div>
-                <Button loading={savingPrompt} theme="solid" onClick={() => void savePrompt()} style={{ marginTop: 'var(--space-md)' }}>
+                <Button disabled={promptActionDisabled || savingPrompt} loading={savingPrompt} theme="solid" onClick={() => void savePrompt()} style={{ marginTop: 'var(--space-md)' }}>
                   保存 AI Prompt
                 </Button>
                 <div style={dryRunPanelStyle}>
@@ -276,7 +293,7 @@ export default function OwnerDashboard() {
                       <textarea aria-label="sample_answer" value={sampleAnswer} onChange={(event) => setSampleAnswer(event.target.value)} style={textareaStyle} />
                     </label>
                   </div>
-                  <Button disabled={!activePromptId} loading={runningDryRun} onClick={() => void runDryRun()} style={{ marginTop: 'var(--space-sm)' }}>
+                  <Button disabled={!activePromptId || promptActionDisabled || runningDryRun} loading={runningDryRun} onClick={() => void runDryRun()} style={{ marginTop: 'var(--space-sm)' }}>
                     运行 dry-run
                   </Button>
                   {dryRun ? (

@@ -57,6 +57,12 @@ func findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, l
 	return submission, tx.Create(&submission).Error
 }
 
+func lockTask(tx *gorm.DB, taskID uint64) (model.Task, error) {
+	var task model.Task
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, taskID).Error
+	return task, err
+}
+
 func lockClaimedItem(tx *gorm.DB, taskID uint64, itemID uint64, labelerID uint64) (model.TaskItem, error) {
 	var item model.TaskItem
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).

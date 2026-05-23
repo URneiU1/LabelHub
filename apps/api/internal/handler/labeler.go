@@ -177,6 +177,8 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
 		case errors.Is(err, submission.ErrInvalidUploadedFile):
 			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "answer contains invalid uploaded file reference")
+		case errors.Is(err, submission.ErrInvalidAIPrompt):
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "active AI prompt is invalid")
 		default:
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save answer")
 		}
