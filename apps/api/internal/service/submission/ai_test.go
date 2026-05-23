@@ -45,3 +45,24 @@ func TestBuildAIReviewPlanAnchorsPayloadAndKey(t *testing.T) {
 		t.Fatalf("expectations not met: %v", err)
 	}
 }
+
+func TestBuildAIReviewPlanSkipsWhenTaskAIReviewDisabled(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	promptID := uint64(7)
+	plan, err := buildAIReviewPlan(db,
+		model.Task{ID: 1, AIReviewEnabled: false, AIPromptID: &promptID},
+		model.Submission{ID: 42},
+		model.SubmissionRevision{ID: 901},
+	)
+	if err != nil {
+		t.Fatalf("buildAIReviewPlan returned error: %v", err)
+	}
+	if plan.Enabled {
+		t.Fatal("AI review plan should be disabled")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}

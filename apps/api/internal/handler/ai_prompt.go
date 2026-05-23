@@ -31,6 +31,7 @@ func (h AIPromptHandler) Register(api gin.IRouter) {
 	api.GET("/tasks/:taskId/ai-prompts", middleware.RequireRoles("owner", "admin"), h.ListPrompts)
 	api.POST("/tasks/:taskId/ai-prompts", middleware.RequireRoles("owner", "admin"), h.CreatePrompt)
 	api.POST("/tasks/:taskId/ai-prompts/:promptId/dry-run", middleware.RequireRoles("owner", "admin"), h.DryRun)
+	api.POST("/tasks/:taskId/ai-review-settings", middleware.RequireRoles("owner", "admin"), h.UpdateAIReviewSettings)
 }
 
 type aiPromptRequest struct {
@@ -52,6 +53,10 @@ type normalizedAIPromptRequest struct {
 type aiDryRunRequest struct {
 	Payload any `json:"payload"`
 	Answer  any `json:"answer"`
+}
+
+type aiReviewSettingsRequest struct {
+	Enabled *bool `json:"enabled"`
 }
 
 func (h AIPromptHandler) ListPrompts(c *gin.Context) {
@@ -174,7 +179,37 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 	})
 }
 
+func (h AIPromptHandler) UpdateAIReviewSettings(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var req aiReviewSettingsRequest
+	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
+		return
+	}
+	if req.Enabled == nil {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "enabled is required")
+		return
+	}
+
+	updated, err := h.updateAIReviewSettings(task.ID, *req.Enabled)
+	if err != nil {
+		if errors.Is(err, errAIReviewActivePromptRequired) {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "active ai_prompt_id is required before enabling AI review")
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update ai review settings")
+		return
+	}
+	httpx.OK(c, gin.H{
+		"aiReviewEnabled": updated.AIReviewEnabled,
+		"activePromptId":  updated.AIPromptID,
+	})
+}
+
 var errAIPromptVersionConflict = errors.New("ai prompt version conflict")
+var errAIReviewActivePromptRequired = errors.New("ai review active prompt required")
 
 func (h AIPromptHandler) createPromptVersion(taskID uint64, createdBy uint64, req normalizedAIPromptRequest) (model.AIPromptConfig, error) {
 	var created model.AIPromptConfig
@@ -209,6 +244,33 @@ func (h AIPromptHandler) createPromptVersion(taskID uint64, createdBy uint64, re
 		return tx.Model(&model.Task{}).Where("id = ?", taskID).Update("ai_prompt_id", created.ID).Error
 	})
 	return created, err
+}
+
+func (h AIPromptHandler) updateAIReviewSettings(taskID uint64, enabled bool) (model.Task, error) {
+	var updated model.Task
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&updated, taskID).Error; err != nil {
+			return err
+		}
+		if enabled {
+			if updated.AIPromptID == nil {
+				return errAIReviewActivePromptRequired
+			}
+			var prompt model.AIPromptConfig
+			if err := tx.Where("id = ? AND task_id = ?", *updated.AIPromptID, taskID).First(&prompt).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errAIReviewActivePromptRequired
+				}
+				return err
+			}
+		}
+		if err := tx.Model(&model.Task{}).Where("id = ?", taskID).Update("ai_review_enabled", enabled).Error; err != nil {
+			return err
+		}
+		updated.AIReviewEnabled = enabled
+		return nil
+	})
+	return updated, err
 }
 
 func (h AIPromptHandler) recordDryRun(c *gin.Context, taskID uint64, promptID uint64, status string, result *llmreview.EvaluationResult, cause error) error {

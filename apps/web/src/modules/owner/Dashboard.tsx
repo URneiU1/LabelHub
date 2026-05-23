@@ -21,6 +21,10 @@ type AIPromptsResponse = {
   activePromptId: number | null
   aiReviewEnabled: boolean
 }
+type AIReviewSettingsResponse = {
+  aiReviewEnabled: boolean
+  activePromptId: number | null
+}
 type AIDryRunResult = {
   provider: string
   result: {
@@ -37,6 +41,7 @@ export default function OwnerDashboard() {
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
+  const [aiReviewEnabled, setAIReviewEnabled] = useState(false)
   const [promptTemplate, setPromptTemplate] = useState('请根据 payload 和 answer 完成结构化预审。')
   const [dimensionsText, setDimensionsText] = useState(defaultDimensionsJSON)
   const [passThreshold, setPassThreshold] = useState('80')
@@ -48,6 +53,7 @@ export default function OwnerDashboard() {
   const [promptError, setPromptError] = useState('')
   const [savingPrompt, setSavingPrompt] = useState(false)
   const [runningDryRun, setRunningDryRun] = useState(false)
+  const [savingAIReviewSettings, setSavingAIReviewSettings] = useState(false)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -70,12 +76,14 @@ export default function OwnerDashboard() {
   const loadPrompts = useCallback(async (taskId: number) => {
     setPrompts([])
     setActivePromptId(null)
+    setAIReviewEnabled(false)
     setDryRun(null)
     setPromptError('')
     try {
       const data = await apiGet<AIPromptsResponse>(`/tasks/${taskId}/ai-prompts`)
       setPrompts(data.prompts)
       setActivePromptId(data.activePromptId)
+      setAIReviewEnabled(data.aiReviewEnabled)
       setDryRun(null)
       setPromptError('')
       const latest = data.prompts[0]
@@ -85,6 +93,7 @@ export default function OwnerDashboard() {
     } catch (error) {
       setPrompts([])
       setActivePromptId(null)
+      setAIReviewEnabled(false)
       setDryRun(null)
       setPromptError(error instanceof Error ? error.message : '加载 AI Prompt 失败')
     }
@@ -138,6 +147,26 @@ export default function OwnerDashboard() {
     }
   }
 
+  async function updateAIReviewSettings(enabled: boolean) {
+    if (!selected) return
+    const taskId = selected.id
+    setSavingAIReviewSettings(true)
+    setPromptError('')
+    try {
+      const data = await apiPost<AIReviewSettingsResponse>(`/tasks/${taskId}/ai-review-settings`, { enabled })
+      setAIReviewEnabled(data.aiReviewEnabled)
+      setActivePromptId(data.activePromptId)
+      setTasks((current) => current.map((task) => task.id === taskId ? { ...task, aiReviewEnabled: data.aiReviewEnabled, aiPromptId: data.activePromptId } : task))
+      Toast.success(enabled ? 'AI review 已启用' : 'AI review 已关闭')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '更新 AI review 设置失败'
+      setPromptError(message)
+      Toast.error(message)
+    } finally {
+      setSavingAIReviewSettings(false)
+    }
+  }
+
   async function runDryRun() {
     if (!selected || !activePromptId) return
     setRunningDryRun(true)
@@ -186,6 +215,19 @@ export default function OwnerDashboard() {
               </div>
               <section style={aiPromptSectionStyle}>
                 <h3 style={subHeadingStyle}>AI Prompt</h3>
+                <div style={aiSettingsRowStyle}>
+                  <span>AI review: {aiReviewEnabled ? '已启用' : '已关闭'}</span>
+                  {aiReviewEnabled ? (
+                    <Button disabled={savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(false)}>
+                      关闭 AI review
+                    </Button>
+                  ) : (
+                    <Button disabled={!activePromptId || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(true)}>
+                      启用 AI review
+                    </Button>
+                  )}
+                </div>
+                {!activePromptId ? <p style={mutedStyle}>保存 AI Prompt 后才能启用 AI review</p> : null}
                 {promptError ? <div role="alert" style={alertStyle}>{promptError}</div> : null}
                 <div style={formGridStyle}>
                   <label style={fieldStyle}>
@@ -306,6 +348,15 @@ const aiPromptSectionStyle: React.CSSProperties = {
   marginTop: 'var(--space-lg)',
   paddingTop: 'var(--space-md)',
   borderTop: '1px solid var(--color-border-light)',
+}
+
+const aiSettingsRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 'var(--space-sm)',
+  marginTop: 'var(--space-sm)',
+  color: 'var(--color-text-secondary)',
 }
 
 const formGridStyle: React.CSSProperties = {

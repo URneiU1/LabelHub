@@ -203,4 +203,77 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
   })
+
+  it('disables AI review enable action when no active prompt exists', async () => {
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByRole('button', { name: '启用 AI review' })).toBeDisabled()
+    expect(screen.getByText('保存 AI Prompt 后才能启用 AI review')).toBeInTheDocument()
+  })
+
+  it('enables AI review for a task with active prompt', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, aiPromptId: 33, aiReviewEnabled: false }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: '请预审',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ aiReviewEnabled: true, activePromptId: 33 })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: '启用 AI review' }))
+
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-review-settings', { enabled: true })
+    expect(await screen.findByText('AI review: 已启用')).toBeInTheDocument()
+  })
+
+  it('disables AI review for a task while keeping the active prompt', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, aiPromptId: 33, aiReviewEnabled: true }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: '请预审',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: true,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ aiReviewEnabled: false, activePromptId: 33 })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: '关闭 AI review' }))
+
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-review-settings', { enabled: false })
+    expect(await screen.findByText('AI review: 已关闭')).toBeInTheDocument()
+  })
 })

@@ -119,6 +119,131 @@ func TestAIPromptDryRunUsesMockProviderWithoutMutatingSubmissionState(t *testing
 	}
 }
 
+func TestUpdateAIReviewSettingsRejectsNonOwner(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 99, "Task", "draft"))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner2", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-review-settings", map[string]any{"enabled": true}))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestUpdateAIReviewSettingsEnableRequiresActivePrompt(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id"}).
+			AddRow(1, 7, "Task", "draft", nil))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id"}).
+			AddRow(1, 7, "Task", "draft", nil))
+	mock.ExpectRollback()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-review-settings", map[string]any{"enabled": true}))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestUpdateAIReviewSettingsEnableWithActivePrompt(t *testing.T) {
+	promptID := uint64(33)
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
+			AddRow(1, 7, "Task", "draft", promptID, false))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
+			AddRow(1, 7, "Task", "draft", promptID, false))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).AddRow(promptID, 1, 3))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .ai_review_enabled.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 999, Username: "admin", Roles: []string{"admin"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-review-settings", map[string]any{"enabled": true}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if data["aiReviewEnabled"] != true {
+		t.Fatalf("aiReviewEnabled = %v, want true", data["aiReviewEnabled"])
+	}
+	if data["activePromptId"] != float64(promptID) {
+		t.Fatalf("activePromptId = %v, want %d", data["activePromptId"], promptID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestUpdateAIReviewSettingsDisableKeepsActivePrompt(t *testing.T) {
+	promptID := uint64(33)
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
+			AddRow(1, 7, "Task", "draft", promptID, true))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
+			AddRow(1, 7, "Task", "draft", promptID, true))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .ai_review_enabled.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-review-settings", map[string]any{"enabled": false}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if data["aiReviewEnabled"] != false {
+		t.Fatalf("aiReviewEnabled = %v, want false", data["aiReviewEnabled"])
+	}
+	if data["activePromptId"] != float64(promptID) {
+		t.Fatalf("activePromptId = %v, want %d", data["activePromptId"], promptID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func validAIPromptBody() map[string]any {
 	return map[string]any{
 		"prompt_template": "请根据 {{payload.prompt}} 和 {{answer.summary}} 预审。",
