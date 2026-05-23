@@ -222,6 +222,120 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByRole('button', { name: '启用 AI review' })).toBeDisabled()
   })
 
+  it('ignores stale dry-run responses after switching tasks', async () => {
+    const user = userEvent.setup()
+    const dryRunResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A', aiPromptId: 33 },
+          { ...task, id: 2, title: 'Task B', aiPromptId: null },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: 'Task A prompt',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(dryRunResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: '运行 dry-run' }))
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+    expect(await screen.findByDisplayValue('请根据 payload 和 answer 完成结构化预审。')).toBeInTheDocument()
+
+    await act(async () => {
+      dryRunResult.resolve({
+        provider: 'mock',
+        result: {
+          verdict: 'pass',
+          overall_score: 90,
+          dimensions: [{ name: '相关性', score: 90, reason: 'late' }],
+          reason: 'late result',
+        },
+      })
+      await dryRunResult.promise
+    })
+
+    expect(screen.queryByText('late result')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '启用 AI review' })).toBeDisabled()
+  })
+
+  it('ignores stale save prompt responses after switching tasks', async () => {
+    const user = userEvent.setup()
+    const saveResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A', aiPromptId: 33 },
+          { ...task, id: 2, title: 'Task B', aiPromptId: null },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: 'Task A prompt',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(saveResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await screen.findByDisplayValue('Task A prompt')
+    await user.click(screen.getByRole('button', { name: '保存 AI Prompt' }))
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+    expect(await screen.findByDisplayValue('请根据 payload 和 answer 完成结构化预审。')).toBeInTheDocument()
+
+    await act(async () => {
+      saveResult.resolve({
+        prompt: {
+          id: 34,
+          version: 2,
+          promptTemplate: 'Late saved prompt',
+          dimensions: '[{"name":"迟到"}]',
+          passThreshold: 90,
+          uncertainMin: 70,
+          model: 'late-model',
+        },
+        activePromptId: 34,
+      })
+      await saveResult.promise
+    })
+
+    expect(screen.queryByDisplayValue('Late saved prompt')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '启用 AI review' })).toBeDisabled()
+  })
+
   it('runs dry-run and displays structured result with provider mark', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {

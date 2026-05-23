@@ -185,7 +185,7 @@ func (h workerHandlers) markFailed(ctx context.Context, payload aiReviewPayload,
 }
 
 func (h workerHandlers) retryOrFailover(ctx context.Context, payload aiReviewPayload, cause error) error {
-	if shouldFailover(ctx) {
+	if llmreview.IsNonRetryableEvaluationError(cause) || shouldFailover(ctx) {
 		if failErr := h.failover(ctx, payload, cause); failErr != nil {
 			return failErr
 		}

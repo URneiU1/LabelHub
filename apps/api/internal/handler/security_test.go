@@ -389,3 +389,53 @@ func TestSubmitItemRechecksClaimOwnershipInsideTransaction(t *testing.T) {
 		t.Fatalf("expectations not met: %v", err)
 	}
 }
+
+func TestSubmitItemRejectsEnabledAIWithInvalidActivePrompt(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
+	promptID := uint64(33)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "ai_prompt_id"}).
+			AddRow(1, 1, "published", true, promptID))
+	claimedBy := uint64(7)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
+			AddRow(11, 1, claimedBy, itemStatusClaimed))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "ai_prompt_id"}).
+			AddRow(1, 1, "published", true, promptID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).
+			AddRow(11, 1, claimedBy, itemStatusClaimed))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status", "template_version"}).
+			AddRow(42, 1, 11, claimedBy, "draft", 1))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(0))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(901, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnError(gorm.ErrRecordNotFound)
+	mock.ExpectRollback()
+
+	r := newGinWithClaims(claims)
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/items/11/submit", map[string]any{
+		"answer": map[string]any{"summary": "ok"},
+	}))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "VALIDATION_ERROR") {
+		t.Fatalf("expected VALIDATION_ERROR, body=%s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
+	"labelhub.local/llmreview"
 )
 
 func TestParseAIReviewPayloadRequiresAnchors(t *testing.T) {
@@ -345,6 +346,42 @@ func TestHandleAIReviewProviderFailureFailsOverOnFinalAttempt(t *testing.T) {
 	}
 }
 
+func TestHandleAIReviewNonRetryableEvaluationErrorFailsOverImmediately(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rawPayload := validAIReviewPayloadJSON()
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT sr.answer, ti.payload, COALESCE\(t.baseline_description,''\), cfg.prompt_template, cfg.dimensions, cfg.pass_threshold, cfg.uncertain_min, cfg.model`).
+		WillReturnRows(sqlmock.NewRows([]string{"answer", "payload", "baseline_description", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model"}).
+			AddRow(`{"summary":"ok"}`, `{"prompt":"question"}`, "baseline", "review {{answer.summary}}", `[{"name":"相关性"}]`, 80, 60, "test-model"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT status FROM ai_reviews.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
+	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'dead'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: nonRetryableEvaluator{}}
+	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err != nil {
+		t.Fatalf("handleAIReview returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 type staticEvaluator struct{}
 
 func (staticEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
@@ -364,6 +401,15 @@ type failingEvaluator struct{}
 
 func (failingEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
 	return aiEvaluation{}, errors.New("provider should not be called")
+}
+
+type nonRetryableEvaluator struct{}
+
+func (nonRetryableEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
+	return aiEvaluation{}, llmreview.ValidateThresholdConsistency(llmreview.EvaluationResult{
+		Verdict:      "pass",
+		OverallScore: 10,
+	}, input.Prompt)
 }
 
 func newAsynqTask(payload []byte) *asynq.Task {

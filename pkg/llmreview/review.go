@@ -167,11 +167,11 @@ func ParseEvaluationArguments(raw []byte, allowedDimensions []string) (Evaluatio
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&args); err != nil {
-		return EvaluationResult{}, err
+		return EvaluationResult{}, nonRetryableEvaluation(err)
 	}
 	var extra struct{}
 	if err := dec.Decode(&extra); err != io.EOF {
-		return EvaluationResult{}, errors.New("evaluation response contains trailing data")
+		return EvaluationResult{}, nonRetryableEvaluation(errors.New("evaluation response contains trailing data"))
 	}
 	result := EvaluationResult{
 		Verdict:      args.Verdict,
@@ -180,7 +180,7 @@ func ParseEvaluationArguments(raw []byte, allowedDimensions []string) (Evaluatio
 		Reason:       args.Reason,
 	}
 	if err := ValidateEvaluationResult(result, allowedDimensions); err != nil {
-		return EvaluationResult{}, err
+		return EvaluationResult{}, nonRetryableEvaluation(err)
 	}
 	return result, nil
 }
@@ -255,7 +255,7 @@ func ValidateThresholdConsistency(result EvaluationResult, prompt PromptConfig) 
 		expected = VerdictReject
 	}
 	if result.Verdict != expected {
-		return fmt.Errorf("verdict %q does not match score %.2f thresholds", result.Verdict, result.OverallScore)
+		return nonRetryableEvaluation(fmt.Errorf("verdict %q does not match score %.2f thresholds", result.Verdict, result.OverallScore))
 	}
 	return nil
 }
@@ -284,6 +284,25 @@ func SafeErrorMessage(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func IsNonRetryableEvaluationError(err error) bool {
+	var nonRetryable nonRetryableEvaluationError
+	return errors.As(err, &nonRetryable)
+}
+
+type nonRetryableEvaluationError struct {
+	err error
+}
+
+func (e nonRetryableEvaluationError) Error() string { return e.err.Error() }
+func (e nonRetryableEvaluationError) Unwrap() error { return e.err }
+
+func nonRetryableEvaluation(err error) error {
+	if err == nil || IsNonRetryableEvaluationError(err) {
+		return err
+	}
+	return nonRetryableEvaluationError{err: err}
 }
 
 func validScore(score float64) bool {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPost, type Task } from '../../shared/api/client'
 
@@ -57,12 +57,18 @@ export default function OwnerDashboard() {
   const [runningDryRun, setRunningDryRun] = useState(false)
   const [savingAIReviewSettings, setSavingAIReviewSettings] = useState(false)
   const promptLoadSeq = useRef(0)
+  const selectedTaskIdRef = useRef<number | null>(null)
+  const taskActionGeneration = useRef(0)
+  const savePromptSeq = useRef(0)
+  const aiReviewSettingsSeq = useRef(0)
+  const dryRunSeq = useRef(0)
 
   const loadTasks = useCallback(async () => {
     try {
       const data = await apiGet<TaskListResponse>('/tasks')
       setTasks(data)
       setSelected(data[0] ?? null)
+      selectedTaskIdRef.current = data[0]?.id ?? null
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载任务失败')
     }
@@ -87,6 +93,7 @@ export default function OwnerDashboard() {
   const loadPrompts = useCallback(async (taskId: number) => {
     const requestSeq = promptLoadSeq.current + 1
     promptLoadSeq.current = requestSeq
+    taskActionGeneration.current += 1
     setPrompts([])
     setActivePromptId(null)
     setAIReviewEnabled(false)
@@ -94,6 +101,9 @@ export default function OwnerDashboard() {
     setPromptError('')
     setPromptLoading(true)
     setPromptLoadFailed(false)
+    setSavingPrompt(false)
+    setRunningDryRun(false)
+    setSavingAIReviewSettings(false)
     try {
       const data = await apiGet<AIPromptsResponse>(`/tasks/${taskId}/ai-prompts`)
       if (promptLoadSeq.current !== requestSeq) return
@@ -130,10 +140,26 @@ export default function OwnerDashboard() {
 
   useEffect(() => {
     if (selected) {
+      selectedTaskIdRef.current = selected.id
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadPrompts(selected.id)
     }
   }, [loadPrompts, selected])
+
+  function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
+    seqRef.current += 1
+    return { taskId, generation: taskActionGeneration.current, seq: seqRef.current }
+  }
+
+  function isCurrentTaskAction(guard: { taskId: number, generation: number, seq: number }, seqRef: MutableRefObject<number>) {
+    return selectedTaskIdRef.current === guard.taskId && taskActionGeneration.current === guard.generation && seqRef.current === guard.seq
+  }
+
+  function selectTask(task: Task) {
+    selectedTaskIdRef.current = task.id
+    taskActionGeneration.current += 1
+    setSelected(task)
+  }
 
   async function exportJSON(taskId: number) {
     try {
@@ -147,6 +173,7 @@ export default function OwnerDashboard() {
 
   async function savePrompt() {
     if (!selected || promptLoading || promptLoadFailed) return
+    const guard = beginTaskAction(selected.id, savePromptSeq)
     setSavingPrompt(true)
     setPromptError('')
     try {
@@ -158,41 +185,51 @@ export default function OwnerDashboard() {
         uncertain_min: Number(uncertainMin),
         model,
       })
+      if (!isCurrentTaskAction(guard, savePromptSeq)) return
       setPrompts((current) => [data.prompt, ...current])
       setActivePromptId(data.activePromptId)
       fillPromptForm(data.prompt)
       Toast.success('AI Prompt 已保存')
     } catch (error) {
+      if (!isCurrentTaskAction(guard, savePromptSeq)) return
       const message = error instanceof Error ? error.message : '保存 AI Prompt 失败'
       setPromptError(message)
       Toast.error(message)
     } finally {
-      setSavingPrompt(false)
+      if (isCurrentTaskAction(guard, savePromptSeq)) {
+        setSavingPrompt(false)
+      }
     }
   }
 
   async function updateAIReviewSettings(enabled: boolean) {
     if (!selected || promptLoading || promptLoadFailed) return
     const taskId = selected.id
+    const guard = beginTaskAction(taskId, aiReviewSettingsSeq)
     setSavingAIReviewSettings(true)
     setPromptError('')
     try {
       const data = await apiPost<AIReviewSettingsResponse>(`/tasks/${taskId}/ai-review-settings`, { enabled })
+      if (!isCurrentTaskAction(guard, aiReviewSettingsSeq)) return
       setAIReviewEnabled(data.aiReviewEnabled)
       setActivePromptId(data.activePromptId)
       setTasks((current) => current.map((task) => task.id === taskId ? { ...task, aiReviewEnabled: data.aiReviewEnabled, aiPromptId: data.activePromptId } : task))
       Toast.success(enabled ? 'AI review 已启用' : 'AI review 已关闭')
     } catch (error) {
+      if (!isCurrentTaskAction(guard, aiReviewSettingsSeq)) return
       const message = error instanceof Error ? error.message : '更新 AI review 设置失败'
       setPromptError(message)
       Toast.error(message)
     } finally {
-      setSavingAIReviewSettings(false)
+      if (isCurrentTaskAction(guard, aiReviewSettingsSeq)) {
+        setSavingAIReviewSettings(false)
+      }
     }
   }
 
   async function runDryRun() {
     if (!selected || !activePromptId || promptLoading || promptLoadFailed) return
+    const guard = beginTaskAction(selected.id, dryRunSeq)
     setRunningDryRun(true)
     setPromptError('')
     setDryRun(null)
@@ -201,15 +238,19 @@ export default function OwnerDashboard() {
         payload: JSON.parse(samplePayload) as Record<string, unknown>,
         answer: JSON.parse(sampleAnswer) as Record<string, unknown>,
       })
+      if (!isCurrentTaskAction(guard, dryRunSeq)) return
       setDryRun(data)
       Toast.success('dry-run 完成')
     } catch (error) {
+      if (!isCurrentTaskAction(guard, dryRunSeq)) return
       const message = error instanceof Error ? error.message : 'dry-run 失败'
       setDryRun(null)
       setPromptError(message)
       Toast.error(message)
     } finally {
-      setRunningDryRun(false)
+      if (isCurrentTaskAction(guard, dryRunSeq)) {
+        setRunningDryRun(false)
+      }
     }
   }
 
@@ -224,7 +265,7 @@ export default function OwnerDashboard() {
         <section style={panelStyle}>
           <h2 style={headingStyle}>任务</h2>
           {tasks.map((task) => (
-            <button key={task.id} onClick={() => setSelected(task)} style={task.id === selected?.id ? activeListButtonStyle : listButtonStyle}>
+            <button key={task.id} onClick={() => selectTask(task)} style={task.id === selected?.id ? activeListButtonStyle : listButtonStyle}>
               <strong>{task.title}</strong>
               <span>{task.finishedItems}/{task.totalItems} · {task.status}</span>
             </button>

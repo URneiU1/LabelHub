@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-23 `s3-ai-review-followups`: 完成 S3 AI review P2 cleanup:Owner Dashboard 的 save prompt / AI review settings / dry-run 都加 task/action guard,切换 task 后晚到的 action response/error 不再污染当前任务 UI;OpenAI-compatible provider HTTP 400/401 error body 不进入 error message;LLM schema/threshold validation error 标记为 non-retryable,worker 遇到后直接 failover 到人工审核避免重复扣费;补 submit invalid active prompt 和 disallowed active model 的 422 HTTP 回归。
 - 2026-05-23 `s3-ai-p1-hardening`: 修复 S3 AI review P1 阻塞项:worker 校验 payload 与 idempotency key 一致,所有 claim/finalize/failover 更新绑定 submission/revision/prompt version,非最终失败回写 failed 以便 Asynq 重试;submission submit 事务内锁定并重载 task 后再决定 AI plan,enabled 但 active prompt 缺失/跨 task/模型不允许时明确拒绝提交;LLM verdict 与 score thresholds 不一致会被拒绝;Owner Dashboard 忽略过期 prompt 响应,加载中/失败时禁用保存、启停和 dry-run,失败 dry-run 清空旧结果;provider HTTP error body 不再写入 dry-run/worker error 持久化路径。
 - 2026-05-23 `s3-ai-prompt-form-reset`: 修复 Owner Dashboard 跨任务 AI Prompt 表单残留:切换到无 prompt 的任务或 prompt 加载失败时,表单会重置为默认 prompt_template/dimensions/thresholds/空 model,避免把上一任务 prompt 误保存到当前任务。
 - 2026-05-23 `s3-ai-review-controls`: 完成任务级 AI review 启用/关闭控制:新增 owner/admin `POST /tasks/:taskId/ai-review-settings`,复用 `loadOwnedTask` 权限边界,启用前校验 active `ai_prompt_id` 且 prompt 属于当前 task,关闭时只更新 `tasks.ai_review_enabled=false` 并保留 prompt history;Owner Dashboard 在 AI Prompt 区块展示当前状态,无 active prompt 时禁用启用动作,有 prompt 时可启用或关闭并本地更新状态;submission flow 回归确认 `ai_review_enabled=false` 即使有 prompt 也跳过 AI。
@@ -62,7 +63,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- AI 预审 P1 安全/状态/前端竞态问题已收敛,但 golden sample 管理、Reviewer AI verdict/score 展示还未做。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup,但 golden sample 管理、Reviewer AI verdict/score 展示还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
@@ -74,6 +75,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-23 S3 AI review followups: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI P1 hardening: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI prompt form reset: `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 AI review controls: `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

@@ -10,7 +10,7 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 AI P1 hardening is implemented and verified. Worker payload/idempotency anchors are checked and bound through review updates, retryable worker failures return reviews to `failed`, submit-time AI planning uses a locked fresh task snapshot, invalid active prompts abort submit, verdict/threshold mismatches are rejected, and Owner Dashboard ignores stale prompt loads while disabling prompt actions during failed/in-flight loads.
+- Latest completed work: S3 AI review follow-ups are implemented. Owner Dashboard ignores stale save/settings/dry-run responses after task switches, provider HTTP error bodies stay out of persisted/provider errors, LLM schema/threshold validation failures are marked non-retryable and fail over directly to human review, and HTTP 422 coverage exists for invalid active prompts and disallowed active models.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
 - Next priority: Designer append/delete/simple property editing, followed by golden sample persistence shape, golden sample management, and Reviewer AI verdict/score display.
 

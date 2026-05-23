@@ -29,6 +29,7 @@ After every code-writing turn:
 - S3 task-level AI review controls are in place: owner/admin can toggle `tasks.ai_review_enabled` via `POST /tasks/:taskId/ai-review-settings`; enabling requires an active prompt for the task, disabling keeps prompt history, and Owner Dashboard reflects the status inline.
 - Owner Dashboard now resets the AI Prompt form to defaults when switching to a task with no prompts or when prompt loading fails, preventing accidental cross-task prompt copies.
 - S3 AI P1 hardening is in place: AI worker payload/idempotency anchors are verified and bound through running/completion/failover updates; retryable worker failures return reviews to `failed`; submission submit locks/reloads task before AI planning and rejects invalid active prompts; LLM verdict/score threshold mismatches are rejected; Owner Dashboard ignores stale prompt loads and disables prompt actions while loading failed or is in flight.
+- S3 AI review follow-ups are in place: Owner Dashboard action responses are task/action guarded after task switches; provider HTTP error bodies are not exposed in persisted error messages; LLM schema/threshold validation errors are non-retryable and fail over directly to human review; HTTP 422 coverage exists for invalid active prompts and disallowed active models.
 
 ## Next Work
 

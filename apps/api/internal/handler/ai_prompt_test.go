@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -201,6 +202,40 @@ func TestUpdateAIReviewSettingsEnableWithActivePrompt(t *testing.T) {
 	}
 	if data["activePromptId"] != float64(promptID) {
 		t.Fatalf("activePromptId = %v, want %d", data["activePromptId"], promptID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestUpdateAIReviewSettingsEnableRejectsDisallowedActiveModel(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "allowed-model")
+	promptID := uint64(33)
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
+			AddRow(1, 7, "Task", "draft", promptID, false))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "ai_review_enabled"}).
+			AddRow(1, 7, "Task", "draft", promptID, false))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "model"}).AddRow(promptID, 1, 3, "blocked-model"))
+	mock.ExpectRollback()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/ai-review-settings", map[string]any{"enabled": true}))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "VALIDATION_ERROR") {
+		t.Fatalf("expected VALIDATION_ERROR, body=%s", rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
