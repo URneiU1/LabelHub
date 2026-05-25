@@ -38,11 +38,12 @@ After every code-writing turn:
 - Owner Dashboard now resets golden sample create drafts only when switching to a different task, preventing Task A payload/answer/verdict/notes from being accidentally created under Task B while preserving same-task no-op clicks.
 - Ad-hoc AI prompt dry-run now preserves raw JSON payload/answer end to end: Owner UI sends the textarea JSON through `apiPostRawJSON`, the handler accepts `json.RawMessage`, and OpenAI-compatible message construction uses `UseNumber`, avoiding float64 precision loss for large numeric IDs.
 - AI prompt dry-run regression coverage now includes Owner raw request body precision, golden sample prompt choice reset, and backend missing/null/invalid raw JSON validation.
+- Task-scoped AI dry-run history API is in place: owner/admin can call `GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=` and receive JSON-valued snapshots/results plus expected/actual verdict, matched flag, status/error, prompt version, and timestamps.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Add task-scoped dry-run history list API, then design the real batch dry-run endpoint partial-failure contract before Reviewer AI verdict display.
+- Design and implement the real batch golden sample dry-run endpoint partial-failure contract before Reviewer AI verdict display.
 - Add server-side dry-run throttle/provider rate-limit backoff before enabling heavier golden sample runs.
 - Continue hardening the Owner UI batch result table with persisted history/trend views after the history API lands.
 - Batch dry-run endpoint is still intentionally deferred; current Owner result table uses frontend serial calls to the single-sample endpoint.

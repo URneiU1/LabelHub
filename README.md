@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s3-ai-dry-run-history-api`: 新增 owner/admin task-scoped dry-run history list API:`GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=`,复用 task ownership 边界,支持按 golden sample 过滤和 limit 上限,返回 dry-run 记录的 prompt version、payload/expected answer snapshot、expected/actual verdict、matched flag、status/result/error 和完成时间,其中 JSON snapshot/result 以 JSON value 返回而不是 escaped string。真正 batch golden sample dry-run endpoint 仍保留下一段,需要和 partial failure contract、server-side throttle/provider rate-limit backoff 一起落地。
 - 2026-05-25 `s3-owner-dry-run-raw-json`: 修复 Owner Dashboard ad-hoc AI prompt dry-run 端到端 raw JSON 精度:前端不再 `JSON.parse` 后走 `apiPost`,改为校验后用 `apiPostRawJSON` 发送 textarea 原始 JSON body,配合后端 RawMessage/provider UseNumber 避免大整数在前端、handler 或 provider message 路径被 float64 精度坍塌;同时补 golden sample prompt choice reset 断言和 ad-hoc dry-run missing/null/invalid JSON 回归。
 - 2026-05-25 `s3-golden-sample-draft-reset`: 修复 Owner Dashboard golden sample create draft 跨 task 泄漏:切换到不同 task 时重置 payload/expected_answer/expected_verdict/notes/prompt choice,同 task 重复点击仍 no-op;同时将 ad-hoc AI prompt dry-run 的 payload/answer 改为 raw JSON 传递,避免大整数在 handler/provider message 路径被 float64 精度坍塌。
 - 2026-05-25 `s3-golden-sample-owner-ui`: 修复 golden sample JSON contract:创建接口用 raw JSON/canonical hash 保留大整数精度,GET/POST 响应用 JSON value 而不是 escaped string;Owner Dashboard 新增 Golden Samples 管理区,支持加载/创建/删除样本、按 active/指定 prompt 绑定、单样本 dry-run、前端串行 Run all visible samples 和 result table,并沿用 task/action stale guard 防止跨 task 晚到响应污染 UI。批量 dry-run 后端 endpoint 仍暂缓,当前 result table 基于单样本 endpoint 串行执行。
@@ -69,18 +70,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI 与前端串行 result table 已具备,但 task-scoped dry-run history API、真正 batch dry-run endpoint、server-side dry-run throttle/provider rate-limit backoff、Reviewer AI verdict/score 展示还未做。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、前端串行 result table 和 task-scoped dry-run history API 已具备,但真正 batch dry-run endpoint、server-side dry-run throttle/provider rate-limit backoff、Reviewer AI verdict/score 展示还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:进入 Designer 的 append/delete/简易属性编辑能力。
-- 推进 S3 下一段:新增 task-scoped dry-run history list API,设计真正 batch golden sample dry-run endpoint 的 partial failure contract,补 server-side dry-run throttle/provider rate-limit backoff,继续打磨 Owner UI batch result table 的历史视图,之后补 Reviewer AI verdict/score 展示和 golden sample result trend/history。
+- 推进 S3 下一段:设计并实现真正 batch golden sample dry-run endpoint 的 partial failure contract,补 server-side dry-run throttle/provider rate-limit backoff,继续打磨 Owner UI batch result table 的历史视图,之后补 Reviewer AI verdict/score 展示和 golden sample result trend/history。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-25 S3 AI dry-run history API: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIDryRuns'` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过。未改前端,未跑 web test/lint/build。
 - 2026-05-25 S3 Owner dry-run raw JSON: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun'` 通过;targeted `pnpm -F web test -- Dashboard` 通过;full `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S3 golden sample draft reset: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun|GoldenSample'` 通过;targeted `cd pkg/llmreview && go test -count=1 ./...` 通过;targeted `pnpm -F web test -- Dashboard` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S3 golden sample owner UI: `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

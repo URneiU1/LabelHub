@@ -10,13 +10,13 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 Owner dry-run raw JSON follow-up is implemented. Golden sample create drafts reset on actual task switch without breaking same-task no-op clicks, and ad-hoc AI prompt dry-run now preserves raw JSON payload/answer numbers from Owner UI request construction through handler/provider message construction.
+- Latest completed work: S3 task-scoped AI dry-run history API is implemented. Owner/admin can list `ai_dry_runs` for a task, optionally filtered by `golden_sample_id`, with JSON-valued payload/answer snapshots and result data for future Owner history/trend UI.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
-- Next priority: Designer append/delete/simple property editing, plus S3 dry-run history list API / true batch dry-run contract / server-side dry-run throttle and provider rate-limit backoff, then Reviewer AI verdict/score display.
+- Next priority: Designer append/delete/simple property editing, plus S3 true batch dry-run contract / server-side dry-run throttle and provider rate-limit backoff, then Owner history/trend UI and Reviewer AI verdict/score display.
 
 ## Known Follow-Ups
 
-- AI queue/failover/provider, prompt enable controls, and Owner golden sample management are closed for the first S3 slices, but S3 is not product-complete until dry-run history/batch semantics, rate-limit/backoff controls, Owner result history/trend views, and Reviewer AI verdict display are added.
+- AI queue/failover/provider, prompt enable controls, Owner golden sample management, and task-scoped dry-run history listing are closed for the first S3 slices, but S3 is not product-complete until batch semantics, rate-limit/backoff controls, Owner result history/trend views, and Reviewer AI verdict display are added.
 - Batch golden sample dry-run endpoint is deferred; current Owner result table intentionally runs visible samples serially through the single-sample endpoint until partial-failure semantics are designed.
 - Add FileUpload download/preview authorization and orphan temp-file cleanup.
 - Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

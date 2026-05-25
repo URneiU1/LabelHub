@@ -66,6 +66,7 @@ func main() {
 	handler.NewTemplateHandler(database).Register(authedAPI)
 	handler.NewAIPromptHandler(database).Register(authedAPI)
 	handler.NewGoldenSampleHandler(database).Register(authedAPI)
+	handler.NewAIDryRunHandler(database).Register(authedAPI)
 
 	port := serverPort()
 	logger.Info("API server starting", zap.String("port", port))
