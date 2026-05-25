@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -52,8 +53,8 @@ type normalizedAIPromptRequest struct {
 }
 
 type aiDryRunRequest struct {
-	Payload any `json:"payload"`
-	Answer  any `json:"answer"`
+	Payload json.RawMessage `json:"payload"`
+	Answer  json.RawMessage `json:"answer"`
 }
 
 type aiReviewSettingsRequest struct {
@@ -117,8 +118,12 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
 		return
 	}
-	if req.Payload == nil || req.Answer == nil {
-		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "payload and answer are required")
+	payloadJSON, ok := normalizeAIDryRunJSON(c, req.Payload, "payload")
+	if !ok {
+		return
+	}
+	answerJSON, ok := normalizeAIDryRunJSON(c, req.Answer, "answer")
+	if !ok {
 		return
 	}
 
@@ -136,18 +141,8 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt model is not allowed")
 		return
 	}
-	payloadJSON, err := json.Marshal(req.Payload)
-	if err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "payload is invalid")
-		return
-	}
-	answerJSON, err := json.Marshal(req.Answer)
-	if err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "answer is invalid")
-		return
-	}
 
-	provider, _, err := llmreview.NewProviderFromEnv(nil)
+	provider, _, err := newAIDryRunProviderFromEnv(nil)
 	if err != nil {
 		_ = h.recordDryRun(c, task.ID, prompt.ID, prompt.Version, "failed", nil, err)
 		httpx.Error(c, http.StatusBadGateway, "LLM_PROVIDER_ERROR", "llm provider is not configured")
@@ -165,8 +160,8 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 		TaskID:              task.ID,
 		PromptConfigID:      prompt.ID,
 		PromptVersion:       prompt.Version,
-		PayloadJSON:         string(payloadJSON),
-		AnswerJSON:          string(answerJSON),
+		PayloadJSON:         payloadJSON,
+		AnswerJSON:          answerJSON,
 		BaselineDescription: task.BaselineDescription.String,
 	})
 	if err != nil {
@@ -225,6 +220,7 @@ func (h AIPromptHandler) UpdateAIReviewSettings(c *gin.Context) {
 var errAIPromptVersionConflict = errors.New("ai prompt version conflict")
 var errAIReviewActivePromptRequired = errors.New("ai review active prompt required")
 var errAIReviewModelNotAllowed = errors.New("ai review model not allowed")
+var newAIDryRunProviderFromEnv = llmreview.NewProviderFromEnv
 
 func (h AIPromptHandler) createPromptVersion(taskID uint64, createdBy uint64, req normalizedAIPromptRequest) (model.AIPromptConfig, error) {
 	var created model.AIPromptConfig
@@ -314,6 +310,19 @@ func (h AIPromptHandler) recordDryRun(c *gin.Context, taskID uint64, promptID ui
 		run.ErrorMsg = model.StringFrom(llmreview.SafeErrorMessage(cause))
 	}
 	return h.db.Create(&run).Error
+}
+
+func normalizeAIDryRunJSON(c *gin.Context, raw json.RawMessage, field string) (string, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "payload and answer are required")
+		return "", false
+	}
+	if !json.Valid(trimmed) {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", field+" is invalid")
+		return "", false
+	}
+	return string(trimmed), true
 }
 
 func normalizeAIPromptRequest(req aiPromptRequest) (normalizedAIPromptRequest, error) {

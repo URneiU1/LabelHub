@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1148,6 +1148,53 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByText('same task golden run')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Run golden sample 11' })).not.toBeDisabled()
+  })
+
+  it('resets golden sample draft only when switching to a different task', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts' || path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples' || path === '/tasks/2/golden-samples') {
+        return { samples: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    const payloadInput = await screen.findByLabelText('golden_sample_payload')
+    const answerInput = screen.getByLabelText('golden_sample_expected_answer')
+    const verdictInput = screen.getByLabelText('golden_sample_expected_verdict')
+    const notesInput = screen.getByLabelText('golden_sample_notes')
+
+    fireEvent.change(payloadInput, { target: { value: '{"prompt":"Task A custom"}' } })
+    fireEvent.change(answerInput, { target: { value: '{"summary":"Task A answer"}' } })
+    await user.selectOptions(verdictInput, 'reject')
+    fireEvent.change(notesInput, { target: { value: 'Task A note' } })
+
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+
+    expect(await screen.findByLabelText('golden_sample_payload')).toHaveValue('{"prompt":"示例题目"}')
+    expect(screen.getByLabelText('golden_sample_expected_answer')).toHaveValue('{"summary":"示例答案"}')
+    expect(screen.getByLabelText('golden_sample_expected_verdict')).toHaveValue('pass')
+    expect(screen.getByLabelText('golden_sample_notes')).toHaveValue('')
+
+    fireEvent.change(screen.getByLabelText('golden_sample_payload'), { target: { value: '{"prompt":"Task B draft"}' } })
+    await user.selectOptions(screen.getByLabelText('golden_sample_expected_verdict'), 'uncertain')
+    fireEvent.change(screen.getByLabelText('golden_sample_notes'), { target: { value: 'Task B note' } })
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+
+    expect(screen.getByLabelText('golden_sample_payload')).toHaveValue('{"prompt":"Task B draft"}')
+    expect(screen.getByLabelText('golden_sample_expected_verdict')).toHaveValue('uncertain')
+    expect(screen.getByLabelText('golden_sample_notes')).toHaveValue('Task B note')
   })
 })
 

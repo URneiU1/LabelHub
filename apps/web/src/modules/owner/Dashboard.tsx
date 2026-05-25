@@ -83,9 +83,9 @@ export default function OwnerDashboard() {
   const [sampleAnswer, setSampleAnswer] = useState('{"summary":"示例答案"}')
   const [dryRun, setDryRun] = useState<AIDryRunResult | null>(null)
   const [goldenSamples, setGoldenSamples] = useState<GoldenSample[]>([])
-  const [goldenPayload, setGoldenPayload] = useState('{"prompt":"示例题目"}')
-  const [goldenExpectedAnswer, setGoldenExpectedAnswer] = useState('{"summary":"示例答案"}')
-  const [goldenExpectedVerdict, setGoldenExpectedVerdict] = useState('pass')
+  const [goldenPayload, setGoldenPayload] = useState(defaultGoldenPayload)
+  const [goldenExpectedAnswer, setGoldenExpectedAnswer] = useState(defaultGoldenExpectedAnswer)
+  const [goldenExpectedVerdict, setGoldenExpectedVerdict] = useState(defaultGoldenExpectedVerdict)
   const [goldenNotes, setGoldenNotes] = useState('')
   const [goldenPromptChoice, setGoldenPromptChoice] = useState('active')
   const [goldenSampleError, setGoldenSampleError] = useState('')
@@ -111,16 +111,25 @@ export default function OwnerDashboard() {
   const deleteGoldenSampleSeq = useRef(0)
   const goldenSampleRunSeq = useRef(0)
 
+  const resetGoldenSampleFormToDefaults = useCallback(() => {
+    setGoldenPayload(defaultGoldenPayload)
+    setGoldenExpectedAnswer(defaultGoldenExpectedAnswer)
+    setGoldenExpectedVerdict(defaultGoldenExpectedVerdict)
+    setGoldenNotes('')
+    setGoldenPromptChoice('active')
+  }, [])
+
   const loadTasks = useCallback(async () => {
     try {
       const data = await apiGet<TaskListResponse>('/tasks')
       setTasks(data)
       setSelected(data[0] ?? null)
       selectedTaskIdRef.current = data[0]?.id ?? null
+      resetGoldenSampleFormToDefaults()
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载任务失败')
     }
-  }, [])
+  }, [resetGoldenSampleFormToDefaults])
 
   const fillPromptForm = useCallback((prompt: AIPromptConfig) => {
     setPromptTemplate(prompt.promptTemplate)
@@ -191,7 +200,6 @@ export default function OwnerDashboard() {
     setGoldenSampleLoadFailed(false)
     setCreatingGoldenSample(false)
     setDeletingGoldenSampleId(null)
-    setGoldenPromptChoice('active')
     try {
       const data = await apiGet<GoldenSamplesResponse>(`/tasks/${taskId}/golden-samples`)
       if (goldenSampleLoadSeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
@@ -254,6 +262,7 @@ export default function OwnerDashboard() {
     setGoldenSampleLoadFailed(false)
     setCreatingGoldenSample(false)
     setDeletingGoldenSampleId(null)
+    resetGoldenSampleFormToDefaults()
     setSelected(task)
   }
 
@@ -717,6 +726,9 @@ const defaultPromptTemplate = '请根据 payload 和 answer 完成结构化预�
 const defaultPassThreshold = '80'
 const defaultUncertainMin = '60'
 const defaultModel = ''
+const defaultGoldenPayload = '{"prompt":"示例题目"}'
+const defaultGoldenExpectedAnswer = '{"summary":"示例答案"}'
+const defaultGoldenExpectedVerdict = 'pass'
 
 const defaultDimensionsJSON = JSON.stringify([
   { name: '相关性', description: '是否相关', weight: 1 },

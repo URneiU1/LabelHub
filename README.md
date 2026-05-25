@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s3-golden-sample-draft-reset`: 修复 Owner Dashboard golden sample create draft 跨 task 泄漏:切换到不同 task 时重置 payload/expected_answer/expected_verdict/notes/prompt choice,同 task 重复点击仍 no-op;同时将 ad-hoc AI prompt dry-run 的 payload/answer 改为 raw JSON 传递,避免大整数在 handler/provider message 路径被 float64 精度坍塌。
 - 2026-05-25 `s3-golden-sample-owner-ui`: 修复 golden sample JSON contract:创建接口用 raw JSON/canonical hash 保留大整数精度,GET/POST 响应用 JSON value 而不是 escaped string;Owner Dashboard 新增 Golden Samples 管理区,支持加载/创建/删除样本、按 active/指定 prompt 绑定、单样本 dry-run、前端串行 Run all visible samples 和 result table,并沿用 task/action stale guard 防止跨 task 晚到响应污染 UI。批量 dry-run 后端 endpoint 仍暂缓,当前 result table 基于单样本 endpoint 串行执行。
 - 2026-05-23 `s3-golden-sample-dry-run-linking`: 新增 golden sample 单样本 dry-run linking: additive migration 扩展 `ai_dry_runs` 记录 `golden_sample_id`、prompt version、输入快照、expected/actual verdict、matched flag 和完成时间,并从 `ai_prompt_configs` 回填历史 prompt version;新增 `POST /tasks/:taskId/golden-samples/:sampleId/dry-run`,复用 owner/admin ownership、sample pinned prompt/task active prompt、prompt allowlist、mock/OpenAI-compatible provider 和 threshold consistency,成功/失败均写 dry-run 记录且 provider failure 只返回/持久化安全错误信息。批量 dry-run 暂缓,避免在结果表 UI 前先固化 partial failure 和路由语义。
 - 2026-05-23 `s3-golden-sample-api`: 新增 owner/admin golden sample persistence API:`GET/POST/DELETE /tasks/:taskId/golden-samples`,复用 task ownership 边界;创建时校验 payload/expected_answer/expected_verdict,可选 `ai_prompt_id` 必须属于当前 task,对 canonical payload JSON 计算 sha256 并用 `uk_task_payload_hash` 做同 task 去重,重复 payload 返回 409。
@@ -67,18 +68,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI 与前端串行 result table 已具备,但 task-scoped dry-run history API、真正 batch dry-run endpoint、Reviewer AI verdict/score 展示还未做。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI 与前端串行 result table 已具备,但 task-scoped dry-run history API、真正 batch dry-run endpoint、server-side dry-run throttle/provider rate-limit backoff、Reviewer AI verdict/score 展示还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:进入 Designer 的 append/delete/简易属性编辑能力。
-- 推进 S3 下一段:新增 task-scoped dry-run history list API,再设计真正 batch dry-run endpoint 的 partial failure contract,之后补 Reviewer AI verdict/score 展示和 golden sample result trend/history。
+- 推进 S3 下一段:新增 task-scoped dry-run history list API,设计真正 batch golden sample dry-run endpoint 的 partial failure contract,补 server-side dry-run throttle/provider rate-limit backoff,继续打磨 Owner UI batch result table 的历史视图,之后补 Reviewer AI verdict/score 展示和 golden sample result trend/history。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-25 S3 golden sample draft reset: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun|GoldenSample'` 通过;targeted `cd pkg/llmreview && go test -count=1 ./...` 通过;targeted `pnpm -F web test -- Dashboard` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S3 golden sample owner UI: `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 golden sample dry-run linking: `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 golden sample persistence API: `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

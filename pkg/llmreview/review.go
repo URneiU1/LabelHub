@@ -509,9 +509,14 @@ func buildMessages(prompt PromptConfig, input EvaluationInput) []chatMessage {
 }
 
 func jsonValueOrString(raw string) any {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
 	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err == nil {
-		return value
+	if err := decoder.Decode(&value); err == nil {
+		var extra any
+		if decoder.Decode(&extra) == io.EOF {
+			return value
+		}
 	}
 	return raw
 }
