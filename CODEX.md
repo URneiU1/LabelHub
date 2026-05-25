@@ -39,14 +39,14 @@ After every code-writing turn:
 - Ad-hoc AI prompt dry-run now preserves raw JSON payload/answer end to end: Owner UI sends the textarea JSON through `apiPostRawJSON`, the handler accepts `json.RawMessage`, and OpenAI-compatible message construction uses `UseNumber`, avoiding float64 precision loss for large numeric IDs.
 - AI prompt dry-run regression coverage now includes Owner raw request body precision, golden sample prompt choice reset, and backend missing/null/invalid raw JSON validation.
 - Task-scoped AI dry-run history API is in place: owner/admin can call `GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=` and receive JSON-valued snapshots/results plus expected/actual verdict, matched flag, status/error, prompt version, and timestamps.
+- Batch golden sample dry-run API is in place: owner/admin can call `POST /tasks/:taskId/golden-samples/dry-runs` with up to 20 task-owned sample IDs; the server runs them serially, returns per-sample partial results, and does not let provider/config/evaluator failure for one sample block the rest.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Design and implement the real batch golden sample dry-run endpoint partial-failure contract before Reviewer AI verdict display.
-- Add server-side dry-run throttle/provider rate-limit backoff before enabling heavier golden sample runs.
+- Wire Owner UI Run all to the backend batch dry-run endpoint before Reviewer AI verdict display.
+- Add configurable server-side provider rate-limit/backoff before enabling heavier golden sample runs.
 - Continue hardening the Owner UI batch result table with persisted history/trend views after the history API lands.
-- Batch dry-run endpoint is still intentionally deferred; current Owner result table uses frontend serial calls to the single-sample endpoint.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.

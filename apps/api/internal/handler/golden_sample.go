@@ -34,6 +34,7 @@ func NewGoldenSampleHandler(db *gorm.DB) GoldenSampleHandler {
 func (h GoldenSampleHandler) Register(api gin.IRouter) {
 	api.GET("/tasks/:taskId/golden-samples", middleware.RequireRoles("owner", "admin"), h.List)
 	api.POST("/tasks/:taskId/golden-samples", middleware.RequireRoles("owner", "admin"), h.Create)
+	api.POST("/tasks/:taskId/golden-samples/dry-runs", middleware.RequireRoles("owner", "admin"), h.BatchDryRun)
 	api.DELETE("/tasks/:taskId/golden-samples/:sampleId", middleware.RequireRoles("owner", "admin"), h.Delete)
 	api.POST("/tasks/:taskId/golden-samples/:sampleId/dry-run", middleware.RequireRoles("owner", "admin"), h.DryRun)
 }
@@ -50,6 +51,11 @@ type goldenSampleDryRunRequest struct {
 	AIPromptID *uint64 `json:"ai_prompt_id"`
 }
 
+type goldenSampleBatchDryRunRequest struct {
+	SampleIDs  []uint64 `json:"sample_ids"`
+	AIPromptID *uint64  `json:"ai_prompt_id"`
+}
+
 type goldenSampleResponse struct {
 	ID              uint64           `json:"id"`
 	TaskID          uint64           `json:"taskId"`
@@ -60,6 +66,29 @@ type goldenSampleResponse struct {
 	Notes           model.NullString `json:"notes"`
 	CreatedAt       time.Time        `json:"createdAt"`
 }
+
+type goldenSampleBatchDryRunResult struct {
+	GoldenSampleID  uint64                      `json:"goldenSampleId"`
+	Status          string                      `json:"status"`
+	DryRunID        *uint64                     `json:"dryRunId,omitempty"`
+	Provider        string                      `json:"provider,omitempty"`
+	Result          *llmreview.EvaluationResult `json:"result,omitempty"`
+	MatchedExpected *bool                       `json:"matchedExpected,omitempty"`
+	Error           string                      `json:"error,omitempty"`
+}
+
+type goldenSampleBatchDryRunSummary struct {
+	Total     int `json:"total"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+}
+
+type resolvedGoldenSamplePrompt struct {
+	prompt     model.AIPromptConfig
+	dimensions []llmreview.DimensionConfig
+}
+
+const maxGoldenSampleBatchDryRunSamples = 20
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
@@ -444,6 +473,181 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 		"matchedExpected": matchedExpected,
 		"dryRunId":        dryRunID,
 	})
+}
+
+func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var req goldenSampleBatchDryRunRequest
+	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
+		return
+	}
+	sampleIDs, ok := normalizeGoldenSampleBatchIDs(c, req.SampleIDs)
+	if !ok {
+		return
+	}
+
+	var samples []model.GoldenSample
+	if err := h.db.Where("task_id = ? AND id IN ?", task.ID, sampleIDs).Find(&samples).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list golden samples")
+		return
+	}
+	if len(samples) != len(sampleIDs) {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "golden sample not found")
+		return
+	}
+	sampleByID := make(map[uint64]model.GoldenSample, len(samples))
+	for _, sample := range samples {
+		sampleByID[sample.ID] = sample
+	}
+
+	provider, _, providerErr := llmreview.NewProviderFromEnv(nil)
+	promptCache := map[uint64]resolvedGoldenSamplePrompt{}
+	results := make([]goldenSampleBatchDryRunResult, 0, len(sampleIDs))
+	summary := goldenSampleBatchDryRunSummary{Total: len(sampleIDs)}
+	for _, sampleID := range sampleIDs {
+		result, err := h.runGoldenSampleBatchDryRun(c, task, sampleByID[sampleID], req.AIPromptID, provider, providerErr, promptCache)
+		if err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
+			return
+		}
+		if result.Status == "succeeded" {
+			summary.Succeeded++
+		} else {
+			summary.Failed++
+		}
+		results = append(results, result)
+	}
+	httpx.OK(c, gin.H{
+		"results": results,
+		"summary": summary,
+	})
+}
+
+func normalizeGoldenSampleBatchIDs(c *gin.Context, sampleIDs []uint64) ([]uint64, bool) {
+	if len(sampleIDs) == 0 {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "sample_ids are required")
+		return nil, false
+	}
+	if len(sampleIDs) > maxGoldenSampleBatchDryRunSamples {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "sample_ids must contain at most 20 items")
+		return nil, false
+	}
+	seen := map[uint64]struct{}{}
+	for _, sampleID := range sampleIDs {
+		if sampleID == 0 {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "sample_ids must be positive integers")
+			return nil, false
+		}
+		if _, exists := seen[sampleID]; exists {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "sample_ids must be unique")
+			return nil, false
+		}
+		seen[sampleID] = struct{}{}
+	}
+	return sampleIDs, true
+}
+
+func (h GoldenSampleHandler) runGoldenSampleBatchDryRun(c *gin.Context, task model.Task, sample model.GoldenSample, overridePromptID *uint64, provider llmreview.Provider, providerErr error, promptCache map[uint64]resolvedGoldenSamplePrompt) (goldenSampleBatchDryRunResult, error) {
+	resolved, message, ok := h.resolveGoldenSamplePrompt(task, sample, overridePromptID, promptCache)
+	if !ok {
+		return goldenSampleBatchDryRunResult{
+			GoldenSampleID: sample.ID,
+			Status:         "failed",
+			Error:          message,
+		}, nil
+	}
+	if providerErr != nil {
+		dryRunID, err := h.recordGoldenSampleDryRun(c, task.ID, resolved.prompt, sample, "failed", nil, providerErr)
+		if err != nil {
+			return goldenSampleBatchDryRunResult{}, err
+		}
+		return goldenSampleBatchDryRunResult{
+			GoldenSampleID: sample.ID,
+			Status:         "failed",
+			DryRunID:       &dryRunID,
+			Error:          llmreview.SafeErrorMessage(providerErr),
+		}, nil
+	}
+
+	result, err := provider.Evaluate(c.Request.Context(), llmreview.PromptConfig{
+		ID:             resolved.prompt.ID,
+		Version:        resolved.prompt.Version,
+		PromptTemplate: resolved.prompt.PromptTemplate,
+		Dimensions:     resolved.dimensions,
+		PassThreshold:  resolved.prompt.PassThreshold,
+		UncertainMin:   resolved.prompt.UncertainMin,
+		Model:          resolved.prompt.Model,
+	}, llmreview.EvaluationInput{
+		TaskID:              task.ID,
+		PromptConfigID:      resolved.prompt.ID,
+		PromptVersion:       resolved.prompt.Version,
+		PayloadJSON:         sample.Payload,
+		AnswerJSON:          sample.ExpectedAnswer,
+		BaselineDescription: task.BaselineDescription.String,
+	})
+	if err == nil {
+		err = llmreview.ValidateThresholdConsistency(result, llmreview.PromptConfig{PassThreshold: resolved.prompt.PassThreshold, UncertainMin: resolved.prompt.UncertainMin})
+	}
+	if err != nil {
+		dryRunID, recordErr := h.recordGoldenSampleDryRun(c, task.ID, resolved.prompt, sample, "failed", nil, err)
+		if recordErr != nil {
+			return goldenSampleBatchDryRunResult{}, recordErr
+		}
+		return goldenSampleBatchDryRunResult{
+			GoldenSampleID: sample.ID,
+			Status:         "failed",
+			DryRunID:       &dryRunID,
+			Error:          llmreview.SafeErrorMessage(err),
+		}, nil
+	}
+
+	dryRunID, err := h.recordGoldenSampleDryRun(c, task.ID, resolved.prompt, sample, "succeeded", &result, nil)
+	if err != nil {
+		return goldenSampleBatchDryRunResult{}, err
+	}
+	matchedExpected := result.Verdict == sample.ExpectedVerdict
+	return goldenSampleBatchDryRunResult{
+		GoldenSampleID:  sample.ID,
+		Status:          "succeeded",
+		DryRunID:        &dryRunID,
+		Provider:        result.Provider,
+		Result:          &result,
+		MatchedExpected: &matchedExpected,
+	}, nil
+}
+
+func (h GoldenSampleHandler) resolveGoldenSamplePrompt(task model.Task, sample model.GoldenSample, overridePromptID *uint64, promptCache map[uint64]resolvedGoldenSamplePrompt) (resolvedGoldenSamplePrompt, string, bool) {
+	promptID := overridePromptID
+	if promptID == nil {
+		promptID = sample.AIPromptID
+	}
+	if promptID == nil {
+		promptID = task.AIPromptID
+	}
+	if promptID == nil {
+		return resolvedGoldenSamplePrompt{}, "active ai_prompt_id is required", false
+	}
+	if cached, ok := promptCache[*promptID]; ok {
+		return cached, "", true
+	}
+
+	var prompt model.AIPromptConfig
+	if err := h.db.Where("id = ? AND task_id = ?", *promptID, task.ID).First(&prompt).Error; err != nil {
+		return resolvedGoldenSamplePrompt{}, "ai_prompt_id must belong to task", false
+	}
+	dimensions, err := llmreview.ParseDimensions(prompt.Dimensions)
+	if err != nil {
+		return resolvedGoldenSamplePrompt{}, "ai prompt dimensions are invalid", false
+	}
+	if !llmreview.AllowedModelName(prompt.Model) {
+		return resolvedGoldenSamplePrompt{}, "ai prompt model is not allowed", false
+	}
+	resolved := resolvedGoldenSamplePrompt{prompt: prompt, dimensions: dimensions}
+	promptCache[*promptID] = resolved
+	return resolved, "", true
 }
 
 func validGoldenSampleVerdict(verdict string) bool {

@@ -480,6 +480,146 @@ func TestGoldenSampleDryRunReturns500WhenFailureRecordCannotPersist(t *testing.T
 	}
 }
 
+func TestGoldenSampleBatchDryRunReturnsPartialResults(t *testing.T) {
+	t.Setenv("LLM_PROVIDER", "mock")
+	t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_prompt_id", "baseline_description"}).
+			AddRow(1, 7, "Task", "draft", nil, "baseline"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .golden_samples.+task_id.+id IN`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "ai_prompt_id", "payload", "payload_hash", "expected_answer", "expected_verdict", "created_by"}).
+			AddRow(11, 1, 34, `{"text":"a"}`, "hash-a", `{"label":"ok"}`, "uncertain", 7).
+			AddRow(12, 1, nil, `{"text":"b"}`, "hash-b", `{"label":"ok"}`, "pass", 7))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model", "created_by"}).
+			AddRow(34, 1, 3, "review {{answer.label}}", `[{"name":"相关性"}]`, 80, 60, "mock-model", 7))
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
+		WithArgs(1, uint64(34), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, "uncertain", "uncertain", true, "succeeded", sqlmock.AnyArg(), nil, 7, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(44, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/dry-runs", map[string]any{
+		"sample_ids": []uint64{11, 12},
+	}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	summary := data["summary"].(map[string]any)
+	if summary["total"] != float64(2) || summary["succeeded"] != float64(1) || summary["failed"] != float64(1) {
+		t.Fatalf("unexpected summary: %v", summary)
+	}
+	results := data["results"].([]any)
+	first := results[0].(map[string]any)
+	if first["goldenSampleId"] != float64(11) || first["status"] != "succeeded" || first["dryRunId"] != float64(44) {
+		t.Fatalf("unexpected first result: %v", first)
+	}
+	if first["matchedExpected"] != true {
+		t.Fatalf("matchedExpected = %v, want true", first["matchedExpected"])
+	}
+	second := results[1].(map[string]any)
+	if second["goldenSampleId"] != float64(12) || second["status"] != "failed" {
+		t.Fatalf("unexpected second result: %v", second)
+	}
+	if second["error"] != "active ai_prompt_id is required" {
+		t.Fatalf("second error = %v", second["error"])
+	}
+	if _, exists := second["dryRunId"]; exists {
+		t.Fatalf("failed config result should not have dryRunId: %v", second)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestGoldenSampleBatchDryRunRejectsTooManySamples(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+
+	sampleIDs := make([]uint64, 0, maxGoldenSampleBatchDryRunSamples+1)
+	for sampleID := uint64(1); sampleID <= maxGoldenSampleBatchDryRunSamples+1; sampleID++ {
+		sampleIDs = append(sampleIDs, sampleID)
+	}
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/dry-runs", map[string]any{
+		"sample_ids": sampleIDs,
+	}))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestGoldenSampleBatchDryRunRejectsNonOwner(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 99, "Task", "draft"))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/dry-runs", map[string]any{
+		"sample_ids": []uint64{11},
+	}))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestGoldenSampleBatchDryRunRejectsMissingSample(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .golden_samples.+task_id.+id IN`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "payload", "payload_hash", "expected_answer", "expected_verdict", "created_by"}).
+			AddRow(11, 1, `{"text":"a"}`, "hash-a", `{"label":"ok"}`, "pass", 7))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/dry-runs", map[string]any{
+		"sample_ids": []uint64{11, 99},
+	}))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func expectedPayloadHash(t *testing.T, payload any) string {
 	t.Helper()
 	raw, err := json.Marshal(payload)
