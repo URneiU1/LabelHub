@@ -53,6 +53,23 @@ type GoldenSamplesResponse = {
 type GoldenSampleCreateResponse = {
   sample: GoldenSample
 }
+type GoldenSampleBatchDryRunResult = {
+  goldenSampleId: number
+  status: 'succeeded' | 'failed'
+  dryRunId?: number
+  provider?: string
+  result?: AIDryRunResult['result']
+  matchedExpected?: boolean
+  error?: string
+}
+type GoldenSampleBatchDryRunResponse = {
+  results: GoldenSampleBatchDryRunResult[]
+  summary: {
+    total: number
+    succeeded: number
+    failed: number
+  }
+}
 type GoldenSampleRunRow = {
   sampleId: number
   expectedVerdict: string
@@ -426,11 +443,54 @@ export default function OwnerDashboard() {
 
   async function runAllGoldenSamples() {
     if (!selected || goldenSamples.length === 0 || goldenSampleLoading || goldenSampleLoadFailed) return
+    const samples = goldenSamples
     const guard = beginTaskAction(selected.id, goldenSampleRunSeq)
     setGoldenSampleError('')
-    for (const sample of goldenSamples) {
+    setGoldenRunRows((current) => {
+      const next = { ...current }
+      for (const sample of samples) {
+        next[sample.id] = {
+          sampleId: sample.id,
+          expectedVerdict: sample.expectedVerdict,
+          status: 'running',
+        }
+      }
+      return next
+    })
+    try {
+      const data = await apiPost<GoldenSampleBatchDryRunResponse>(`/tasks/${selected.id}/golden-samples/dry-runs`, {
+        sample_ids: samples.map((sample) => sample.id),
+      })
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
-      await runGoldenSampleWithGuard(selected.id, sample, guard)
+      const resultBySampleId = new Map(data.results.map((result) => [result.goldenSampleId, result]))
+      setGoldenRunRows((current) => {
+        const next = { ...current }
+        for (const sample of samples) {
+          next[sample.id] = goldenSampleBatchResultToRunRow(sample, resultBySampleId.get(sample.id))
+        }
+        return next
+      })
+      if (data.summary.failed > 0) {
+        setGoldenSampleError(data.results.find((result) => result.status === 'failed')?.error || '部分 golden sample dry-run 失败')
+      } else {
+        setGoldenSampleError('')
+      }
+    } catch (error) {
+      if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      const message = error instanceof Error ? error.message : 'golden sample batch dry-run 失败'
+      setGoldenRunRows((current) => {
+        const next = { ...current }
+        for (const sample of samples) {
+          next[sample.id] = {
+            sampleId: sample.id,
+            expectedVerdict: sample.expectedVerdict,
+            status: 'failed',
+            error: message,
+          }
+        }
+        return next
+      })
+      setGoldenSampleError(message)
     }
   }
 
@@ -775,6 +835,30 @@ function buildAIDryRunBody(payloadInput: string, answerInput: string) {
   const payload = normalizeJSONInput(payloadInput, 'payload')
   const answer = normalizeJSONInput(answerInput, 'answer')
   return `{"payload":${payload},"answer":${answer}}`
+}
+
+function goldenSampleBatchResultToRunRow(sample: GoldenSample, result: GoldenSampleBatchDryRunResult | undefined): GoldenSampleRunRow {
+  if (result?.status === 'succeeded' && result.result) {
+    return {
+      sampleId: sample.id,
+      expectedVerdict: sample.expectedVerdict,
+      status: 'succeeded',
+      actualVerdict: result.result.verdict,
+      matchedExpected: result.matchedExpected,
+      score: result.result.overall_score,
+      provider: result.provider,
+      model: result.result.model,
+      reason: result.result.reason,
+      dryRunId: result.dryRunId,
+    }
+  }
+  return {
+    sampleId: sample.id,
+    expectedVerdict: sample.expectedVerdict,
+    status: 'failed',
+    dryRunId: result?.dryRunId,
+    error: result?.error || 'missing dry-run result',
+  }
 }
 
 function normalizeJSONInput(raw: string, label: string) {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -89,6 +90,7 @@ type resolvedGoldenSamplePrompt struct {
 }
 
 const maxGoldenSampleBatchDryRunSamples = 20
+const goldenSampleBatchDelayEnv = "LLM_BATCH_DRY_RUN_DELAY_MS"
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
@@ -504,10 +506,24 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 	}
 
 	provider, _, providerErr := llmreview.NewProviderFromEnv(nil)
+	batchDelay, err := goldenSampleBatchDryRunDelayFromEnv()
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
 	promptCache := map[uint64]resolvedGoldenSamplePrompt{}
 	results := make([]goldenSampleBatchDryRunResult, 0, len(sampleIDs))
 	summary := goldenSampleBatchDryRunSummary{Total: len(sampleIDs)}
-	for _, sampleID := range sampleIDs {
+	for index, sampleID := range sampleIDs {
+		if index > 0 && batchDelay > 0 {
+			timer := time.NewTimer(batchDelay)
+			select {
+			case <-c.Request.Context().Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
 		result, err := h.runGoldenSampleBatchDryRun(c, task, sampleByID[sampleID], req.AIPromptID, provider, providerErr, promptCache)
 		if err != nil {
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
@@ -548,6 +564,18 @@ func normalizeGoldenSampleBatchIDs(c *gin.Context, sampleIDs []uint64) ([]uint64
 		seen[sampleID] = struct{}{}
 	}
 	return sampleIDs, true
+}
+
+func goldenSampleBatchDryRunDelayFromEnv() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(goldenSampleBatchDelayEnv))
+	if raw == "" {
+		return 0, nil
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms < 0 {
+		return 0, errors.New(goldenSampleBatchDelayEnv + " must be a non-negative integer")
+	}
+	return time.Duration(ms) * time.Millisecond, nil
 }
 
 func (h GoldenSampleHandler) runGoldenSampleBatchDryRun(c *gin.Context, task model.Task, sample model.GoldenSample, overridePromptID *uint64, provider llmreview.Provider, providerErr error, promptCache map[uint64]resolvedGoldenSamplePrompt) (goldenSampleBatchDryRunResult, error) {

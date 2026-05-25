@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	mysqlerr "github.com/go-sql-driver/mysql"
@@ -617,6 +618,22 @@ func TestGoldenSampleBatchDryRunRejectsMissingSample(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestGoldenSampleBatchDryRunDelayFromEnv(t *testing.T) {
+	t.Setenv(goldenSampleBatchDelayEnv, "125")
+	delay, err := goldenSampleBatchDryRunDelayFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if delay != 125*time.Millisecond {
+		t.Fatalf("delay = %s, want 125ms", delay)
+	}
+
+	t.Setenv(goldenSampleBatchDelayEnv, "-1")
+	if _, err := goldenSampleBatchDryRunDelayFromEnv(); err == nil {
+		t.Fatal("expected invalid delay error")
 	}
 }
 

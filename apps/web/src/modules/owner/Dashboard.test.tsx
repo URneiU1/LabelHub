@@ -1089,7 +1089,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByText('44')).toBeInTheDocument()
   })
 
-  it('runs all visible golden samples serially and keeps going after failure', async () => {
+  it('runs all visible golden samples through the batch endpoint and maps partial results', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
@@ -1108,33 +1108,172 @@ describe('OwnerDashboard AI prompt flow', () => {
       }
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost
-      .mockRejectedValueOnce(new Error('provider failed'))
-      .mockResolvedValueOnce({
-        provider: 'mock',
-        dryRunId: 45,
-        matchedExpected: true,
-        result: {
-          verdict: 'uncertain',
-          overall_score: 75,
-          dimensions: [],
-          reason: 'second sample done',
-          model: 'mock-model',
+    mockApiPost.mockResolvedValue({
+      summary: { total: 2, succeeded: 1, failed: 1 },
+      results: [
+        {
+          goldenSampleId: 11,
+          status: 'failed',
+          dryRunId: 44,
+          error: 'provider failed',
         },
-      })
+        {
+          goldenSampleId: 12,
+          status: 'succeeded',
+          provider: 'mock',
+          dryRunId: 45,
+          matchedExpected: true,
+          result: {
+            verdict: 'uncertain',
+            overall_score: 75,
+            dimensions: [],
+            reason: 'second sample done',
+            model: 'mock-model',
+          },
+        },
+      ],
+    })
 
     render(<OwnerDashboard />)
 
     await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
 
     await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledTimes(2)
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12] })
     })
-    expect(mockApiPost.mock.calls[0][0]).toBe('/tasks/1/golden-samples/11/dry-run')
-    expect(mockApiPost.mock.calls[1][0]).toBe('/tasks/1/golden-samples/12/dry-run')
-    expect(await screen.findAllByText('provider failed')).toHaveLength(2)
+    expect(mockApiPost).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
     expect(screen.getByText('second sample done')).toBeInTheDocument()
     expect(screen.getAllByText('matched')).toHaveLength(2)
+    expect(screen.getByText('44')).toBeInTheDocument()
+    expect(screen.getByText('45')).toBeInTheDocument()
+  })
+
+  it('ignores stale batch golden sample run responses after switching tasks', async () => {
+    const user = userEvent.setup()
+    const runResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/2/golden-samples') {
+        return { samples: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(runResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+    expect(await screen.findByText('暂无 golden samples')).toBeInTheDocument()
+
+    await act(async () => {
+      runResult.resolve({
+        summary: { total: 1, succeeded: 1, failed: 0 },
+        results: [{
+          goldenSampleId: 11,
+          status: 'succeeded',
+          provider: 'mock',
+          dryRunId: 44,
+          matchedExpected: true,
+          result: {
+            verdict: 'pass',
+            overall_score: 90,
+            dimensions: [],
+            reason: 'late batch golden run',
+          },
+        }],
+      })
+      await runResult.promise
+    })
+
+    expect(screen.queryByText('late batch golden run')).not.toBeInTheDocument()
+  })
+
+  it('keeps same-task batch golden sample run response current after clicking selected task again', async () => {
+    const user = userEvent.setup()
+    const runResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, title: 'Task A' }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(runResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
+    await user.click(screen.getByRole('button', { name: /Task A/ }))
+
+    await act(async () => {
+      runResult.resolve({
+        summary: { total: 1, succeeded: 1, failed: 0 },
+        results: [{
+          goldenSampleId: 11,
+          status: 'succeeded',
+          provider: 'mock',
+          dryRunId: 44,
+          matchedExpected: true,
+          result: {
+            verdict: 'pass',
+            overall_score: 90,
+            dimensions: [],
+            reason: 'same task batch golden run',
+          },
+        }],
+      })
+      await runResult.promise
+    })
+
+    expect(await screen.findByText('same task batch golden run')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run all visible samples' })).not.toBeDisabled()
   })
 
   it('ignores stale golden sample run responses after switching tasks', async () => {

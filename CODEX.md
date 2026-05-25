@@ -40,13 +40,13 @@ After every code-writing turn:
 - AI prompt dry-run regression coverage now includes Owner raw request body precision, golden sample prompt choice reset, and backend missing/null/invalid raw JSON validation.
 - Task-scoped AI dry-run history API is in place: owner/admin can call `GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=` and receive JSON-valued snapshots/results plus expected/actual verdict, matched flag, status/error, prompt version, and timestamps.
 - Batch golden sample dry-run API is in place: owner/admin can call `POST /tasks/:taskId/golden-samples/dry-runs` with up to 20 task-owned sample IDs; the server runs them serially, returns per-sample partial results, and does not let provider/config/evaluator failure for one sample block the rest.
+- Owner Run all now uses the backend batch endpoint and maps partial results into the existing result table; batch dry-runs can be paced with `LLM_BATCH_DRY_RUN_DELAY_MS` when a provider needs request spacing.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Wire Owner UI Run all to the backend batch dry-run endpoint before Reviewer AI verdict display.
-- Add configurable server-side provider rate-limit/backoff before enabling heavier golden sample runs.
-- Continue hardening the Owner UI batch result table with persisted history/trend views after the history API lands.
+- Continue hardening the Owner UI batch result table with persisted history/trend views.
+- Add finer provider-specific 429/backoff policy before enabling heavier golden sample runs.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.
