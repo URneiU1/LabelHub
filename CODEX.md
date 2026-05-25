@@ -43,12 +43,13 @@ After every code-writing turn:
 - Owner Run all now uses the backend batch endpoint and maps partial results into the existing result table; batch dry-runs can be paced with `LLM_BATCH_DRY_RUN_DELAY_MS` when a provider needs request spacing.
 - Owner dry-run history/trend UI is in place: the Golden Samples area loads recent task dry-runs, supports per-sample filtering through the existing history API, shows compact total/matched/mismatch/failed summary, and lists expected/actual verdict, match state, status/error, prompt version, and finished time with stale task guards.
 - Reviewer AI verdict display is in place: Reviewer Queue and detail use existing submission `aiVerdict/aiScore` fields to show AI precheck verdict/score, with an empty state when no AI result exists.
+- OpenAI-compatible provider retry/backoff controls are in place: `LLM_RETRY_MAX_ATTEMPTS`, `LLM_RETRY_BACKOFF_MS`, and `LLM_RETRY_MAX_BACKOFF_MS` bound short retries to network errors, HTTP 429, and 5xx while keeping 400/401/schema/threshold failures fail-fast and sanitized.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
 - Add richer Owner dry-run trend/history analysis after the minimal summary table proves useful.
-- Add finer provider-specific 429/backoff policy before enabling heavier golden sample runs.
+- Add server-side dry-run quota/circuit breaker if real provider usage needs a harder cost guard.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.

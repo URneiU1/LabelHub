@@ -20,7 +20,11 @@ const (
 	VerdictReject    = "reject"
 	VerdictUncertain = "uncertain"
 
-	DefaultTimeout = 30 * time.Second
+	DefaultTimeout      = 30 * time.Second
+	DefaultMaxAttempts  = 2
+	DefaultBackoffBase  = 200 * time.Millisecond
+	DefaultBackoffMax   = 2 * time.Second
+	maxProviderAttempts = 5
 )
 
 type PromptConfig struct {
@@ -75,11 +79,14 @@ type Provider interface {
 }
 
 type ProviderConfig struct {
-	Provider string
-	BaseURL  string
-	APIKey   string
-	Model    string
-	Timeout  time.Duration
+	Provider    string
+	BaseURL     string
+	APIKey      string
+	Model       string
+	Timeout     time.Duration
+	MaxAttempts int
+	BackoffBase time.Duration
+	BackoffMax  time.Duration
 }
 
 func ConfigFromEnv() (ProviderConfig, error) {
@@ -95,12 +102,34 @@ func ConfigFromEnv() (ProviderConfig, error) {
 		}
 		timeout = time.Duration(ms) * time.Millisecond
 	}
+	maxAttempts := DefaultMaxAttempts
+	if raw := strings.TrimSpace(os.Getenv("LLM_RETRY_MAX_ATTEMPTS")); raw != "" {
+		attempts, err := strconv.Atoi(raw)
+		if err != nil || attempts <= 0 || attempts > maxProviderAttempts {
+			return ProviderConfig{}, fmt.Errorf("LLM_RETRY_MAX_ATTEMPTS must be a positive integer up to %d", maxProviderAttempts)
+		}
+		maxAttempts = attempts
+	}
+	backoffBase, err := durationMSEnv("LLM_RETRY_BACKOFF_MS", DefaultBackoffBase)
+	if err != nil {
+		return ProviderConfig{}, err
+	}
+	backoffMax, err := durationMSEnv("LLM_RETRY_MAX_BACKOFF_MS", DefaultBackoffMax)
+	if err != nil {
+		return ProviderConfig{}, err
+	}
+	if backoffMax < backoffBase {
+		return ProviderConfig{}, errors.New("LLM_RETRY_MAX_BACKOFF_MS must be greater than or equal to LLM_RETRY_BACKOFF_MS")
+	}
 	cfg := ProviderConfig{
-		Provider: provider,
-		BaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("LLM_BASE_URL")), "/"),
-		APIKey:   strings.TrimSpace(os.Getenv("LLM_API_KEY")),
-		Model:    strings.TrimSpace(os.Getenv("LLM_MODEL")),
-		Timeout:  timeout,
+		Provider:    provider,
+		BaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("LLM_BASE_URL")), "/"),
+		APIKey:      strings.TrimSpace(os.Getenv("LLM_API_KEY")),
+		Model:       strings.TrimSpace(os.Getenv("LLM_MODEL")),
+		Timeout:     timeout,
+		MaxAttempts: maxAttempts,
+		BackoffBase: backoffBase,
+		BackoffMax:  backoffMax,
 	}
 	switch provider {
 	case "mock", "deterministic":
@@ -113,6 +142,18 @@ func ConfigFromEnv() (ProviderConfig, error) {
 	default:
 		return ProviderConfig{}, fmt.Errorf("unsupported LLM_PROVIDER %q", provider)
 	}
+}
+
+func durationMSEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return time.Duration(ms) * time.Millisecond, nil
 }
 
 func NewProviderFromEnv(client *http.Client) (Provider, ProviderConfig, error) {
@@ -391,14 +432,23 @@ func (p OpenAICompatibleProvider) Evaluate(ctx context.Context, prompt PromptCon
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
+	maxAttempts := p.config.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxAttempts
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			timer := time.NewTimer(time.Duration(attempt) * 200 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return EvaluationResult{}, ctx.Err()
-			case <-timer.C:
+			delay := p.retryDelay(attempt, lastErr)
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return EvaluationResult{}, ctx.Err()
+				case <-timer.C:
+				}
+			} else if err := ctx.Err(); err != nil {
+				return EvaluationResult{}, err
 			}
 		}
 		result, err := p.call(ctx, body, model, input.IdempotencyKey, DimensionNames(prompt.Dimensions))
@@ -415,6 +465,34 @@ func (p OpenAICompatibleProvider) Evaluate(ctx context.Context, prompt PromptCon
 		}
 	}
 	return EvaluationResult{}, lastErr
+}
+
+func (p OpenAICompatibleProvider) retryDelay(attempt int, err error) time.Duration {
+	var retryable retryableError
+	if errors.As(err, &retryable) && retryable.hasRetryAfter {
+		return clampDuration(retryable.retryAfter, p.config.BackoffMax)
+	}
+	if p.config.BackoffBase <= 0 {
+		return 0
+	}
+	delay := p.config.BackoffBase
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if p.config.BackoffMax > 0 && delay >= p.config.BackoffMax {
+			return p.config.BackoffMax
+		}
+	}
+	return clampDuration(delay, p.config.BackoffMax)
+}
+
+func clampDuration(delay time.Duration, max time.Duration) time.Duration {
+	if delay < 0 {
+		return 0
+	}
+	if max >= 0 && delay > max {
+		return max
+	}
+	return delay
 }
 
 func (p OpenAICompatibleProvider) call(ctx context.Context, body []byte, model string, idempotencyKey string, allowedDimensions []string) (EvaluationResult, error) {
@@ -439,7 +517,8 @@ func (p OpenAICompatibleProvider) call(ctx context.Context, body []byte, model s
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg := fmt.Sprintf("llm provider returned HTTP %d", resp.StatusCode)
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			return EvaluationResult{}, retryableError{err: errors.New(msg)}
+			retryAfter, hasRetryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+			return EvaluationResult{}, retryableError{err: errors.New(msg), retryAfter: retryAfter, hasRetryAfter: hasRetryAfter}
 		}
 		return EvaluationResult{}, errors.New(msg)
 	}
@@ -648,7 +727,9 @@ type tokenUsage struct {
 }
 
 type retryableError struct {
-	err error
+	err           error
+	retryAfter    time.Duration
+	hasRetryAfter bool
 }
 
 func (e retryableError) Error() string { return e.err.Error() }
@@ -657,6 +738,28 @@ func (e retryableError) Unwrap() error { return e.err }
 func isRetryableProviderError(err error) bool {
 	var retryable retryableError
 	return errors.As(err, &retryable)
+}
+
+func parseRetryAfter(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds < 0 {
+			return 0, true
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0, false
+	}
+	delay := time.Until(when)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
 }
 
 func truncateForError(raw []byte) string {
