@@ -129,6 +129,8 @@ export type Submission = {
   taskId: number
   itemId: number
   status: string
+  aiVerdict?: string | null
+  aiScore?: number | null
   humanVerdict?: string
   currentRevisionId?: number
 }

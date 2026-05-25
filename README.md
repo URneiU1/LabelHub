@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s3-reviewer-ai-verdict-display`: Reviewer Queue/Detail 增加 AI 预审结果展示,复用 submission 上已有 `aiVerdict/aiScore`,左侧队列显示 `AI verdict · score`,详情页在人工审核前显示 AI verdict/score 或空状态;未改后端 API。
 - 2026-05-25 `s3-owner-dry-run-history-ui`: Owner Dashboard 的 Golden Samples 区域新增 dry-run history/trend 最小可用视图,复用 `GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=` 自动加载最近记录,支持按 sample filter/History 按钮查看单样本历史,用 compact summary 展示 total/matched/mismatch/failed,table 展示 expected/actual verdict、matched、status/error、prompt version 和 finished time,并沿用 task switch stale guard 防止晚到 history 响应污染当前 task。
 - 2026-05-25 `s3-golden-sample-batch-dry-run`: 新增 owner/admin batch golden sample dry-run endpoint:`POST /tasks/:taskId/golden-samples/dry-runs`,body 为 `{sample_ids:[...], ai_prompt_id?: number}`;服务端限制单批最多 20 个样本并串行执行,避免 provider 并发突刺;请求中的 sample 必须全部属于当前 task,否则整体 404;单样本 provider/evaluator/config 失败写入对应 failed dry-run 或返回 per-sample failed result,不阻断后续样本;响应返回 `summary` 与每个 sample 的 status/dryRunId/result/matchedExpected/error。
 - 2026-05-25 `s3-owner-batch-run-wiring`: Owner Dashboard 的 Run all visible samples 改接后端 batch dry-run endpoint,一次请求返回 partial results 并映射到 result table;保留单样本 Run endpoint;后端 batch 循环新增 `LLM_BATCH_DRY_RUN_DELAY_MS` 可选样本间隔,默认 0,用于按 provider 限制做基础节流。
@@ -73,18 +74,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、同步串行 batch dry-run endpoint 和基础 batch delay 配置已具备,但更细的 provider 429/backoff 策略、更丰富的 trend/history 分析、Reviewer AI verdict/score 展示还未做。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score 展示、同步串行 batch dry-run endpoint 和基础 batch delay 配置已具备,但更细的 provider 429/backoff 策略、更丰富的 trend/history 分析还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:进入 Designer 的 append/delete/简易属性编辑能力。
-- 推进 S3 下一段:补 Reviewer AI verdict/score 展示,按真实 provider 限制补更细的 429/backoff 策略,之后再做更丰富的 Owner dry-run trend/history 分析。
+- 推进 S3 下一段:按真实 provider 限制补更细的 429/backoff 策略,之后再做更丰富的 Owner dry-run trend/history 分析。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-25 S3 Reviewer AI verdict display: targeted `pnpm -F web test -- Queue` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
 - 2026-05-25 S3 Owner dry-run history UI: targeted `pnpm -F web test -- Dashboard` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
 - 2026-05-25 S3 Owner batch run wiring: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'GoldenSampleBatchDryRun'` 通过;targeted `pnpm -F web test -- Dashboard` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S3 golden sample batch dry-run: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'GoldenSampleBatchDryRun|GoldenSampleDryRunRecordsMatchedExpected'` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过。未改前端,未跑 web test/lint/build。

@@ -94,6 +94,7 @@ export default function ReviewerQueue() {
               <strong>Submission #{submission.id}</strong>
               <span>Task #{submission.taskId} · Item #{submission.itemId}</span>
               <span>{submission.status}</span>
+              <span>{formatAIReviewSummary(submission)}</span>
             </button>
           ))}
           {submissions.length === 0 ? <p style={mutedStyle}>当前没有 human_reviewing 数据</p> : null}
@@ -117,6 +118,17 @@ export default function ReviewerQueue() {
                   />
                 ) : (
                   <div role="alert" style={errorBannerStyle}>{schema.message}</div>
+                )}
+              </section>
+              <section style={panelStyle}>
+                <h2 style={headingStyle}>AI 预审</h2>
+                {detail.submission?.aiVerdict ? (
+                  <div style={aiReviewSummaryStyle}>
+                    <span>verdict: {detail.submission.aiVerdict}</span>
+                    <span>score: {formatAIScore(detail.submission.aiScore)}</span>
+                  </div>
+                ) : (
+                  <p style={mutedStyle}>暂无 AI 预审结果</p>
                 )}
               </section>
               <section style={panelStyle}>
@@ -159,6 +171,15 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
     return { ok: false, message: `${result.error.field}: ${result.error.message}` }
   }
   return { ok: true, schema: result.value }
+}
+
+function formatAIReviewSummary(submission: Submission) {
+  if (!submission.aiVerdict) return 'AI 未预审'
+  return `AI ${submission.aiVerdict} · ${formatAIScore(submission.aiScore)}`
+}
+
+function formatAIScore(score: number | null | undefined) {
+  return typeof score === 'number' && Number.isFinite(score) ? String(score) : '-'
 }
 
 const layoutStyle: CSSProperties = {
@@ -214,6 +235,14 @@ const errorBannerStyle: CSSProperties = {
   border: '1px solid var(--color-danger, #b42318)',
   color: 'var(--color-danger, #b42318)',
   background: 'var(--color-bg)',
+}
+
+const aiReviewSummaryStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-md)',
+  marginTop: 'var(--space-sm)',
+  color: 'var(--color-text-secondary)',
 }
 
 const textareaStyle: CSSProperties = {

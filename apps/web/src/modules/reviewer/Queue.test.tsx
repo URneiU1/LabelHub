@@ -30,6 +30,8 @@ const submission = {
   taskId: 1,
   itemId: 11,
   status: 'human_reviewing',
+  aiVerdict: 'pass',
+  aiScore: 92.5,
   currentRevisionId: 901,
 }
 
@@ -90,6 +92,42 @@ describe('ReviewerQueue schema runtime flow', () => {
     const input = await screen.findByLabelText('历史字段')
     expect(input).toHaveValue('旧答案')
     expect(input).toBeDisabled()
+    expect(screen.getByText('AI pass · 92.5')).toBeInTheDocument()
+    expect(screen.getByText('verdict: pass')).toBeInTheDocument()
+    expect(screen.getByText('score: 92.5')).toBeInTheDocument()
+  })
+
+  it('shows an empty AI review state when no AI verdict exists', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [{ ...submission, aiVerdict: null, aiScore: null }]
+      }
+      if (path === '/reviewer/submissions/501') {
+        return {
+          task,
+          item,
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission: { ...submission, aiVerdict: null, aiScore: null },
+          revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<ReviewerQueue />)
+
+    await user.click(await screen.findByText('Submission #501'))
+
+    expect(screen.getByText('AI 未预审')).toBeInTheDocument()
+    expect(await screen.findByText('暂无 AI 预审结果')).toBeInTheDocument()
   })
 
   it('shows schema error banner and disables review actions for bad schema', async () => {
