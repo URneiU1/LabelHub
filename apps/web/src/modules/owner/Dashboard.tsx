@@ -70,6 +70,23 @@ type GoldenSampleBatchDryRunResponse = {
     failed: number
   }
 }
+type AIDryRunHistoryItem = {
+  id: number
+  taskId: number
+  aiPromptId: number
+  goldenSampleId: number | null
+  promptVersion: number
+  expectedVerdict: string | null
+  actualVerdict: string | null
+  matchedExpected: boolean | null
+  status: string
+  errorMsg: string | null
+  createdAt: string
+  finishedAt: string | null
+}
+type AIDryRunHistoryResponse = {
+  dryRuns: AIDryRunHistoryItem[]
+}
 type GoldenSampleRunRow = {
   sampleId: number
   expectedVerdict: string
@@ -111,6 +128,10 @@ export default function OwnerDashboard() {
   const [creatingGoldenSample, setCreatingGoldenSample] = useState(false)
   const [deletingGoldenSampleId, setDeletingGoldenSampleId] = useState<number | null>(null)
   const [goldenRunRows, setGoldenRunRows] = useState<Record<number, GoldenSampleRunRow>>({})
+  const [dryRunHistory, setDryRunHistory] = useState<AIDryRunHistoryItem[]>([])
+  const [dryRunHistorySampleFilter, setDryRunHistorySampleFilter] = useState('all')
+  const [dryRunHistoryLoading, setDryRunHistoryLoading] = useState(false)
+  const [dryRunHistoryError, setDryRunHistoryError] = useState('')
   const [promptError, setPromptError] = useState('')
   const [promptLoading, setPromptLoading] = useState(false)
   const [promptLoadFailed, setPromptLoadFailed] = useState(false)
@@ -127,6 +148,7 @@ export default function OwnerDashboard() {
   const createGoldenSampleSeq = useRef(0)
   const deleteGoldenSampleSeq = useRef(0)
   const goldenSampleRunSeq = useRef(0)
+  const dryRunHistorySeq = useRef(0)
 
   const resetGoldenSampleFormToDefaults = useCallback(() => {
     setGoldenPayload(defaultGoldenPayload)
@@ -234,6 +256,26 @@ export default function OwnerDashboard() {
     }
   }, [])
 
+  const loadDryRunHistory = useCallback(async (taskId: number, sampleID: number | null) => {
+    const requestSeq = dryRunHistorySeq.current + 1
+    dryRunHistorySeq.current = requestSeq
+    setDryRunHistoryLoading(true)
+    setDryRunHistoryError('')
+    const sampleQuery = sampleID ? `golden_sample_id=${sampleID}&` : ''
+    try {
+      const data = await apiGet<AIDryRunHistoryResponse>(`/tasks/${taskId}/ai-dry-runs?${sampleQuery}limit=10`)
+      if (dryRunHistorySeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
+      setDryRunHistory(data.dryRuns)
+      setDryRunHistoryLoading(false)
+      setDryRunHistoryError('')
+    } catch (error) {
+      if (dryRunHistorySeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
+      setDryRunHistory([])
+      setDryRunHistoryLoading(false)
+      setDryRunHistoryError(error instanceof Error ? error.message : '加载 dry-run history 失败')
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
@@ -247,6 +289,13 @@ export default function OwnerDashboard() {
       void loadGoldenSamples(selected.id)
     }
   }, [loadGoldenSamples, loadPrompts, selected])
+
+  useEffect(() => {
+    if (selected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadDryRunHistory(selected.id, dryRunHistorySampleID(dryRunHistorySampleFilter))
+    }
+  }, [dryRunHistorySampleFilter, loadDryRunHistory, selected])
 
   function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
     seqRef.current += 1
@@ -279,6 +328,10 @@ export default function OwnerDashboard() {
     setGoldenSampleLoadFailed(false)
     setCreatingGoldenSample(false)
     setDeletingGoldenSampleId(null)
+    setDryRunHistory([])
+    setDryRunHistorySampleFilter('all')
+    setDryRunHistoryError('')
+    setDryRunHistoryLoading(true)
     resetGoldenSampleFormToDefaults()
     setSelected(task)
   }
@@ -475,6 +528,7 @@ export default function OwnerDashboard() {
       } else {
         setGoldenSampleError('')
       }
+      void loadDryRunHistory(selected.id, dryRunHistorySampleID(dryRunHistorySampleFilter))
     } catch (error) {
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       const message = error instanceof Error ? error.message : 'golden sample batch dry-run 失败'
@@ -521,6 +575,7 @@ export default function OwnerDashboard() {
           dryRunId: data.dryRunId,
         },
       }))
+      void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
     } catch (error) {
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       const message = error instanceof Error ? error.message : 'golden sample dry-run 失败'
@@ -554,6 +609,8 @@ export default function OwnerDashboard() {
   const goldenActionDisabled = goldenSampleLoading || goldenSampleLoadFailed
   const anyGoldenRunRunning = Object.values(goldenRunRows).some((row) => row.status === 'running')
   const goldenRunResults = goldenSamples.map((sample) => goldenRunRows[sample.id]).filter((row): row is GoldenSampleRunRow => Boolean(row))
+  const selectedHistorySampleID = dryRunHistorySampleID(dryRunHistorySampleFilter)
+  const dryRunHistorySummary = summarizeDryRunHistory(dryRunHistory)
 
   return (
     <div>
@@ -720,6 +777,9 @@ export default function OwnerDashboard() {
                               <Button aria-label={`Run golden sample ${sample.id}`} disabled={goldenActionDisabled || runRow?.status === 'running' || anyGoldenRunRunning} loading={runRow?.status === 'running'} onClick={() => void runGoldenSample(sample)}>
                                 Run
                               </Button>
+                              <Button aria-label={`查看 golden sample ${sample.id} history`} disabled={dryRunHistoryLoading} onClick={() => setDryRunHistorySampleFilter(String(sample.id))}>
+                                History
+                              </Button>
                               <Button aria-label={`删除 golden sample ${sample.id}`} disabled={goldenActionDisabled || deletingGoldenSampleId === sample.id || anyGoldenRunRunning} loading={deletingGoldenSampleId === sample.id} onClick={() => void deleteGoldenSample(sample)}>
                                 删除
                               </Button>
@@ -761,6 +821,68 @@ export default function OwnerDashboard() {
                       </table>
                     </div>
                   ) : null}
+                  <div style={historyPanelStyle}>
+                    <div style={aiSettingsRowStyle}>
+                      <h3 style={subHeadingStyle}>Dry-run History</h3>
+                      <Button disabled={!selected || dryRunHistoryLoading} loading={dryRunHistoryLoading} onClick={() => selected && void loadDryRunHistory(selected.id, selectedHistorySampleID)}>
+                        Refresh history
+                      </Button>
+                    </div>
+                    <label style={{ ...fieldStyle, marginTop: 'var(--space-sm)' }}>
+                      history_sample_filter
+                      <select aria-label="dry_run_history_sample_filter" value={dryRunHistorySampleFilter} onChange={(event) => setDryRunHistorySampleFilter(event.target.value)} style={inputStyle}>
+                        <option value="all">最近全部 dry-runs</option>
+                        {goldenSamples.map((sample) => (
+                          <option key={sample.id} value={String(sample.id)}>Golden sample #{sample.id}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {dryRunHistoryError ? <p style={errorTextStyle}>{dryRunHistoryError}</p> : null}
+                    {dryRunHistory.length > 0 ? (
+                      <div style={historySummaryStyle}>
+                        <span>total {dryRunHistorySummary.total}</span>
+                        <span>matched {dryRunHistorySummary.matched}</span>
+                        <span>mismatch {dryRunHistorySummary.mismatch}</span>
+                        <span>failed {dryRunHistorySummary.failed}</span>
+                      </div>
+                    ) : null}
+                    {dryRunHistoryLoading ? (
+                      <p style={mutedStyle}>加载 dry-run history...</p>
+                    ) : dryRunHistory.length === 0 ? (
+                      <p style={mutedStyle}>暂无 dry-run history</p>
+                    ) : (
+                      <div style={resultTableWrapStyle}>
+                        <table style={resultTableStyle}>
+                          <thead>
+                            <tr>
+                              <th style={resultCellStyle}>dryRunId</th>
+                              <th style={resultCellStyle}>sample</th>
+                              <th style={resultCellStyle}>expected</th>
+                              <th style={resultCellStyle}>actual</th>
+                              <th style={resultCellStyle}>matched</th>
+                              <th style={resultCellStyle}>status / error</th>
+                              <th style={resultCellStyle}>prompt</th>
+                              <th style={resultCellStyle}>finished</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dryRunHistory.map((run) => (
+                              <tr key={run.id}>
+                                <td style={resultCellStyle}>#{run.id}</td>
+                                <td style={resultCellStyle}>{run.goldenSampleId ? `#${run.goldenSampleId}` : '-'}</td>
+                                <td style={resultCellStyle}>{run.expectedVerdict || '-'}</td>
+                                <td style={resultCellStyle}>{run.actualVerdict || '-'}</td>
+                                <td style={resultCellStyle}>{formatMatched(run.matchedExpected)}</td>
+                                <td style={resultCellStyle}>{[run.status, run.errorMsg].filter(Boolean).join(' · ')}</td>
+                                <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
+                                <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </section>
               <Button onClick={() => void exportJSON(selected.id)} style={{ marginTop: 'var(--space-md)' }}>
@@ -861,6 +983,12 @@ function goldenSampleBatchResultToRunRow(sample: GoldenSample, result: GoldenSam
   }
 }
 
+function dryRunHistorySampleID(value: string) {
+  if (value === 'all') return null
+  const sampleID = Number(value)
+  return Number.isFinite(sampleID) && sampleID > 0 ? sampleID : null
+}
+
 function normalizeJSONInput(raw: string, label: string) {
   const trimmed = raw.trim()
   if (!trimmed || trimmed === 'null') {
@@ -883,6 +1011,27 @@ function formatDateTime(value: string) {
   const time = new Date(value)
   if (Number.isNaN(time.getTime())) return value
   return time.toLocaleString()
+}
+
+function formatMatched(value: boolean | null | undefined) {
+  if (value === true) return 'matched'
+  if (value === false) return 'mismatch'
+  return '-'
+}
+
+function summarizeDryRunHistory(runs: AIDryRunHistoryItem[]) {
+  return runs.reduce((summary, run) => {
+    summary.total += 1
+    if (run.matchedExpected === true) {
+      summary.matched += 1
+    } else if (run.matchedExpected === false) {
+      summary.mismatch += 1
+    }
+    if (run.status === 'failed') {
+      summary.failed += 1
+    }
+    return summary
+  }, { total: 0, matched: 0, mismatch: 0, failed: 0 })
 }
 
 const panelStyle: React.CSSProperties = {
@@ -1026,11 +1175,31 @@ const resultCellStyle: React.CSSProperties = {
   verticalAlign: 'top',
 }
 
+const historyPanelStyle: React.CSSProperties = {
+  marginTop: 'var(--space-md)',
+  paddingTop: 'var(--space-md)',
+  borderTop: '1px solid var(--color-border-light)',
+}
+
+const historySummaryStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-sm)',
+  marginTop: 'var(--space-sm)',
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
+}
+
 const alertStyle: React.CSSProperties = {
   marginTop: 'var(--space-sm)',
   padding: 'var(--space-sm)',
   border: '1px solid var(--color-danger)',
   color: 'var(--color-danger)',
+}
+
+const errorTextStyle: React.CSSProperties = {
+  color: 'var(--color-danger)',
+  margin: 'var(--space-sm) 0 0',
 }
 
 const mutedStyle: React.CSSProperties = {

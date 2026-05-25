@@ -41,11 +41,12 @@ After every code-writing turn:
 - Task-scoped AI dry-run history API is in place: owner/admin can call `GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=` and receive JSON-valued snapshots/results plus expected/actual verdict, matched flag, status/error, prompt version, and timestamps.
 - Batch golden sample dry-run API is in place: owner/admin can call `POST /tasks/:taskId/golden-samples/dry-runs` with up to 20 task-owned sample IDs; the server runs them serially, returns per-sample partial results, and does not let provider/config/evaluator failure for one sample block the rest.
 - Owner Run all now uses the backend batch endpoint and maps partial results into the existing result table; batch dry-runs can be paced with `LLM_BATCH_DRY_RUN_DELAY_MS` when a provider needs request spacing.
+- Owner dry-run history/trend UI is in place: the Golden Samples area loads recent task dry-runs, supports per-sample filtering through the existing history API, shows compact total/matched/mismatch/failed summary, and lists expected/actual verdict, match state, status/error, prompt version, and finished time with stale task guards.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Continue hardening the Owner UI batch result table with persisted history/trend views.
+- Add richer Owner dry-run trend/history analysis after the minimal summary table proves useful.
 - Add finer provider-specific 429/backoff policy before enabling heavier golden sample runs.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.

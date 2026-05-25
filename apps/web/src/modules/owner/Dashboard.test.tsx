@@ -58,6 +58,9 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/1/golden-samples') {
         return { samples: [] }
       }
+      if (path.startsWith('/tasks/1/ai-dry-runs')) {
+        return { dryRuns: [] }
+      }
       if (path.endsWith('/golden-samples')) {
         return { samples: [] }
       }
@@ -1391,6 +1394,147 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByText('same task golden run')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Run golden sample 11' })).not.toBeDisabled()
+  })
+
+  it('loads dry-run history and shows failed errors', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return {
+          dryRuns: [
+            { id: 44, taskId: 1, aiPromptId: 33, goldenSampleId: 11, promptVersion: 3, expectedVerdict: 'pass', actualVerdict: 'pass', matchedExpected: true, status: 'succeeded', errorMsg: null, createdAt: '2026-05-25T12:00:00Z', finishedAt: '2026-05-25T12:01:00Z' },
+            { id: 45, taskId: 1, aiPromptId: 33, goldenSampleId: 11, promptVersion: 3, expectedVerdict: 'pass', actualVerdict: null, matchedExpected: null, status: 'failed', errorMsg: 'provider timeout', createdAt: '2026-05-25T12:02:00Z', finishedAt: '2026-05-25T12:03:00Z' },
+          ],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByText('#44')).toBeInTheDocument()
+    expect(screen.getByText('#45')).toBeInTheDocument()
+    expect(screen.getByText('failed · provider timeout')).toBeInTheDocument()
+    expect(screen.getAllByText('v3 #33')).toHaveLength(2)
+    expect(screen.getAllByText('matched').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('filters dry-run history by golden sample', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [
+            { id: 11, taskId: 1, aiPromptId: null, payload: { text: 'a' }, payloadHash: 'hash-a', expectedAnswer: { label: 'a' }, expectedVerdict: 'pass', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
+            { id: 12, taskId: 1, aiPromptId: null, payload: { text: 'b' }, payloadHash: 'hash-b', expectedAnswer: { label: 'b' }, expectedVerdict: 'reject', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
+          ],
+        }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return { dryRuns: [] }
+      }
+      if (path === '/tasks/1/ai-dry-runs?golden_sample_id=12&limit=10') {
+        return {
+          dryRuns: [
+            { id: 77, taskId: 1, aiPromptId: 34, goldenSampleId: 12, promptVersion: 4, expectedVerdict: 'reject', actualVerdict: 'pass', matchedExpected: false, status: 'succeeded', errorMsg: null, createdAt: '2026-05-25T12:02:00Z', finishedAt: '2026-05-25T12:03:00Z' },
+          ],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 golden sample 12 history' }))
+
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith('/tasks/1/ai-dry-runs?golden_sample_id=12&limit=10')
+    })
+    expect(await screen.findByText('#77')).toBeInTheDocument()
+    expect(screen.getByLabelText('dry_run_history_sample_filter')).toHaveValue('12')
+    expect(screen.getByText('mismatch')).toBeInTheDocument()
+    expect(screen.getByText('v4 #34')).toBeInTheDocument()
+  })
+
+  it('ignores stale dry-run history responses after switching tasks', async () => {
+    const user = userEvent.setup()
+    const taskAHistory = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts' || path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples' || path === '/tasks/2/golden-samples') {
+        return { samples: [] }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return taskAHistory.promise
+      }
+      if (path === '/tasks/2/ai-dry-runs?limit=10') {
+        return { dryRuns: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: /Task B/ }))
+    expect(await screen.findByText('暂无 dry-run history')).toBeInTheDocument()
+
+    await act(async () => {
+      taskAHistory.resolve({
+        dryRuns: [{
+          id: 88,
+          taskId: 1,
+          aiPromptId: 33,
+          goldenSampleId: 11,
+          promptVersion: 3,
+          expectedVerdict: 'pass',
+          actualVerdict: null,
+          matchedExpected: null,
+          status: 'failed',
+          errorMsg: 'late history error',
+          createdAt: '2026-05-25T12:00:00Z',
+          finishedAt: '2026-05-25T12:01:00Z',
+        }],
+      })
+      await taskAHistory.promise
+    })
+
+    expect(screen.queryByText('late history error')).not.toBeInTheDocument()
+    expect(screen.queryByText('#88')).not.toBeInTheDocument()
   })
 
   it('resets golden sample draft only when switching to a different task', async () => {
