@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -39,8 +40,15 @@ func TestGoldenSamplesListCreateDeleteOwnerAndAdmin(t *testing.T) {
 		}
 		data := responseData(t, rec)
 		samples := data["samples"].([]any)
-		if samples[0].(map[string]any)["id"] != float64(11) {
-			t.Fatalf("sample id = %v, want 11", samples[0].(map[string]any)["id"])
+		sample := samples[0].(map[string]any)
+		if sample["id"] != float64(11) {
+			t.Fatalf("sample id = %v, want 11", sample["id"])
+		}
+		if _, ok := sample["payload"].(map[string]any); !ok {
+			t.Fatalf("payload is %T, want JSON object: %s", sample["payload"], rec.Body.String())
+		}
+		if _, ok := sample["expectedAnswer"].(map[string]any); !ok {
+			t.Fatalf("expectedAnswer is %T, want JSON object: %s", sample["expectedAnswer"], rec.Body.String())
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatalf("expectations not met: %v", err)
@@ -82,8 +90,11 @@ func TestGoldenSamplesListCreateDeleteOwnerAndAdmin(t *testing.T) {
 		if sample["id"] != float64(31) {
 			t.Fatalf("sample id = %v, want 31", sample["id"])
 		}
-		if sample["payloadHash"] == "" {
-			t.Fatalf("payloadHash missing in response: %s", rec.Body.String())
+		if _, ok := sample["payload"].(map[string]any); !ok {
+			t.Fatalf("payload is %T, want JSON object: %s", sample["payload"], rec.Body.String())
+		}
+		if _, ok := sample["expectedAnswer"].(map[string]any); !ok {
+			t.Fatalf("expectedAnswer is %T, want JSON object: %s", sample["expectedAnswer"], rec.Body.String())
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatalf("expectations not met: %v", err)
@@ -115,6 +126,62 @@ func TestGoldenSamplesListCreateDeleteOwnerAndAdmin(t *testing.T) {
 			t.Fatalf("expectations not met: %v", err)
 		}
 	})
+}
+
+func TestGoldenSampleCreatePreservesRawJSONNumbersAndCanonicalHash(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	payload := `{"nested":{"b":2.0,"a":1e0},"external_id":9007199254740993123}`
+	expectedAnswer := `{"label":"ok","confidence":1}`
+	canonicalPayload := `{"external_id":9007199254740993123,"nested":{"a":1,"b":2}}`
+	canonicalAnswer := `{"confidence":1,"label":"ok"}`
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^INSERT INTO .golden_samples.`).
+		WithArgs(1, nil, canonicalPayload, expectedPayloadHashRaw(t, canonicalPayload), canonicalAnswer, "pass", nil, 7, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(41, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, rawJSONRequest(http.MethodPost, "/tasks/1/golden-samples", `{
+		"payload": `+payload+`,
+		"expected_answer": `+expectedAnswer+`,
+		"expected_verdict": "pass"
+	}`))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			Sample struct {
+				Payload        json.RawMessage `json:"payload"`
+				ExpectedAnswer json.RawMessage `json:"expectedAnswer"`
+			} `json:"sample"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Data.Sample.Payload) != canonicalPayload {
+		t.Fatalf("payload = %s, want %s", resp.Data.Sample.Payload, canonicalPayload)
+	}
+	if !bytes.Contains(resp.Data.Sample.Payload, []byte("9007199254740993123")) {
+		t.Fatalf("large integer lost precision: %s", resp.Data.Sample.Payload)
+	}
+	if string(resp.Data.Sample.ExpectedAnswer) != canonicalAnswer {
+		t.Fatalf("expectedAnswer = %s, want %s", resp.Data.Sample.ExpectedAnswer, canonicalAnswer)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
 }
 
 func TestGoldenSamplesRejectNonOwner(t *testing.T) {
@@ -419,6 +486,17 @@ func expectedPayloadHash(t *testing.T, payload any) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(raw)
+	return expectedPayloadHashRaw(t, string(raw))
+}
+
+func expectedPayloadHashRaw(t *testing.T, raw string) string {
+	t.Helper()
+	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+func rawJSONRequest(method, path string, body string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }

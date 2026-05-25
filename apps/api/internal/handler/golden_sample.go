@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,15 +39,26 @@ func (h GoldenSampleHandler) Register(api gin.IRouter) {
 }
 
 type goldenSampleRequest struct {
-	Payload         any     `json:"payload"`
-	ExpectedAnswer  any     `json:"expected_answer"`
-	ExpectedVerdict string  `json:"expected_verdict"`
-	Notes           string  `json:"notes"`
-	AIPromptID      *uint64 `json:"ai_prompt_id"`
+	Payload         json.RawMessage `json:"payload"`
+	ExpectedAnswer  json.RawMessage `json:"expected_answer"`
+	ExpectedVerdict string          `json:"expected_verdict"`
+	Notes           string          `json:"notes"`
+	AIPromptID      *uint64         `json:"ai_prompt_id"`
 }
 
 type goldenSampleDryRunRequest struct {
 	AIPromptID *uint64 `json:"ai_prompt_id"`
+}
+
+type goldenSampleResponse struct {
+	ID              uint64           `json:"id"`
+	TaskID          uint64           `json:"taskId"`
+	AIPromptID      *uint64          `json:"aiPromptId"`
+	Payload         json.RawMessage  `json:"payload"`
+	ExpectedAnswer  json.RawMessage  `json:"expectedAnswer"`
+	ExpectedVerdict string           `json:"expectedVerdict"`
+	Notes           model.NullString `json:"notes"`
+	CreatedAt       time.Time        `json:"createdAt"`
 }
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
@@ -56,7 +71,12 @@ func (h GoldenSampleHandler) List(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list golden samples")
 		return
 	}
-	httpx.OK(c, gin.H{"samples": samples})
+	responses, err := goldenSampleResponses(samples)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to serialize golden samples")
+		return
+	}
+	httpx.OK(c, gin.H{"samples": responses})
 }
 
 func (h GoldenSampleHandler) Create(c *gin.Context) {
@@ -68,8 +88,12 @@ func (h GoldenSampleHandler) Create(c *gin.Context) {
 	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
 		return
 	}
-	if req.Payload == nil || req.ExpectedAnswer == nil {
-		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "payload and expected_answer are required")
+	payloadJSON, ok := normalizeGoldenSampleJSON(c, req.Payload, "payload")
+	if !ok {
+		return
+	}
+	answerJSON, ok := normalizeGoldenSampleJSON(c, req.ExpectedAnswer, "expected_answer")
+	if !ok {
 		return
 	}
 	if !validGoldenSampleVerdict(req.ExpectedVerdict) {
@@ -86,16 +110,6 @@ func (h GoldenSampleHandler) Create(c *gin.Context) {
 			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai_prompt_id must belong to task")
 			return
 		}
-	}
-	payloadJSON, err := json.Marshal(req.Payload)
-	if err != nil {
-		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "payload is invalid")
-		return
-	}
-	answerJSON, err := json.Marshal(req.ExpectedAnswer)
-	if err != nil {
-		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "expected_answer is invalid")
-		return
 	}
 	sample := model.GoldenSample{
 		TaskID:          task.ID,
@@ -115,7 +129,198 @@ func (h GoldenSampleHandler) Create(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create golden sample")
 		return
 	}
-	httpx.OK(c, gin.H{"sample": sample})
+	response, err := goldenSampleResponseFromModel(sample)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to serialize golden sample")
+		return
+	}
+	httpx.OK(c, gin.H{"sample": response})
+}
+
+func normalizeGoldenSampleJSON(c *gin.Context, raw json.RawMessage, field string) ([]byte, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "payload and expected_answer are required")
+		return nil, false
+	}
+	canonical, err := canonicalGoldenSampleJSON(trimmed)
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", field+" is invalid")
+		return nil, false
+	}
+	return canonical, true
+}
+
+func canonicalGoldenSampleJSON(raw []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("multiple JSON values")
+		}
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := writeCanonicalJSON(&buf, value); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func writeCanonicalJSON(buf *bytes.Buffer, value any) error {
+	switch typed := value.(type) {
+	case nil:
+		buf.WriteString("null")
+	case bool:
+		if typed {
+			buf.WriteString("true")
+		} else {
+			buf.WriteString("false")
+		}
+	case string:
+		bytes, err := json.Marshal(typed)
+		if err != nil {
+			return err
+		}
+		buf.Write(bytes)
+	case json.Number:
+		number, err := canonicalJSONNumber(typed.String())
+		if err != nil {
+			return err
+		}
+		buf.WriteString(number)
+	case []any:
+		buf.WriteByte('[')
+		for index, item := range typed {
+			if index > 0 {
+				buf.WriteByte(',')
+			}
+			if err := writeCanonicalJSON(buf, item); err != nil {
+				return err
+			}
+		}
+		buf.WriteByte(']')
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		buf.WriteByte('{')
+		for index, key := range keys {
+			if index > 0 {
+				buf.WriteByte(',')
+			}
+			keyBytes, err := json.Marshal(key)
+			if err != nil {
+				return err
+			}
+			buf.Write(keyBytes)
+			buf.WriteByte(':')
+			if err := writeCanonicalJSON(buf, typed[key]); err != nil {
+				return err
+			}
+		}
+		buf.WriteByte('}')
+	default:
+		return errors.New("unsupported JSON value")
+	}
+	return nil
+}
+
+func canonicalJSONNumber(raw string) (string, error) {
+	sign := ""
+	if strings.HasPrefix(raw, "-") {
+		sign = "-"
+		raw = raw[1:]
+	}
+	exp := 0
+	if index := strings.IndexAny(raw, "eE"); index >= 0 {
+		parsed, err := strconv.Atoi(raw[index+1:])
+		if err != nil {
+			return "", err
+		}
+		exp = parsed
+		raw = raw[:index]
+	}
+	fracLen := 0
+	if index := strings.IndexByte(raw, '.'); index >= 0 {
+		fracLen = len(raw) - index - 1
+		raw = raw[:index] + raw[index+1:]
+	}
+	scale := fracLen - exp
+	if scale < 0 {
+		if -scale > int(maxAIPromptBytes) {
+			return "", errors.New("number is too large")
+		}
+		raw += strings.Repeat("0", -scale)
+		scale = 0
+	}
+	raw = strings.TrimLeft(raw, "0")
+	if raw == "" {
+		return "0", nil
+	}
+	for scale > 0 && strings.HasSuffix(raw, "0") {
+		raw = strings.TrimSuffix(raw, "0")
+		scale--
+	}
+	if len(raw)+scale > int(maxAIPromptBytes) {
+		return "", errors.New("number is too large")
+	}
+	if scale == 0 {
+		return sign + raw, nil
+	}
+	if len(raw) <= scale {
+		return sign + "0." + strings.Repeat("0", scale-len(raw)) + raw, nil
+	}
+	split := len(raw) - scale
+	return sign + raw[:split] + "." + raw[split:], nil
+}
+
+func goldenSampleResponses(samples []model.GoldenSample) ([]goldenSampleResponse, error) {
+	responses := make([]goldenSampleResponse, 0, len(samples))
+	for _, sample := range samples {
+		response, err := goldenSampleResponseFromModel(sample)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, response)
+	}
+	return responses, nil
+}
+
+func goldenSampleResponseFromModel(sample model.GoldenSample) (goldenSampleResponse, error) {
+	payload, err := storedGoldenSampleJSON(sample.Payload)
+	if err != nil {
+		return goldenSampleResponse{}, err
+	}
+	expectedAnswer, err := storedGoldenSampleJSON(sample.ExpectedAnswer)
+	if err != nil {
+		return goldenSampleResponse{}, err
+	}
+	return goldenSampleResponse{
+		ID:              sample.ID,
+		TaskID:          sample.TaskID,
+		AIPromptID:      sample.AIPromptID,
+		Payload:         payload,
+		ExpectedAnswer:  expectedAnswer,
+		ExpectedVerdict: sample.ExpectedVerdict,
+		Notes:           sample.Notes,
+		CreatedAt:       sample.CreatedAt,
+	}, nil
+}
+
+func storedGoldenSampleJSON(value string) (json.RawMessage, error) {
+	raw := json.RawMessage(value)
+	if !json.Valid(raw) {
+		return nil, errors.New("stored golden sample JSON is invalid")
+	}
+	return raw, nil
 }
 
 func (h GoldenSampleHandler) Delete(c *gin.Context) {
