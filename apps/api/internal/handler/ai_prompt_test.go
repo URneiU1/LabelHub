@@ -173,6 +173,67 @@ func TestAIPromptDryRunPreservesRawJSONNumbersForProvider(t *testing.T) {
 	}
 }
 
+func TestAIPromptDryRunRejectsInvalidRawJSONInput(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{
+			name: "missing payload",
+			body: `{"answer":{"summary":"ok"}}`,
+			want: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "missing answer",
+			body: `{"payload":{"prompt":"question"}}`,
+			want: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "null payload",
+			body: `{"payload":null,"answer":{"summary":"ok"}}`,
+			want: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "null answer",
+			body: `{"payload":{"prompt":"question"},"answer":null}`,
+			want: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "invalid body",
+			body: `{"payload":`,
+			want: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, sqlDB := newMockDB(t)
+			defer sqlDB.Close()
+
+			mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+				WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+					AddRow(1, 7, "Task", "draft"))
+
+			r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+			registerAllHandlers(r, db)
+
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, rawJSONRequest(http.MethodPost, "/tasks/1/ai-prompts/33/dry-run", tt.body))
+
+			if rec.Code != tt.want {
+				t.Fatalf("expected %d, got %d, body=%s", tt.want, rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "VALIDATION_ERROR") {
+				t.Fatalf("expected VALIDATION_ERROR, body=%s", rec.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("expectations not met: %v", err)
+			}
+		})
+	}
+}
+
 type captureProvider struct {
 	input *llmreview.EvaluationInput
 }

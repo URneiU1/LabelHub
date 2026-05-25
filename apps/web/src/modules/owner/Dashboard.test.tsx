@@ -282,7 +282,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost.mockReturnValue(dryRunResult.promise)
+    mockApiPostRawJSON.mockReturnValue(dryRunResult.promise)
 
     render(<OwnerDashboard />)
 
@@ -335,7 +335,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost.mockReturnValue(dryRunResult.promise)
+    mockApiPostRawJSON.mockReturnValue(dryRunResult.promise)
 
     render(<OwnerDashboard />)
 
@@ -450,7 +450,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost.mockResolvedValue({
+    mockApiPostRawJSON.mockResolvedValue({
       provider: 'mock',
       result: {
         verdict: 'uncertain',
@@ -468,6 +468,60 @@ describe('OwnerDashboard AI prompt flow', () => {
     await screen.findByText('needs human review')
     expect(screen.getAllByText(/uncertain/).some((element) => element.textContent?.includes('75'))).toBe(true)
     expect(screen.getByText('needs human review')).toBeInTheDocument()
+  })
+
+  it('sends ad-hoc dry-run as raw JSON to preserve large integer spelling', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, aiPromptId: 33 }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: '请预审',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPostRawJSON.mockResolvedValue({
+      provider: 'mock',
+      result: {
+        verdict: 'uncertain',
+        overall_score: 75,
+        dimensions: [{ name: '相关性', score: 75, reason: 'ok' }],
+        reason: 'needs human review',
+      },
+    })
+
+    render(<OwnerDashboard />)
+
+    fireEvent.change(await screen.findByLabelText('sample_payload'), { target: { value: '{"external_id":9007199254740993123}' } })
+    fireEvent.change(screen.getByLabelText('sample_answer'), { target: { value: '{"selected_id":9007199254740993124}' } })
+    await user.click(screen.getByRole('button', { name: '运行 dry-run' }))
+
+    expect(mockApiPost).not.toHaveBeenCalled()
+    expect(mockApiPostRawJSON).toHaveBeenCalledWith(
+      '/tasks/1/ai-prompts/33/dry-run',
+      expect.stringContaining('9007199254740993123'),
+    )
+    const body = mockApiPostRawJSON.mock.calls[0][1]
+    expect(body).toContain('9007199254740993124')
+    expect(body).not.toContain('9007199254740993000')
+    expect(body).not.toContain('9.007199254740993')
   })
 
   it('shows dry-run errors inline', async () => {
@@ -497,7 +551,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost.mockRejectedValue(new Error('provider failed'))
+    mockApiPostRawJSON.mockRejectedValue(new Error('provider failed'))
 
     render(<OwnerDashboard />)
 
@@ -533,7 +587,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost
+    mockApiPostRawJSON
       .mockResolvedValueOnce({
         provider: 'mock',
         result: {
@@ -554,6 +608,56 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
     expect(screen.queryByText('first result')).not.toBeInTheDocument()
+  })
+
+  it('rejects null ad-hoc dry-run payload before request and clears stale result', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, aiPromptId: 33 }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: '请预审',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPostRawJSON.mockResolvedValue({
+      provider: 'mock',
+      result: {
+        verdict: 'uncertain',
+        overall_score: 75,
+        dimensions: [{ name: '相关性', score: 75, reason: 'ok' }],
+        reason: 'first result',
+      },
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: '运行 dry-run' }))
+    expect(await screen.findByText('first result')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('sample_payload'), { target: { value: 'null' } })
+    await user.click(screen.getByRole('button', { name: '运行 dry-run' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('payload is required')
+    expect(screen.queryByText('first result')).not.toBeInTheDocument()
+    expect(mockApiPostRawJSON).toHaveBeenCalledTimes(1)
   })
 
   it('disables AI review enable action when no active prompt exists', async () => {
@@ -1173,11 +1277,13 @@ describe('OwnerDashboard AI prompt flow', () => {
     const payloadInput = await screen.findByLabelText('golden_sample_payload')
     const answerInput = screen.getByLabelText('golden_sample_expected_answer')
     const verdictInput = screen.getByLabelText('golden_sample_expected_verdict')
+    const promptChoiceInput = screen.getByLabelText('golden_sample_prompt')
     const notesInput = screen.getByLabelText('golden_sample_notes')
 
     fireEvent.change(payloadInput, { target: { value: '{"prompt":"Task A custom"}' } })
     fireEvent.change(answerInput, { target: { value: '{"summary":"Task A answer"}' } })
     await user.selectOptions(verdictInput, 'reject')
+    await user.selectOptions(promptChoiceInput, 'none')
     fireEvent.change(notesInput, { target: { value: 'Task A note' } })
 
     await user.click(screen.getByRole('button', { name: /Task B/ }))
@@ -1185,15 +1291,18 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(await screen.findByLabelText('golden_sample_payload')).toHaveValue('{"prompt":"示例题目"}')
     expect(screen.getByLabelText('golden_sample_expected_answer')).toHaveValue('{"summary":"示例答案"}')
     expect(screen.getByLabelText('golden_sample_expected_verdict')).toHaveValue('pass')
+    expect(screen.getByLabelText('golden_sample_prompt')).toHaveValue('active')
     expect(screen.getByLabelText('golden_sample_notes')).toHaveValue('')
 
     fireEvent.change(screen.getByLabelText('golden_sample_payload'), { target: { value: '{"prompt":"Task B draft"}' } })
     await user.selectOptions(screen.getByLabelText('golden_sample_expected_verdict'), 'uncertain')
+    await user.selectOptions(screen.getByLabelText('golden_sample_prompt'), 'none')
     fireEvent.change(screen.getByLabelText('golden_sample_notes'), { target: { value: 'Task B note' } })
     await user.click(screen.getByRole('button', { name: /Task B/ }))
 
     expect(screen.getByLabelText('golden_sample_payload')).toHaveValue('{"prompt":"Task B draft"}')
     expect(screen.getByLabelText('golden_sample_expected_verdict')).toHaveValue('uncertain')
+    expect(screen.getByLabelText('golden_sample_prompt')).toHaveValue('none')
     expect(screen.getByLabelText('golden_sample_notes')).toHaveValue('Task B note')
   })
 })

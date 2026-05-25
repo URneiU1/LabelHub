@@ -10,7 +10,7 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 golden sample Owner UI follow-up is implemented. Golden sample create drafts reset on actual task switch without breaking same-task no-op clicks, and ad-hoc AI prompt dry-run now preserves raw JSON payload/answer numbers through handler/provider message construction.
+- Latest completed work: S3 Owner dry-run raw JSON follow-up is implemented. Golden sample create drafts reset on actual task switch without breaking same-task no-op clicks, and ad-hoc AI prompt dry-run now preserves raw JSON payload/answer numbers from Owner UI request construction through handler/provider message construction.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
 - Next priority: Designer append/delete/simple property editing, plus S3 dry-run history list API / true batch dry-run contract / server-side dry-run throttle and provider rate-limit backoff, then Reviewer AI verdict/score display.
 

@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s3-owner-dry-run-raw-json`: 修复 Owner Dashboard ad-hoc AI prompt dry-run 端到端 raw JSON 精度:前端不再 `JSON.parse` 后走 `apiPost`,改为校验后用 `apiPostRawJSON` 发送 textarea 原始 JSON body,配合后端 RawMessage/provider UseNumber 避免大整数在前端、handler 或 provider message 路径被 float64 精度坍塌;同时补 golden sample prompt choice reset 断言和 ad-hoc dry-run missing/null/invalid JSON 回归。
 - 2026-05-25 `s3-golden-sample-draft-reset`: 修复 Owner Dashboard golden sample create draft 跨 task 泄漏:切换到不同 task 时重置 payload/expected_answer/expected_verdict/notes/prompt choice,同 task 重复点击仍 no-op;同时将 ad-hoc AI prompt dry-run 的 payload/answer 改为 raw JSON 传递,避免大整数在 handler/provider message 路径被 float64 精度坍塌。
 - 2026-05-25 `s3-golden-sample-owner-ui`: 修复 golden sample JSON contract:创建接口用 raw JSON/canonical hash 保留大整数精度,GET/POST 响应用 JSON value 而不是 escaped string;Owner Dashboard 新增 Golden Samples 管理区,支持加载/创建/删除样本、按 active/指定 prompt 绑定、单样本 dry-run、前端串行 Run all visible samples 和 result table,并沿用 task/action stale guard 防止跨 task 晚到响应污染 UI。批量 dry-run 后端 endpoint 仍暂缓,当前 result table 基于单样本 endpoint 串行执行。
 - 2026-05-23 `s3-golden-sample-dry-run-linking`: 新增 golden sample 单样本 dry-run linking: additive migration 扩展 `ai_dry_runs` 记录 `golden_sample_id`、prompt version、输入快照、expected/actual verdict、matched flag 和完成时间,并从 `ai_prompt_configs` 回填历史 prompt version;新增 `POST /tasks/:taskId/golden-samples/:sampleId/dry-run`,复用 owner/admin ownership、sample pinned prompt/task active prompt、prompt allowlist、mock/OpenAI-compatible provider 和 threshold consistency,成功/失败均写 dry-run 记录且 provider failure 只返回/持久化安全错误信息。批量 dry-run 暂缓,避免在结果表 UI 前先固化 partial failure 和路由语义。
@@ -80,6 +81,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-25 S3 Owner dry-run raw JSON: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun'` 通过;targeted `pnpm -F web test -- Dashboard` 通过;full `cd apps/api && go test -count=1 ./...` 通过;`cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S3 golden sample draft reset: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun|GoldenSample'` 通过;targeted `cd pkg/llmreview && go test -count=1 ./...` 通过;targeted `pnpm -F web test -- Dashboard` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S3 golden sample owner UI: `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-23 S3 golden sample dry-run linking: `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

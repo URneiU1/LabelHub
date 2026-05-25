@@ -334,15 +334,14 @@ export default function OwnerDashboard() {
 
   async function runDryRun() {
     if (!selected || !activePromptId || promptLoading || promptLoadFailed) return
-    const guard = beginTaskAction(selected.id, dryRunSeq)
+    const taskId = selected.id
+    const guard = beginTaskAction(taskId, dryRunSeq)
     setRunningDryRun(true)
     setPromptError('')
     setDryRun(null)
     try {
-      const data = await apiPost<AIDryRunResult>(`/tasks/${selected.id}/ai-prompts/${activePromptId}/dry-run`, {
-        payload: JSON.parse(samplePayload) as Record<string, unknown>,
-        answer: JSON.parse(sampleAnswer) as Record<string, unknown>,
-      })
+      const body = buildAIDryRunBody(samplePayload, sampleAnswer)
+      const data = await apiPostRawJSON<AIDryRunResult>(`/tasks/${taskId}/ai-prompts/${activePromptId}/dry-run`, body)
       if (!isCurrentTaskAction(guard, dryRunSeq)) return
       setDryRun(data)
       Toast.success('dry-run 完成')
@@ -770,6 +769,12 @@ function buildGoldenSampleCreateBody(input: { payload: string, expectedAnswer: s
     fields.push(`"ai_prompt_id":${input.aiPromptId}`)
   }
   return `{${fields.join(',')}}`
+}
+
+function buildAIDryRunBody(payloadInput: string, answerInput: string) {
+  const payload = normalizeJSONInput(payloadInput, 'payload')
+  const answer = normalizeJSONInput(answerInput, 'answer')
+  return `{"payload":${payload},"answer":${answer}}`
 }
 
 function normalizeJSONInput(raw: string, label: string) {

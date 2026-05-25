@@ -36,7 +36,8 @@ After every code-writing turn:
 - Golden sample JSON contract is hardened: create uses raw JSON/canonical hash so large numeric IDs are not coerced through JS/Go float64, and list/create responses return JSON values for `payload` and `expectedAnswer`.
 - Owner Dashboard golden sample manager is in place: owners can load/create/delete samples, bind active or historical prompt versions, run one sample, or run all visible samples serially through the single-sample dry-run endpoint; result rows show expected/actual verdict, match state, score, provider/model, reason/error, and dryRunId.
 - Owner Dashboard now resets golden sample create drafts only when switching to a different task, preventing Task A payload/answer/verdict/notes from being accidentally created under Task B while preserving same-task no-op clicks.
-- Ad-hoc AI prompt dry-run now preserves raw JSON payload/answer through handler input and OpenAI-compatible message construction, avoiding float64 precision loss for large numeric IDs.
+- Ad-hoc AI prompt dry-run now preserves raw JSON payload/answer end to end: Owner UI sends the textarea JSON through `apiPostRawJSON`, the handler accepts `json.RawMessage`, and OpenAI-compatible message construction uses `UseNumber`, avoiding float64 precision loss for large numeric IDs.
+- AI prompt dry-run regression coverage now includes Owner raw request body precision, golden sample prompt choice reset, and backend missing/null/invalid raw JSON validation.
 
 ## Next Work
 
