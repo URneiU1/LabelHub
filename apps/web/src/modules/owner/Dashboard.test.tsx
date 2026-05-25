@@ -1092,6 +1092,68 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByText('44')).toBeInTheDocument()
   })
 
+  it('refreshes dry-run history after a single golden sample failure', async () => {
+    const user = userEvent.setup()
+    let historyCalls = 0
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        historyCalls += 1
+        if (historyCalls === 1) {
+          return { dryRuns: [] }
+        }
+        return {
+          dryRuns: [{
+            id: 55,
+            taskId: 1,
+            aiPromptId: 33,
+            goldenSampleId: 11,
+            promptVersion: 3,
+            expectedVerdict: 'pass',
+            actualVerdict: null,
+            matchedExpected: null,
+            status: 'failed',
+            errorMsg: 'provider failed',
+            createdAt: '2026-05-25T12:02:00Z',
+            finishedAt: '2026-05-25T12:03:00Z',
+          }],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockRejectedValue(new Error('provider failed'))
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
+    expect(await screen.findByText('#55')).toBeInTheDocument()
+    expect(screen.getByText('failed · provider failed')).toBeInTheDocument()
+    expect(historyCalls).toBe(2)
+  })
+
   it('runs all visible golden samples through the batch endpoint and maps partial results', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {

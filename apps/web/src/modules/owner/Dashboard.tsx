@@ -589,6 +589,7 @@ export default function OwnerDashboard() {
         },
       }))
       setGoldenSampleError(message)
+      void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
     }
   }
 

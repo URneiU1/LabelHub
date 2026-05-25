@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s3-owner-history-refresh-fix`: 修复 Owner 单条 golden sample dry-run 失败后 history/trend 不刷新的 P2:单样本失败路径现在与成功路径一样重新加载当前 task/filter 的 dry-run history,让失败记录和趋势摘要及时反映后端已持久化的 failed dry-run。
 - 2026-05-25 `s2-designer-editing-v1`: 新增 Owner 模板版本入口和 Template Designer 最小编辑闭环:`/owner/tasks/:taskId/templates` 列出版本,`/owner/tasks/:taskId/templates/:templateId` 加载模板;latest 版本支持点击添加 9 个核心 widget、画布选中/删除、编辑 name/label/required 以及 options/length/path/mode/maxFiles/LLM target/prompt 等基础属性,保存时通过既有 `POST /tasks/:taskId/templates` 创建新版本并剥离 `_draftId`;历史版本只读并可 Fork 为新版本。
 - 2026-05-25 `s3-provider-retry-backoff`: OpenAI-compatible provider 新增短重试/backoff 配置:支持 `LLM_RETRY_MAX_ATTEMPTS`、`LLM_RETRY_BACKOFF_MS`、`LLM_RETRY_MAX_BACKOFF_MS`,默认最多 2 次且上限 2s;仅网络错误、HTTP 429 和 5xx 会重试,并尊重/clamp `Retry-After`;HTTP 400/401、schema/threshold validation 仍 fail fast,provider error body 继续不进入持久化错误信息。
 - 2026-05-25 `s3-reviewer-ai-verdict-display`: Reviewer Queue/Detail 增加 AI 预审结果展示,复用 submission 上已有 `aiVerdict/aiScore`,左侧队列显示 `AI verdict · score`,详情页在人工审核前显示 AI verdict/score 或空状态;未改后端 API。
@@ -89,6 +90,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-25 S3 Owner history refresh fix: targeted `pnpm -F web test -- Dashboard` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S2 Designer editing v1: targeted `pnpm -F web test -- src/modules/template/Designer.integration.test.tsx` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
 - 2026-05-25 S3 provider retry/backoff: targeted `cd apps/api && go test -count=1 ./internal/service/aiprompt` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过。
 - 2026-05-25 S3 Reviewer AI verdict display: targeted `pnpm -F web test -- Queue` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
