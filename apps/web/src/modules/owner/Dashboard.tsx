@@ -638,6 +638,9 @@ export default function OwnerDashboard() {
               <div style={{ marginTop: 'var(--space-md)', padding: 'var(--space-md)', border: '1px solid var(--color-border-light)', maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
                 {selected.baselineDescription || '暂无 baseline'}
               </div>
+              <div style={{ marginTop: 'var(--space-md)' }}>
+                <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>模板 Designer</a>
+              </div>
               <section style={aiPromptSectionStyle}>
                 <h3 style={subHeadingStyle}>AI Prompt</h3>
                 <div style={aiSettingsRowStyle}>
@@ -1221,4 +1224,16 @@ const activeListButtonStyle: React.CSSProperties = {
   ...listButtonStyle,
   borderColor: 'var(--color-accent)',
   background: 'var(--color-bg)',
+}
+
+const templateDesignerLinkStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  minHeight: 36,
+  alignItems: 'center',
+  padding: '0 var(--space-md)',
+  border: '1px solid var(--color-border)',
+  color: 'var(--color-text)',
+  background: 'var(--color-surface)',
+  textDecoration: 'none',
+  fontFamily: 'var(--font-body)',
 }

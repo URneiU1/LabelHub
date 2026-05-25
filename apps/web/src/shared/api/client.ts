@@ -110,6 +110,7 @@ export type Task = {
   description: string | null
   baselineDescription: string | null
   status: string
+  templateId?: number | null
   totalItems: number
   finishedItems: number
   aiPromptId?: number | null
@@ -137,7 +138,12 @@ export type Submission = {
 
 export type TaskTemplate = {
   id: number
+  taskId?: number
+  version?: number
   schemaJson: string
+  schemaHash?: string
+  createdBy?: number
+  createdAt?: string
 }
 
 export type SubmissionRevision = {

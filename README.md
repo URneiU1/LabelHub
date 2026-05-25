@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s2-designer-editing-v1`: 新增 Owner 模板版本入口和 Template Designer 最小编辑闭环:`/owner/tasks/:taskId/templates` 列出版本,`/owner/tasks/:taskId/templates/:templateId` 加载模板;latest 版本支持点击添加 9 个核心 widget、画布选中/删除、编辑 name/label/required 以及 options/length/path/mode/maxFiles/LLM target/prompt 等基础属性,保存时通过既有 `POST /tasks/:taskId/templates` 创建新版本并剥离 `_draftId`;历史版本只读并可 Fork 为新版本。
 - 2026-05-25 `s3-provider-retry-backoff`: OpenAI-compatible provider 新增短重试/backoff 配置:支持 `LLM_RETRY_MAX_ATTEMPTS`、`LLM_RETRY_BACKOFF_MS`、`LLM_RETRY_MAX_BACKOFF_MS`,默认最多 2 次且上限 2s;仅网络错误、HTTP 429 和 5xx 会重试,并尊重/clamp `Retry-After`;HTTP 400/401、schema/threshold validation 仍 fail fast,provider error body 继续不进入持久化错误信息。
 - 2026-05-25 `s3-reviewer-ai-verdict-display`: Reviewer Queue/Detail 增加 AI 预审结果展示,复用 submission 上已有 `aiVerdict/aiScore`,左侧队列显示 `AI verdict · score`,详情页在人工审核前显示 AI verdict/score 或空状态;未改后端 API。
 - 2026-05-25 `s3-owner-dry-run-history-ui`: Owner Dashboard 的 Golden Samples 区域新增 dry-run history/trend 最小可用视图,复用 `GET /tasks/:taskId/ai-dry-runs?golden_sample_id=&limit=` 自动加载最近记录,支持按 sample filter/History 按钮查看单样本历史,用 compact summary 展示 total/matched/mismatch/failed,table 展示 expected/actual verdict、matched、status/error、prompt version 和 finished time,并沿用 task switch stale guard 防止晚到 history 响应污染当前 task。
@@ -75,18 +76,20 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
+- S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/simple property editing 和 Save as new version,但还没有拖拽排序、Tabs/Group、属性错误逐字段高亮、用真实 task item payload 做预览。
 - AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score 展示、同步串行 batch dry-run endpoint、基础 batch delay 配置和 provider 429/backoff 短重试已具备,但 server-side quota/circuit breaker 与更丰富的 trend/history 分析还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
-- 推进 S2 后续:进入 Designer 的 append/delete/简易属性编辑能力。
+- 推进 S2 后续:补 Designer 排序/复制、逐字段 validation 显示、真实样本预览或 Tabs/Group 加分物料。
 - 推进 S3 下一段:补 server-side dry-run quota/circuit breaker 或更丰富的 Owner dry-run trend/history 分析。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-25 S2 Designer editing v1: targeted `pnpm -F web test -- src/modules/template/Designer.integration.test.tsx` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
 - 2026-05-25 S3 provider retry/backoff: targeted `cd apps/api && go test -count=1 ./internal/service/aiprompt` 通过;full `cd apps/api && go test -count=1 ./...` 通过;extra `cd apps/ai-worker && go test -count=1 ./...` 通过。
 - 2026-05-25 S3 Reviewer AI verdict display: targeted `pnpm -F web test -- Queue` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
 - 2026-05-25 S3 Owner dry-run history UI: targeted `pnpm -F web test -- Dashboard` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
