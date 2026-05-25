@@ -49,6 +49,18 @@ export async function apiPost<T>(path: string, body: Record<string, unknown> | F
   }, auth)
 }
 
+export async function apiPostRawJSON<T>(path: string, body: string, auth = true) {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }, auth)
+}
+
+export async function apiDelete<T>(path: string) {
+  return request<T>(path, { method: 'DELETE' })
+}
+
 export async function apiUpload<T>(path: string, body: FormData) {
   const headers = new Headers()
   const token = getToken()

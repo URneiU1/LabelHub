@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
-import { apiGet, apiPost, type Task } from '../../shared/api/client'
+import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
 
 type TaskListResponse = Task[]
 type ExportResponse = {
@@ -27,12 +27,44 @@ type AIReviewSettingsResponse = {
 }
 type AIDryRunResult = {
   provider: string
+  dryRunId?: number
+  matchedExpected?: boolean
   result: {
     verdict: string
     overall_score: number
     dimensions: Array<{ name: string, score: number, reason: string }>
     reason: string
+    model?: string
   }
+}
+type GoldenSample = {
+  id: number
+  taskId: number
+  aiPromptId: number | null
+  payload: unknown
+  expectedAnswer: unknown
+  expectedVerdict: string
+  notes: string | null
+  createdAt: string
+}
+type GoldenSamplesResponse = {
+  samples: GoldenSample[]
+}
+type GoldenSampleCreateResponse = {
+  sample: GoldenSample
+}
+type GoldenSampleRunRow = {
+  sampleId: number
+  expectedVerdict: string
+  status: 'running' | 'succeeded' | 'failed'
+  actualVerdict?: string
+  matchedExpected?: boolean
+  score?: number
+  provider?: string
+  model?: string
+  reason?: string
+  dryRunId?: number
+  error?: string
 }
 
 export default function OwnerDashboard() {
@@ -50,6 +82,18 @@ export default function OwnerDashboard() {
   const [samplePayload, setSamplePayload] = useState('{"prompt":"示例题目"}')
   const [sampleAnswer, setSampleAnswer] = useState('{"summary":"示例答案"}')
   const [dryRun, setDryRun] = useState<AIDryRunResult | null>(null)
+  const [goldenSamples, setGoldenSamples] = useState<GoldenSample[]>([])
+  const [goldenPayload, setGoldenPayload] = useState('{"prompt":"示例题目"}')
+  const [goldenExpectedAnswer, setGoldenExpectedAnswer] = useState('{"summary":"示例答案"}')
+  const [goldenExpectedVerdict, setGoldenExpectedVerdict] = useState('pass')
+  const [goldenNotes, setGoldenNotes] = useState('')
+  const [goldenPromptChoice, setGoldenPromptChoice] = useState('active')
+  const [goldenSampleError, setGoldenSampleError] = useState('')
+  const [goldenSampleLoading, setGoldenSampleLoading] = useState(false)
+  const [goldenSampleLoadFailed, setGoldenSampleLoadFailed] = useState(false)
+  const [creatingGoldenSample, setCreatingGoldenSample] = useState(false)
+  const [deletingGoldenSampleId, setDeletingGoldenSampleId] = useState<number | null>(null)
+  const [goldenRunRows, setGoldenRunRows] = useState<Record<number, GoldenSampleRunRow>>({})
   const [promptError, setPromptError] = useState('')
   const [promptLoading, setPromptLoading] = useState(false)
   const [promptLoadFailed, setPromptLoadFailed] = useState(false)
@@ -57,11 +101,15 @@ export default function OwnerDashboard() {
   const [runningDryRun, setRunningDryRun] = useState(false)
   const [savingAIReviewSettings, setSavingAIReviewSettings] = useState(false)
   const promptLoadSeq = useRef(0)
+  const goldenSampleLoadSeq = useRef(0)
   const selectedTaskIdRef = useRef<number | null>(null)
   const taskActionGeneration = useRef(0)
   const savePromptSeq = useRef(0)
   const aiReviewSettingsSeq = useRef(0)
   const dryRunSeq = useRef(0)
+  const createGoldenSampleSeq = useRef(0)
+  const deleteGoldenSampleSeq = useRef(0)
+  const goldenSampleRunSeq = useRef(0)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -133,6 +181,34 @@ export default function OwnerDashboard() {
     }
   }, [fillPromptForm, resetPromptFormToDefaults])
 
+  const loadGoldenSamples = useCallback(async (taskId: number) => {
+    const requestSeq = goldenSampleLoadSeq.current + 1
+    goldenSampleLoadSeq.current = requestSeq
+    setGoldenSamples([])
+    setGoldenRunRows({})
+    setGoldenSampleError('')
+    setGoldenSampleLoading(true)
+    setGoldenSampleLoadFailed(false)
+    setCreatingGoldenSample(false)
+    setDeletingGoldenSampleId(null)
+    setGoldenPromptChoice('active')
+    try {
+      const data = await apiGet<GoldenSamplesResponse>(`/tasks/${taskId}/golden-samples`)
+      if (goldenSampleLoadSeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
+      setGoldenSamples(data.samples)
+      setGoldenSampleError('')
+      setGoldenSampleLoading(false)
+      setGoldenSampleLoadFailed(false)
+    } catch (error) {
+      if (goldenSampleLoadSeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
+      setGoldenSamples([])
+      setGoldenRunRows({})
+      setGoldenSampleLoading(false)
+      setGoldenSampleLoadFailed(true)
+      setGoldenSampleError(error instanceof Error ? error.message : '加载 golden samples 失败')
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
@@ -143,8 +219,9 @@ export default function OwnerDashboard() {
       selectedTaskIdRef.current = selected.id
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadPrompts(selected.id)
+      void loadGoldenSamples(selected.id)
     }
-  }, [loadPrompts, selected])
+  }, [loadGoldenSamples, loadPrompts, selected])
 
   function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
     seqRef.current += 1
@@ -159,6 +236,24 @@ export default function OwnerDashboard() {
     if (task.id === selectedTaskIdRef.current) return
     selectedTaskIdRef.current = task.id
     taskActionGeneration.current += 1
+    setExportRows([])
+    setPrompts([])
+    setActivePromptId(null)
+    setAIReviewEnabled(false)
+    setDryRun(null)
+    setPromptError('')
+    setPromptLoading(true)
+    setPromptLoadFailed(false)
+    setSavingPrompt(false)
+    setRunningDryRun(false)
+    setSavingAIReviewSettings(false)
+    setGoldenSamples([])
+    setGoldenRunRows({})
+    setGoldenSampleError('')
+    setGoldenSampleLoading(true)
+    setGoldenSampleLoadFailed(false)
+    setCreatingGoldenSample(false)
+    setDeletingGoldenSampleId(null)
     setSelected(task)
   }
 
@@ -255,7 +350,142 @@ export default function OwnerDashboard() {
     }
   }
 
+  async function createGoldenSample() {
+    if (!selected || goldenSampleLoading || goldenSampleLoadFailed) return
+    const guard = beginTaskAction(selected.id, createGoldenSampleSeq)
+    setCreatingGoldenSample(true)
+    setGoldenSampleError('')
+    try {
+      const body = buildGoldenSampleCreateBody({
+        payload: goldenPayload,
+        expectedAnswer: goldenExpectedAnswer,
+        expectedVerdict: goldenExpectedVerdict,
+        notes: goldenNotes,
+        aiPromptId: resolveGoldenPromptId(),
+      })
+      const data = await apiPostRawJSON<GoldenSampleCreateResponse>(`/tasks/${selected.id}/golden-samples`, body)
+      if (!isCurrentTaskAction(guard, createGoldenSampleSeq)) return
+      setGoldenSamples((current) => [data.sample, ...current.filter((sample) => sample.id !== data.sample.id)])
+      setGoldenNotes('')
+      setGoldenSampleError('')
+      Toast.success('Golden sample 已创建')
+    } catch (error) {
+      if (!isCurrentTaskAction(guard, createGoldenSampleSeq)) return
+      const message = error instanceof Error ? error.message : '创建 golden sample 失败'
+      setGoldenSampleError(message)
+      Toast.error(message)
+    } finally {
+      if (isCurrentTaskAction(guard, createGoldenSampleSeq)) {
+        setCreatingGoldenSample(false)
+      }
+    }
+  }
+
+  async function deleteGoldenSample(sample: GoldenSample) {
+    if (!selected || goldenSampleLoading || goldenSampleLoadFailed) return
+    if (!window.confirm(`删除 golden sample #${sample.id}?`)) return
+    const guard = beginTaskAction(selected.id, deleteGoldenSampleSeq)
+    setDeletingGoldenSampleId(sample.id)
+    setGoldenSampleError('')
+    try {
+      await apiDelete<{ deleted: boolean }>(`/tasks/${selected.id}/golden-samples/${sample.id}`)
+      if (!isCurrentTaskAction(guard, deleteGoldenSampleSeq)) return
+      setGoldenSamples((current) => current.filter((currentSample) => currentSample.id !== sample.id))
+      setGoldenRunRows((current) => {
+        const next = { ...current }
+        delete next[sample.id]
+        return next
+      })
+      Toast.success('Golden sample 已删除')
+    } catch (error) {
+      if (!isCurrentTaskAction(guard, deleteGoldenSampleSeq)) return
+      const message = error instanceof Error ? error.message : '删除 golden sample 失败'
+      setGoldenSampleError(message)
+      Toast.error(message)
+    } finally {
+      if (isCurrentTaskAction(guard, deleteGoldenSampleSeq)) {
+        setDeletingGoldenSampleId(null)
+      }
+    }
+  }
+
+  async function runGoldenSample(sample: GoldenSample) {
+    if (!selected || goldenSampleLoading || goldenSampleLoadFailed) return
+    const guard = beginTaskAction(selected.id, goldenSampleRunSeq)
+    setGoldenSampleError('')
+    await runGoldenSampleWithGuard(selected.id, sample, guard)
+  }
+
+  async function runAllGoldenSamples() {
+    if (!selected || goldenSamples.length === 0 || goldenSampleLoading || goldenSampleLoadFailed) return
+    const guard = beginTaskAction(selected.id, goldenSampleRunSeq)
+    setGoldenSampleError('')
+    for (const sample of goldenSamples) {
+      if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      await runGoldenSampleWithGuard(selected.id, sample, guard)
+    }
+  }
+
+  async function runGoldenSampleWithGuard(taskId: number, sample: GoldenSample, guard: { taskId: number, generation: number, seq: number }) {
+    setGoldenRunRows((current) => ({
+      ...current,
+      [sample.id]: {
+        sampleId: sample.id,
+        expectedVerdict: sample.expectedVerdict,
+        status: 'running',
+      },
+    }))
+    try {
+      const data = await apiPost<AIDryRunResult>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, {})
+      if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      setGoldenRunRows((current) => ({
+        ...current,
+        [sample.id]: {
+          sampleId: sample.id,
+          expectedVerdict: sample.expectedVerdict,
+          status: 'succeeded',
+          actualVerdict: data.result.verdict,
+          matchedExpected: data.matchedExpected,
+          score: data.result.overall_score,
+          provider: data.provider,
+          model: data.result.model,
+          reason: data.result.reason,
+          dryRunId: data.dryRunId,
+        },
+      }))
+    } catch (error) {
+      if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      const message = error instanceof Error ? error.message : 'golden sample dry-run 失败'
+      setGoldenRunRows((current) => ({
+        ...current,
+        [sample.id]: {
+          sampleId: sample.id,
+          expectedVerdict: sample.expectedVerdict,
+          status: 'failed',
+          error: message,
+        },
+      }))
+      setGoldenSampleError(message)
+    }
+  }
+
+  function resolveGoldenPromptId() {
+    if (goldenPromptChoice === 'none') return null
+    if (goldenPromptChoice === 'active') return activePromptId
+    const promptId = Number(goldenPromptChoice)
+    return Number.isFinite(promptId) && promptId > 0 ? promptId : null
+  }
+
+  function promptVersionLabel(promptId: number | null) {
+    if (!promptId) return '未绑定 prompt'
+    const prompt = prompts.find((candidate) => candidate.id === promptId)
+    return prompt ? `Prompt v${prompt.version} (#${prompt.id})` : `Prompt #${promptId}`
+  }
+
   const promptActionDisabled = promptLoading || promptLoadFailed
+  const goldenActionDisabled = goldenSampleLoading || goldenSampleLoadFailed
+  const anyGoldenRunRunning = Object.values(goldenRunRows).some((row) => row.status === 'running')
+  const goldenRunResults = goldenSamples.map((sample) => goldenRunRows[sample.id]).filter((row): row is GoldenSampleRunRow => Boolean(row))
 
   return (
     <div>
@@ -353,6 +583,117 @@ export default function OwnerDashboard() {
                     <p style={mutedStyle}>当前任务未配置 AI Prompt</p>
                   ) : null}
                 </div>
+                <div style={goldenSampleSectionStyle}>
+                  <div style={aiSettingsRowStyle}>
+                    <h3 style={subHeadingStyle}>Golden Samples</h3>
+                    <Button disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()}>
+                      Run all visible samples
+                    </Button>
+                  </div>
+                  {goldenSampleError ? <div role="alert" style={alertStyle}>{goldenSampleError}</div> : null}
+                  <div style={dryRunGridStyle}>
+                    <label style={fieldStyle}>
+                      golden_sample_payload
+                      <textarea aria-label="golden_sample_payload" value={goldenPayload} onChange={(event) => setGoldenPayload(event.target.value)} style={textareaStyle} />
+                    </label>
+                    <label style={fieldStyle}>
+                      golden_sample_expected_answer
+                      <textarea aria-label="golden_sample_expected_answer" value={goldenExpectedAnswer} onChange={(event) => setGoldenExpectedAnswer(event.target.value)} style={textareaStyle} />
+                    </label>
+                  </div>
+                  <div style={formGridStyle}>
+                    <label style={fieldStyle}>
+                      expected_verdict
+                      <select aria-label="golden_sample_expected_verdict" value={goldenExpectedVerdict} onChange={(event) => setGoldenExpectedVerdict(event.target.value)} style={inputStyle}>
+                        <option value="pass">pass</option>
+                        <option value="reject">reject</option>
+                        <option value="uncertain">uncertain</option>
+                      </select>
+                    </label>
+                    <label style={fieldStyle}>
+                      ai_prompt
+                      <select aria-label="golden_sample_prompt" value={goldenPromptChoice} onChange={(event) => setGoldenPromptChoice(event.target.value)} style={inputStyle}>
+                        <option value="active">当前 active prompt{activePromptId ? ` (#${activePromptId})` : ''}</option>
+                        <option value="none">不绑定 prompt</option>
+                        {prompts.map((prompt) => (
+                          <option key={prompt.id} value={String(prompt.id)}>Prompt v{prompt.version} #{prompt.id}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={fieldStyle}>
+                      notes
+                      <input aria-label="golden_sample_notes" value={goldenNotes} onChange={(event) => setGoldenNotes(event.target.value)} style={inputStyle} />
+                    </label>
+                  </div>
+                  <Button disabled={goldenActionDisabled || creatingGoldenSample} loading={creatingGoldenSample} onClick={() => void createGoldenSample()} style={{ marginTop: 'var(--space-sm)' }}>
+                    创建 golden sample
+                  </Button>
+                  {goldenSampleLoading ? (
+                    <p style={mutedStyle}>加载 golden samples...</p>
+                  ) : goldenSamples.length === 0 ? (
+                    <p style={mutedStyle}>暂无 golden samples</p>
+                  ) : (
+                    <div style={goldenSampleListStyle}>
+                      {goldenSamples.map((sample) => {
+                        const runRow = goldenRunRows[sample.id]
+                        return (
+                          <div key={sample.id} style={goldenSampleItemStyle}>
+                            <div style={goldenSampleHeaderStyle}>
+                              <strong>#{sample.id} · {sample.expectedVerdict}</strong>
+                              <span>{promptVersionLabel(sample.aiPromptId)}</span>
+                              <span>{formatDateTime(sample.createdAt)}</span>
+                            </div>
+                            {sample.notes ? <div style={mutedStyle}>{sample.notes}</div> : null}
+                            <div style={dryRunGridStyle}>
+                              <pre style={compactPreviewStyle}>{formatCompactJSON(sample.payload)}</pre>
+                              <pre style={compactPreviewStyle}>{formatCompactJSON(sample.expectedAnswer)}</pre>
+                            </div>
+                            <div style={goldenSampleActionsStyle}>
+                              <Button aria-label={`Run golden sample ${sample.id}`} disabled={goldenActionDisabled || runRow?.status === 'running' || anyGoldenRunRunning} loading={runRow?.status === 'running'} onClick={() => void runGoldenSample(sample)}>
+                                Run
+                              </Button>
+                              <Button aria-label={`删除 golden sample ${sample.id}`} disabled={goldenActionDisabled || deletingGoldenSampleId === sample.id || anyGoldenRunRunning} loading={deletingGoldenSampleId === sample.id} onClick={() => void deleteGoldenSample(sample)}>
+                                删除
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {goldenRunResults.length > 0 ? (
+                    <div style={resultTableWrapStyle}>
+                      <table style={resultTableStyle}>
+                        <thead>
+                          <tr>
+                            <th style={resultCellStyle}>sample</th>
+                            <th style={resultCellStyle}>expected</th>
+                            <th style={resultCellStyle}>actual</th>
+                            <th style={resultCellStyle}>matched</th>
+                            <th style={resultCellStyle}>score</th>
+                            <th style={resultCellStyle}>provider</th>
+                            <th style={resultCellStyle}>dryRunId</th>
+                            <th style={resultCellStyle}>reason / error</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {goldenRunResults.map((row) => (
+                            <tr key={row.sampleId}>
+                              <td style={resultCellStyle}>#{row.sampleId}</td>
+                              <td style={resultCellStyle}>{row.expectedVerdict}</td>
+                              <td style={resultCellStyle}>{row.actualVerdict || row.status}</td>
+                              <td style={resultCellStyle}>{row.matchedExpected === undefined ? '-' : row.matchedExpected ? 'matched' : 'mismatch'}</td>
+                              <td style={resultCellStyle}>{row.score ?? '-'}</td>
+                              <td style={resultCellStyle}>{[row.provider, row.model].filter(Boolean).join(' / ') || '-'}</td>
+                              <td style={resultCellStyle}>{row.dryRunId ?? '-'}</td>
+                              <td style={resultCellStyle}>{row.error || row.reason || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
               </section>
               <Button onClick={() => void exportJSON(selected.id)} style={{ marginTop: 'var(--space-md)' }}>
                 导出 approved JSON
@@ -399,6 +740,48 @@ function parseDimensionsInput(raw: string): Array<Record<string, unknown>> {
   return parsed.filter((dimension): dimension is Record<string, unknown> => {
     return typeof dimension === 'object' && dimension !== null
   })
+}
+
+function buildGoldenSampleCreateBody(input: { payload: string, expectedAnswer: string, expectedVerdict: string, notes: string, aiPromptId: number | null }) {
+  const payload = normalizeJSONInput(input.payload, 'payload')
+  const expectedAnswer = normalizeJSONInput(input.expectedAnswer, 'expected_answer')
+  const fields = [
+    `"payload":${payload}`,
+    `"expected_answer":${expectedAnswer}`,
+    `"expected_verdict":${JSON.stringify(input.expectedVerdict)}`,
+  ]
+  const notes = input.notes.trim()
+  if (notes) {
+    fields.push(`"notes":${JSON.stringify(notes)}`)
+  }
+  if (input.aiPromptId) {
+    fields.push(`"ai_prompt_id":${input.aiPromptId}`)
+  }
+  return `{${fields.join(',')}}`
+}
+
+function normalizeJSONInput(raw: string, label: string) {
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed === 'null') {
+    throw new Error(`${label} is required`)
+  }
+  JSON.parse(trimmed)
+  return trimmed
+}
+
+function formatCompactJSON(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function formatDateTime(value: string) {
+  if (!value) return '-'
+  const time = new Date(value)
+  if (Number.isNaN(time.getTime())) return value
+  return time.toLocaleString()
 }
 
 const panelStyle: React.CSSProperties = {
@@ -479,6 +862,67 @@ const dryRunResultStyle: React.CSSProperties = {
   padding: 'var(--space-sm)',
   border: '1px solid var(--color-border-light)',
   background: 'var(--color-bg)',
+}
+
+const goldenSampleSectionStyle: React.CSSProperties = {
+  marginTop: 'var(--space-lg)',
+  paddingTop: 'var(--space-md)',
+  borderTop: '1px solid var(--color-border-light)',
+}
+
+const goldenSampleListStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  marginTop: 'var(--space-md)',
+}
+
+const goldenSampleItemStyle: React.CSSProperties = {
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  background: 'var(--color-bg)',
+}
+
+const goldenSampleHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-sm)',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  color: 'var(--color-text-secondary)',
+}
+
+const goldenSampleActionsStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: 'var(--space-sm)',
+  marginTop: 'var(--space-sm)',
+}
+
+const compactPreviewStyle: React.CSSProperties = {
+  margin: 'var(--space-sm) 0 0',
+  padding: 'var(--space-sm)',
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border-light)',
+  maxHeight: 120,
+  overflow: 'auto',
+  whiteSpace: 'pre-wrap',
+}
+
+const resultTableWrapStyle: React.CSSProperties = {
+  marginTop: 'var(--space-md)',
+  overflowX: 'auto',
+}
+
+const resultTableStyle: React.CSSProperties = {
+  width: '100%',
+  borderCollapse: 'collapse',
+  fontSize: 'var(--text-sm)',
+}
+
+const resultCellStyle: React.CSSProperties = {
+  border: '1px solid var(--color-border-light)',
+  padding: 'var(--space-sm)',
+  textAlign: 'left',
+  verticalAlign: 'top',
 }
 
 const alertStyle: React.CSSProperties = {

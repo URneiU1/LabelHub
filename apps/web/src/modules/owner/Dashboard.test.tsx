@@ -3,11 +3,13 @@ import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OwnerDashboard from './Dashboard'
-import { apiGet, apiPost } from '../../shared/api/client'
+import { apiDelete, apiGet, apiPost, apiPostRawJSON } from '../../shared/api/client'
 
 vi.mock('../../shared/api/client', () => ({
+  apiDelete: vi.fn(),
   apiGet: vi.fn(),
   apiPost: vi.fn(),
+  apiPostRawJSON: vi.fn(),
 }))
 
 vi.mock('@douyinfe/semi-ui', () => ({
@@ -24,6 +26,8 @@ vi.mock('@douyinfe/semi-ui', () => ({
 
 const mockApiGet = vi.mocked(apiGet)
 const mockApiPost = vi.mocked(apiPost)
+const mockApiPostRawJSON = vi.mocked(apiPostRawJSON)
+const mockApiDelete = vi.mocked(apiDelete)
 
 const task = {
   id: 1,
@@ -39,8 +43,11 @@ const task = {
 
 describe('OwnerDashboard AI prompt flow', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     mockApiGet.mockReset()
     mockApiPost.mockReset()
+    mockApiPostRawJSON.mockReset()
+    mockApiDelete.mockReset()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]
@@ -48,6 +55,13 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/1/ai-prompts') {
         return { prompts: [], activePromptId: null, aiReviewEnabled: false }
       }
+      if (path === '/tasks/1/golden-samples') {
+        return { samples: [] }
+      }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
   })
@@ -102,6 +116,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: false,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockResolvedValue({
@@ -156,6 +174,10 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/2/ai-prompts') {
         return { prompts: [], activePromptId: null, aiReviewEnabled: false }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
 
@@ -192,6 +214,10 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/2/ai-prompts') {
         return { prompts: [], activePromptId: null, aiReviewEnabled: false }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
 
@@ -250,6 +276,10 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/2/ai-prompts') {
         return { prompts: [], activePromptId: null, aiReviewEnabled: false }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockReturnValue(dryRunResult.promise)
@@ -299,6 +329,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: false,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockReturnValue(dryRunResult.promise)
@@ -354,6 +388,10 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/2/ai-prompts') {
         return { prompts: [], activePromptId: null, aiReviewEnabled: false }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockReturnValue(saveResult.promise)
@@ -406,6 +444,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: false,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockResolvedValue({
@@ -449,6 +491,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: false,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockRejectedValue(new Error('provider failed'))
@@ -481,6 +527,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: false,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost
@@ -534,6 +584,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: false,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockResolvedValue({ aiReviewEnabled: true, activePromptId: 33 })
@@ -567,6 +621,10 @@ describe('OwnerDashboard AI prompt flow', () => {
           aiReviewEnabled: true,
         }
       }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockResolvedValue({ aiReviewEnabled: false, activePromptId: 33 })
@@ -577,6 +635,519 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-review-settings', { enabled: false })
     expect(await screen.findByText('AI review: 已关闭')).toBeInTheDocument()
+  })
+
+  it('loads golden samples for the selected task', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: 'baseline sample',
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByText('#11 · pass')).toBeInTheDocument()
+    expect(screen.getByText('baseline sample')).toBeInTheDocument()
+    expect(screen.getByText(/"text": "a"/)).toBeInTheDocument()
+    expect(screen.getByText(/"label": "ok"/)).toBeInTheDocument()
+  })
+
+  it('creates a golden sample with raw JSON object body', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, aiPromptId: 33 }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return {
+          prompts: [{
+            id: 33,
+            version: 1,
+            promptTemplate: '请预审',
+            dimensions: '[{"name":"相关性"}]',
+            passThreshold: 80,
+            uncertainMin: 60,
+            model: 'mock-model',
+          }],
+          activePromptId: 33,
+          aiReviewEnabled: false,
+        }
+      }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPostRawJSON.mockResolvedValue({
+      sample: {
+        id: 11,
+        taskId: 1,
+        aiPromptId: 33,
+        payload: { prompt: '示例题目' },
+        payloadHash: 'hash',
+        expectedAnswer: { summary: '示例答案' },
+        expectedVerdict: 'pass',
+        notes: 'owner baseline',
+        createdBy: 7,
+        createdAt: '2026-05-23T12:00:00Z',
+      },
+    })
+
+    render(<OwnerDashboard />)
+
+    await screen.findByDisplayValue('请预审')
+    await user.type(screen.getByLabelText('golden_sample_notes'), 'owner baseline')
+    await user.click(screen.getByRole('button', { name: '创建 golden sample' }))
+
+    await waitFor(() => {
+      expect(mockApiPostRawJSON).toHaveBeenCalledWith('/tasks/1/golden-samples', expect.any(String))
+    })
+    const body = mockApiPostRawJSON.mock.calls[0][1] as string
+    expect(body).toContain('"payload":{"prompt":"示例题目"}')
+    expect(body).toContain('"expected_answer":{"summary":"示例答案"}')
+    expect(body).toContain('"ai_prompt_id":33')
+    expect(body).not.toContain('\\"prompt\\"')
+    expect(await screen.findByText('#11 · pass')).toBeInTheDocument()
+  })
+
+  it('shows golden sample create errors without keeping stale success state', async () => {
+    const user = userEvent.setup()
+    mockApiPostRawJSON.mockRejectedValue(new Error('duplicate golden sample'))
+
+    render(<OwnerDashboard />)
+
+    const createButton = await screen.findByRole('button', { name: '创建 golden sample' })
+    await waitFor(() => expect(createButton).not.toBeDisabled())
+    await user.click(createButton)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('duplicate golden sample')
+    expect(screen.queryByText('#11 · pass')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建 golden sample' })).not.toBeDisabled()
+  })
+
+  it('ignores stale golden sample create responses after switching tasks', async () => {
+    const user = userEvent.setup()
+    const createResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path.endsWith('/golden-samples')) {
+        return { samples: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPostRawJSON.mockReturnValue(createResult.promise)
+
+    render(<OwnerDashboard />)
+
+    const createButton = await screen.findByRole('button', { name: '创建 golden sample' })
+    await waitFor(() => expect(createButton).not.toBeDisabled())
+    await user.click(createButton)
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+    expect(await screen.findByText('暂无 golden samples')).toBeInTheDocument()
+
+    await act(async () => {
+      createResult.resolve({
+        sample: {
+          id: 11,
+          taskId: 1,
+          aiPromptId: null,
+          payload: { text: 'late' },
+          payloadHash: 'hash',
+          expectedAnswer: { label: 'late' },
+          expectedVerdict: 'pass',
+          notes: 'late create',
+          createdBy: 7,
+          createdAt: '2026-05-23T12:00:00Z',
+        },
+      })
+      await createResult.promise
+    })
+
+    expect(screen.queryByText('late create')).not.toBeInTheDocument()
+  })
+
+  it('ignores stale golden sample loads after switching tasks', async () => {
+    const user = userEvent.setup()
+    const taskAGoldenSamples = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return taskAGoldenSamples.promise
+      }
+      if (path === '/tasks/2/golden-samples') {
+        return { samples: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: /Task B/ }))
+    expect(await screen.findByDisplayValue('请根据 payload 和 answer 完成结构化预审。')).toBeInTheDocument()
+
+    await act(async () => {
+      taskAGoldenSamples.resolve({
+        samples: [{
+          id: 11,
+          taskId: 1,
+          aiPromptId: null,
+          payload: { text: 'late' },
+          payloadHash: 'hash',
+          expectedAnswer: { label: 'late' },
+          expectedVerdict: 'pass',
+          notes: 'late sample',
+          createdBy: 7,
+          createdAt: '2026-05-23T12:00:00Z',
+        }],
+      })
+      await taskAGoldenSamples.promise
+    })
+
+    expect(screen.queryByText('late sample')).not.toBeInTheDocument()
+    expect(screen.getByText('暂无 golden samples')).toBeInTheDocument()
+  })
+
+  it('clears golden samples synchronously when switching tasks', async () => {
+    const user = userEvent.setup()
+    const taskBGoldenSamples = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts' || path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: 'task a sample',
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/2/golden-samples') {
+        return taskBGoldenSamples.promise
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByText('task a sample')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+
+    expect(screen.queryByText('task a sample')).not.toBeInTheDocument()
+    expect(screen.getByText('加载 golden samples...')).toBeInTheDocument()
+  })
+
+  it('deletes a golden sample from the current task list', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: 'delete me',
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiDelete.mockResolvedValue({ deleted: true })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByText('delete me')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '删除 golden sample 11' }))
+
+    await waitFor(() => {
+      expect(mockApiDelete).toHaveBeenCalledWith('/tasks/1/golden-samples/11')
+    })
+    expect(screen.queryByText('delete me')).not.toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  it('runs a golden sample and displays the result row', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      provider: 'mock',
+      dryRunId: 44,
+      matchedExpected: false,
+      result: {
+        verdict: 'reject',
+        overall_score: 30,
+        dimensions: [],
+        reason: 'not enough evidence',
+        model: 'mock-model',
+      },
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
+
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', {})
+    expect(await screen.findByText('mismatch')).toBeInTheDocument()
+    expect(screen.getByText('not enough evidence')).toBeInTheDocument()
+    expect(screen.getByText('44')).toBeInTheDocument()
+  })
+
+  it('runs all visible golden samples serially and keeps going after failure', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [
+            { id: 11, taskId: 1, aiPromptId: null, payload: { text: 'a' }, payloadHash: 'hash-a', expectedAnswer: { label: 'a' }, expectedVerdict: 'pass', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
+            { id: 12, taskId: 1, aiPromptId: null, payload: { text: 'b' }, payloadHash: 'hash-b', expectedAnswer: { label: 'b' }, expectedVerdict: 'uncertain', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
+          ],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost
+      .mockRejectedValueOnce(new Error('provider failed'))
+      .mockResolvedValueOnce({
+        provider: 'mock',
+        dryRunId: 45,
+        matchedExpected: true,
+        result: {
+          verdict: 'uncertain',
+          overall_score: 75,
+          dimensions: [],
+          reason: 'second sample done',
+          model: 'mock-model',
+        },
+      })
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledTimes(2)
+    })
+    expect(mockApiPost.mock.calls[0][0]).toBe('/tasks/1/golden-samples/11/dry-run')
+    expect(mockApiPost.mock.calls[1][0]).toBe('/tasks/1/golden-samples/12/dry-run')
+    expect(await screen.findAllByText('provider failed')).toHaveLength(2)
+    expect(screen.getByText('second sample done')).toBeInTheDocument()
+    expect(screen.getAllByText('matched')).toHaveLength(2)
+  })
+
+  it('ignores stale golden sample run responses after switching tasks', async () => {
+    const user = userEvent.setup()
+    const runResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          { ...task, id: 1, title: 'Task A' },
+          { ...task, id: 2, title: 'Task B' },
+        ]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/2/golden-samples') {
+        return { samples: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(runResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
+    await user.click(screen.getByRole('button', { name: /Task B/ }))
+    expect(await screen.findByText('暂无 golden samples')).toBeInTheDocument()
+
+    await act(async () => {
+      runResult.resolve({
+        provider: 'mock',
+        dryRunId: 44,
+        matchedExpected: true,
+        result: {
+          verdict: 'pass',
+          overall_score: 90,
+          dimensions: [],
+          reason: 'late golden run',
+        },
+      })
+      await runResult.promise
+    })
+
+    expect(screen.queryByText('late golden run')).not.toBeInTheDocument()
+  })
+
+  it('keeps same-task golden sample run response current after clicking selected task again', async () => {
+    const user = userEvent.setup()
+    const runResult = deferred<unknown>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [{ ...task, title: 'Task A' }]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(runResult.promise)
+
+    render(<OwnerDashboard />)
+
+    await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
+    await user.click(screen.getByRole('button', { name: /Task A/ }))
+
+    await act(async () => {
+      runResult.resolve({
+        provider: 'mock',
+        dryRunId: 44,
+        matchedExpected: true,
+        result: {
+          verdict: 'pass',
+          overall_score: 90,
+          dimensions: [],
+          reason: 'same task golden run',
+        },
+      })
+      await runResult.promise
+    })
+
+    expect(await screen.findByText('same task golden run')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run golden sample 11' })).not.toBeDisabled()
   })
 })
 

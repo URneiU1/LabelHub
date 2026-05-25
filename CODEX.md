@@ -33,12 +33,14 @@ After every code-writing turn:
 - Owner Dashboard same-task task-list clicks are no-ops, so they no longer invalidate the current in-flight save/settings/dry-run guard or leave loading stuck.
 - Golden sample persistence API is in place for owner/admin users: list/create/delete samples under a task, validate expected verdicts and same-task prompt links, hash canonical payload JSON for duplicate protection, and return 409 for duplicate task payloads.
 - Golden sample single-sample dry-run linking is in place: `ai_dry_runs` now stores sample links, prompt version, input snapshots, expected/actual verdicts, matched flags, and finished timestamps; `POST /tasks/:taskId/golden-samples/:sampleId/dry-run` runs through the existing provider path, prefers a sample-pinned prompt before task active prompt, and records sanitized failures.
+- Golden sample JSON contract is hardened: create uses raw JSON/canonical hash so large numeric IDs are not coerced through JS/Go float64, and list/create responses return JSON values for `payload` and `expectedAnswer`.
+- Owner Dashboard golden sample manager is in place: owners can load/create/delete samples, bind active or historical prompt versions, run one sample, or run all visible samples serially through the single-sample dry-run endpoint; result rows show expected/actual verdict, match state, score, provider/model, reason/error, and dryRunId.
 
 ## Next Work
 
 - Continue Designer implementation with append/delete/simple property editing.
-- Build Owner UI golden sample manager and batch run result table before Reviewer AI verdict display.
-- Batch dry-run endpoint is intentionally deferred until the UI/result-table shape is clear, to avoid freezing partial-failure semantics before the product surface exists.
+- Add task-scoped dry-run history list API, then design the real batch dry-run endpoint partial-failure contract before Reviewer AI verdict display.
+- Batch dry-run endpoint is still intentionally deferred; current Owner result table uses frontend serial calls to the single-sample endpoint.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.
