@@ -131,6 +131,27 @@ describe('TemplateDesigner', () => {
       }))
     })
   })
+
+  it('fails closed when route task and loaded template task do not match', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/20') {
+        return templateDetail(20, baseSchema, true, 2)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    renderDesigner('/owner/tasks/1/templates/20')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('模板不属于当前 URL 中的 task')
+    expect(screen.getByRole('button', { name: 'Add Radio' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Save as new version' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Fork as new version' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add Radio' }))
+
+    expect(mockApiPost).not.toHaveBeenCalled()
+  })
 })
 
 function renderDesigner(initialEntry: string) {
@@ -143,11 +164,11 @@ function renderDesigner(initialEntry: string) {
   )
 }
 
-function templateDetail(id: number, schema: unknown, isLatest: boolean) {
+function templateDetail(id: number, schema: unknown, isLatest: boolean, templateTaskId = 1) {
   return {
     template: {
       id,
-      taskId: 1,
+      taskId: templateTaskId,
       version: id === 9 ? 1 : 2,
       schemaJson: JSON.stringify(schema),
     },

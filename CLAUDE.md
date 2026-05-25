@@ -10,7 +10,7 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: Owner single-sample golden dry-run failure now refreshes the current dry-run history/trend view, so persisted failed runs appear immediately after a row-level failure.
+- Latest completed work: Template Designer now validates loaded template ownership against the route task ID and disables save/fork on mismatch.
 - Current focus: continue S2 Designer buildout and the remaining S3 product surface.
 - Next priority: Designer ordering/copy, per-field validation display, real item preview or Tabs/Group bonus widgets, plus server-side dry-run quota/circuit breaker and richer Owner dry-run trend/history analysis.
 

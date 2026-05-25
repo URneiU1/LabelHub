@@ -57,6 +57,7 @@ export default function TemplateDesigner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [schemaError, setSchemaError] = useState<{ field: string, message: string } | null>(null)
+  const [taskMismatch, setTaskMismatch] = useState(false)
 
   const loadTemplate = useCallback(async () => {
     if (!Number.isFinite(numericTemplateId) || numericTemplateId <= 0) {
@@ -67,12 +68,22 @@ export default function TemplateDesigner() {
     setLoading(true)
     setError('')
     setSchemaError(null)
+    setTaskMismatch(false)
     try {
       const data = await apiGet<TemplateDetailResponse>(`/templates/${numericTemplateId}`)
-      const parsed = parseTemplateSchema(data.template.schemaJson)
       setTemplate(data.template)
       setIsLatest(data.isLatest)
       setLatestTemplateId(data.latestTemplateId)
+      if (Number(data.template.taskId) !== numericTaskId) {
+        setSchema(null)
+        setFields([])
+        setSelectedId(null)
+        setTaskMismatch(true)
+        setError('模板不属于当前 URL 中的 task，已禁止保存和 Fork。')
+        return
+      }
+
+      const parsed = parseTemplateSchema(data.template.schemaJson)
       if (!parsed.ok) {
         setSchema(null)
         setFields([])
@@ -93,7 +104,7 @@ export default function TemplateDesigner() {
     } finally {
       setLoading(false)
     }
-  }, [numericTemplateId])
+  }, [numericTaskId, numericTemplateId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -102,7 +113,7 @@ export default function TemplateDesigner() {
 
   const selectedField = fields.find((field) => field._draftId === selectedId) ?? null
   const validationErrors = useMemo(() => validateDraftFields(fields), [fields])
-  const canEdit = isLatest && !schemaError
+  const canEdit = isLatest && !schemaError && !taskMismatch
   const saveDisabled = saving || !canEdit || validationErrors.length > 0 || fields.length === 0
 
   function appendField(widget: WidgetType) {
@@ -145,7 +156,7 @@ export default function TemplateDesigner() {
   }
 
   async function saveTemplate() {
-    if (!numericTaskId || saveDisabled) return
+    if (!numericTaskId || saveDisabled || taskMismatch) return
     setSaving(true)
     setError('')
     try {
@@ -161,7 +172,7 @@ export default function TemplateDesigner() {
   }
 
   async function forkTemplate() {
-    if (!numericTaskId || !schema || fields.length === 0) return
+    if (!numericTaskId || !schema || fields.length === 0 || taskMismatch) return
     setSaving(true)
     setError('')
     try {
@@ -191,7 +202,7 @@ export default function TemplateDesigner() {
         </div>
         <div style={toolbarActionsStyle}>
           {!isLatest && latestTemplateId ? <Link to={`/owner/tasks/${numericTaskId}/templates/${latestTemplateId}`} style={backLinkStyle}>打开 latest</Link> : null}
-          {canEdit ? (
+          {taskMismatch ? null : canEdit ? (
             <>
               <Button disabled={saving} onClick={discardChanges}>Discard</Button>
               <Button disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>Save as new version</Button>
