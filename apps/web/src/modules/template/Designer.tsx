@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
@@ -77,6 +77,7 @@ export default function TemplateDesigner() {
   const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null)
   const loadSeq = useRef(0)
   const routeRef = useRef({ taskId: numericTaskId, templateId: numericTemplateId })
 
@@ -242,13 +243,12 @@ export default function TemplateDesigner() {
 
   function moveField(fieldId: string, direction: -1 | 1) {
     if (!canEdit) return
-    const index = fields.findIndex((field) => field._draftId === fieldId)
-    const nextIndex = index + direction
-    if (index < 0 || nextIndex < 0 || nextIndex >= fields.length) return
-    const next = [...fields]
-    const [field] = next.splice(index, 1)
-    next.splice(nextIndex, 0, field)
-    setFields(next)
+    setFields((current) => reorderFieldByOffset(current, fieldId, direction))
+  }
+
+  function moveFieldToDragTarget(fieldId: string, targetFieldId: string) {
+    if (!canEdit || fieldId === targetFieldId) return
+    setFields((current) => reorderFieldsToTarget(current, fieldId, targetFieldId))
   }
 
   function updateSelected(patch: Partial<FieldSchema>) {
@@ -383,12 +383,34 @@ export default function TemplateDesigner() {
                 isLast={index === fields.length - 1}
                 previewPayload={previewPayloadResult.payload}
                 selected={field._draftId === selectedId}
+                dragging={field._draftId === draggingFieldId}
                 disabled={!canEdit}
                 onSelect={() => setSelectedId(field._draftId)}
                 onCopy={() => copyField(field._draftId)}
                 onDelete={() => deleteField(field._draftId)}
                 onMoveDown={() => moveField(field._draftId, 1)}
                 onMoveUp={() => moveField(field._draftId, -1)}
+                onDragEnd={() => setDraggingFieldId(null)}
+                onDragOver={(event) => {
+                  if (!canEdit) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                }}
+                onDragStart={(event) => {
+                  if (!canEdit) return
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', field._draftId)
+                  setDraggingFieldId(field._draftId)
+                }}
+                onDrop={(event) => {
+                  if (!canEdit) return
+                  event.preventDefault()
+                  const draggedId = draggingFieldId ?? event.dataTransfer.getData('text/plain')
+                  if (draggedId) {
+                    moveFieldToDragTarget(draggedId, field._draftId)
+                  }
+                  setDraggingFieldId(null)
+                }}
               />
             ))}
           </div>
@@ -415,12 +437,17 @@ function CanvasField({
   isLast,
   previewPayload,
   selected,
+  dragging,
   disabled,
   onSelect,
   onCopy,
   onDelete,
   onMoveDown,
   onMoveUp,
+  onDragEnd,
+  onDragOver,
+  onDragStart,
+  onDrop,
 }: {
   field: DraftField
   errors: DraftValidationError[]
@@ -428,22 +455,33 @@ function CanvasField({
   isLast: boolean
   previewPayload: RenderPayload
   selected: boolean
+  dragging: boolean
   disabled: boolean
   onSelect: () => void
   onCopy: () => void
   onDelete: () => void
   onMoveDown: () => void
   onMoveUp: () => void
+  onDragEnd: () => void
+  onDragOver: (event: DragEvent<HTMLElement>) => void
+  onDragStart: (event: DragEvent<HTMLButtonElement>) => void
+  onDrop: (event: DragEvent<HTMLElement>) => void
 }) {
   const Widget = widgetRegistry[field.widget]
   return (
-    <section style={selected ? selectedCanvasItemStyle : canvasItemStyle}>
+    <section
+      aria-label={`canvas field ${field.name}`}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      style={dragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle}
+    >
       <div style={canvasItemHeaderStyle}>
         <button type="button" aria-label={`select ${field.name}`} onClick={onSelect} style={selectFieldButtonStyle}>
           <strong>{field.name}</strong>
           <span>{widgetLabels[field.widget]} · {field.label}</span>
         </button>
         <div style={fieldActionsStyle}>
+          <Button disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`}>Drag</Button>
           <Button disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>Up</Button>
           <Button disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>Down</Button>
           <Button disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>Copy</Button>
@@ -671,6 +709,26 @@ function cloneDraftField(field: DraftField, current: DraftField[]): DraftField {
     _draftId: createDraftId(),
     name: nextCopyFieldName(field.name, current),
   })
+}
+
+function reorderFieldsToTarget(current: DraftField[], fieldId: string, targetFieldId: string) {
+  const index = current.findIndex((field) => field._draftId === fieldId)
+  const targetIndex = current.findIndex((field) => field._draftId === targetFieldId)
+  if (index < 0 || targetIndex < 0 || index === targetIndex) return current
+  const next = [...current]
+  const [field] = next.splice(index, 1)
+  next.splice(targetIndex, 0, field)
+  return next
+}
+
+function reorderFieldByOffset(current: DraftField[], fieldId: string, direction: -1 | 1) {
+  const index = current.findIndex((field) => field._draftId === fieldId)
+  const nextIndex = index + direction
+  if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current
+  const next = [...current]
+  const [field] = next.splice(index, 1)
+  next.splice(nextIndex, 0, field)
+  return next
 }
 
 function nextCopyFieldName(name: string, current: DraftField[]) {
@@ -906,6 +964,11 @@ const selectedCanvasItemStyle: CSSProperties = {
   ...canvasItemStyle,
   outline: '2px solid var(--color-accent)',
   outlineOffset: 0,
+}
+
+const draggingCanvasItemStyle: CSSProperties = {
+  ...selectedCanvasItemStyle,
+  opacity: 0.72,
 }
 
 const canvasItemHeaderStyle: CSSProperties = {

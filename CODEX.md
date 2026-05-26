@@ -24,6 +24,7 @@ After every code-writing turn:
 - S2 Designer editing v1 is in place: owners can browse task template versions, edit latest templates with click-to-append widgets, delete/copy/order fields, update simple properties, see per-field validation, save as a new version, and fork historical readonly versions without leaking `_draftId`.
 - S2 Designer now fails closed when the route task ID does not match the loaded template's task ID, when the route template ID is invalid, or when a numeric template load fails; stale route loads are ignored, and stale save/fork resolves no longer navigate back to old routes.
 - S2 Designer real item preview is in place: owner/admin can load `GET /tasks/:taskId/item-preview`, which returns only minimal item id/externalId/payload JSON for the task; Designer passes that payload into widget previews, including ShowItem via `$payload`, with stale task guards.
+- S2 Designer drag ordering is in place: latest templates expose a drag handle per canvas field, reorder by `_draftId` over the existing `fields` array, preserve selected field state, keep Copy/Up/Down as fallback controls, disable drag in readonly/fail-closed states, and let `buildTemplatePayload` serialize the final `fields/export_fields` order.
 - P1 safety defaults now recheck labeler item ownership inside the submission service transaction and make AI review disabled by default at schema/model/migration level.
 - P1/P2 closeout is in place: FileUpload submit attaches uploaded files to the revision; Go/TS schema validators are aligned; Labeler/Reviewer page tests cover schema runtime; AI submit writes pending `ai_reviews` and `ai:review` outbox; API publisher and worker consume/failover path move AI-reviewed submissions to `human_reviewing`.
 - P1/P2 edge hardening is in place: revising submissions may reuse attached FileUpload keys from the same submission history; AI worker finalized duplicate tasks no-op instead of replaying; API-side AI sweeper moves stale pending/running reviews out of `ai_reviewing`.
@@ -51,7 +52,7 @@ After every code-writing turn:
 
 ## Next Work
 
-- Continue Designer implementation with drag-and-drop ordering polish or Tabs/Group bonus widgets.
+- Continue Designer implementation with Tabs/Group bonus widgets or fuller layout editing.
 - Add richer Owner dry-run trend/history analysis after the minimal summary table proves useful.
 - Add server-side dry-run quota/circuit breaker if real provider usage needs a harder cost guard.
 - Add FileUpload download/preview authorization and orphan temp cleanup.

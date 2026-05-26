@@ -158,6 +158,63 @@ describe('TemplateDesigner', () => {
     expect(JSON.stringify(body)).not.toContain('_draftId')
   })
 
+  it('reorders fields with drag and drop before saving a new version', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      if (path === '/templates/13') {
+        return templateDetail(13, {
+          ...baseSchema,
+          fields: [
+            { name: 'tags_1', widget: 'Tags', label: '标签多选', required: false, options: ['pass', 'reject', 'uncertain'] },
+            baseSchema.fields[0],
+            { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
+          ],
+        }, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      id: 13,
+      taskId: 1,
+      version: 4,
+      schemaJson: '',
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    await screen.findByRole('button', { name: /select summary/ })
+    await user.click(screen.getByRole('button', { name: 'Add Radio' }))
+    await user.click(screen.getByRole('button', { name: 'Add Tags' }))
+    expect(screen.getByLabelText('field_name')).toHaveValue('tags_1')
+
+    const dataTransfer = dragDataTransfer()
+    fireEvent.dragStart(screen.getByRole('button', { name: 'drag tags_1' }), { dataTransfer })
+    fireEvent.dragOver(screen.getByLabelText('canvas field summary'), { dataTransfer })
+    fireEvent.drop(screen.getByLabelText('canvas field summary'), { dataTransfer })
+
+    expect(screen.getByLabelText('field_name')).toHaveValue('tags_1')
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        export_fields: ['tags_1', 'summary', 'radio_1'],
+      }))
+    })
+    const [, body] = mockApiPost.mock.calls[0]
+    expect(body).toMatchObject({
+      fields: [
+        { name: 'tags_1', widget: 'Tags', label: '标签多选', required: false, options: ['pass', 'reject', 'uncertain'] },
+        { name: 'summary', widget: 'Input', label: 'Summary', required: true },
+        { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
+      ],
+    })
+    expect(JSON.stringify(body)).not.toContain('_draftId')
+  })
+
   it('shows field-level validation and blocks saving invalid fields', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
@@ -288,6 +345,7 @@ describe('TemplateDesigner', () => {
 
     await screen.findByText('Template Designer')
     expect(screen.getByRole('button', { name: 'Add Radio' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'drag summary' })).toBeDisabled()
     expect(screen.getByLabelText('field_name')).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: 'Fork as new version' }))
@@ -544,6 +602,16 @@ function deferred<T>() {
     reject = innerReject
   })
   return { promise, resolve, reject }
+}
+
+function dragDataTransfer() {
+  const data = new Map<string, string>()
+  return {
+    dropEffect: '',
+    effectAllowed: '',
+    getData: vi.fn((type: string) => data.get(type) ?? ''),
+    setData: vi.fn((type: string, value: string) => data.set(type, value)),
+  }
 }
 
 function templateDetail(id: number, schema: unknown, isLatest: boolean, templateTaskId = 1) {
