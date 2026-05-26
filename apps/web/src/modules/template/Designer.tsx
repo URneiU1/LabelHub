@@ -325,100 +325,119 @@ export default function TemplateDesigner() {
 
   return (
     <div style={pageStyle}>
-      <div style={toolbarStyle}>
+      <div style={{ ...toolbarStyle, background: 'var(--color-surface)', padding: 'var(--space-lg) var(--space-xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
         <div>
-          <Link to={`/owner/tasks/${numericTaskId}/templates`} style={backLinkStyle}>返回模板版本</Link>
-          <h1 style={headingStyle}>Template Designer</h1>
-          <p style={mutedStyle}>
-            {template ? `Template #${template.id} · v${template.version ?? '-'} · ${isLatest ? 'edit' : 'readonly'}` : '模板'}
-          </p>
+          <Link to={`/owner/tasks/${numericTaskId}/templates`} style={backLinkStyle}>← 返回版本列表</Link>
+          <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>Template Designer</h1>
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
+             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>ID: {template?.id}</span>
+             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>Version: v{template?.version ?? '-'}</span>
+             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: isLatest ? '#e8f5e9' : '#fff3e0', color: isLatest ? '#2e7d32' : '#ef6c00', fontWeight: 600 }}>{isLatest ? 'LATEST / EDITABLE' : 'READONLY'}</span>
+          </div>
         </div>
         <div style={toolbarActionsStyle}>
-          {!isLatest && latestTemplateId ? <Link to={`/owner/tasks/${numericTaskId}/templates/${latestTemplateId}`} style={backLinkStyle}>打开 latest</Link> : null}
+          {!isLatest && latestTemplateId ? (
+            <Link to={`/owner/tasks/${numericTaskId}/templates/${latestTemplateId}`} style={latestTemplateLinkStyle}>查看最新版本</Link>
+          ) : null}
           {taskMismatch ? null : canEdit ? (
             <>
-              <Button disabled={saving} onClick={discardChanges}>Discard</Button>
-              <Button disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>Save as new version</Button>
+              <Button aria-label="Discard" disabled={saving} onClick={discardChanges} theme="light">重置修改</Button>
+              <Button aria-label="Save as new version" disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>保存并发布新版</Button>
             </>
           ) : (
-            <Button disabled={saving || !schema} loading={saving} theme="solid" onClick={() => void forkTemplate()}>Fork as new version</Button>
+            <Button aria-label="Fork as new version" disabled={saving || !schema} loading={saving} theme="solid" onClick={() => void forkTemplate()}>Fork 为新版本</Button>
           )}
         </div>
       </div>
 
-      {error ? <div role="alert" style={alertStyle}>{error}</div> : null}
-      {schemaError ? <SchemaErrorBanner error={schemaError} role="owner" /> : null}
+      {error ? <div role="alert" style={{ ...alertStyle, margin: 'var(--space-md) 0' }}>{error}</div> : null}
+      {schemaError ? <div style={{ margin: 'var(--space-md) 0' }}><SchemaErrorBanner error={schemaError} role="owner" /></div> : null}
       {validationErrors.length > 0 ? (
-        <div role="alert" style={alertStyle}>
-          {validationErrors.map((item) => <div key={`${item.field}-${item.message}`}>{item.field}: {item.message}</div>)}
+        <div role="alert" style={{ ...alertStyle, margin: 'var(--space-md) 0', background: '#fff1f0' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>存在配置错误 ({validationErrors.length}):</div>
+          {validationErrors.map((item) => <div key={`${item.field}-${item.message}`} style={{ fontSize: 13 }}>• {item.field}: {item.message}</div>)}
         </div>
       ) : null}
 
-      <div style={designerGridStyle}>
+      <div style={{ ...designerGridStyle, marginTop: 'var(--space-lg)' }}>
         <aside style={panelStyle}>
-          <h2 style={subHeadingStyle}>物料</h2>
+          <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
+            <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
+          </div>
           <div style={paletteStyle}>
             {widgetTypes.map((widget) => (
-              <Button key={widget} disabled={!canEdit} onClick={() => appendField(widget)}>
-                Add {widget}
+              <Button key={widget} aria-label={`Add ${widget}`} disabled={!canEdit} onClick={() => appendField(widget)} theme="light" style={paletteButtonStyle}>
+                <span style={paletteButtonNodeStyle}>
+                  <span style={paletteWidgetCodeStyle}>{widget}</span>
+                  <span style={paletteWidgetLabelStyle}>{widgetLabels[widget]}</span>
+                </span>
               </Button>
             ))}
           </div>
         </aside>
 
-        <main style={panelStyle}>
-          <label style={fieldStyle}>
-            title
-            <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} />
-          </label>
-          <PreviewItemStatus
-            item={previewItem}
-            loading={previewLoading}
-            loadError={previewError}
-            parseError={previewPayloadResult.error}
-          />
-          <div style={canvasStyle}>
-            {fields.length === 0 ? (
-              <p style={mutedStyle}>从左侧添加一个字段开始。</p>
-            ) : fields.map((field, index) => (
-              <CanvasField
-                key={field._draftId}
-                field={field}
-                errors={validationErrorsByDraftId.get(field._draftId) ?? []}
-                isFirst={index === 0}
-                isLast={index === fields.length - 1}
-                previewPayload={previewPayloadResult.payload}
-                selected={field._draftId === selectedId}
-                dragging={field._draftId === draggingFieldId}
-                disabled={!canEdit}
-                onSelect={() => setSelectedId(field._draftId)}
-                onCopy={() => copyField(field._draftId)}
-                onDelete={() => deleteField(field._draftId)}
-                onMoveDown={() => moveField(field._draftId, 1)}
-                onMoveUp={() => moveField(field._draftId, -1)}
-                onDragEnd={() => setDraggingFieldId(null)}
-                onDragOver={(event) => {
-                  if (!canEdit) return
-                  event.preventDefault()
-                  event.dataTransfer.dropEffect = 'move'
-                }}
-                onDragStart={(event) => {
-                  if (!canEdit) return
-                  event.dataTransfer.effectAllowed = 'move'
-                  event.dataTransfer.setData('text/plain', field._draftId)
-                  setDraggingFieldId(field._draftId)
-                }}
-                onDrop={(event) => {
-                  if (!canEdit) return
-                  event.preventDefault()
-                  const draggedId = draggingFieldId ?? event.dataTransfer.getData('text/plain')
-                  if (draggedId) {
-                    moveFieldToDragTarget(draggedId, field._draftId)
-                  }
-                  setDraggingFieldId(null)
-                }}
-              />
-            ))}
+        <main style={{ ...panelStyle, minHeight: 800 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+            <label style={fieldStyle}>
+              <span style={{ fontWeight: 600 }}>模板名称</span>
+              <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} placeholder="输入模板标题..." />
+            </label>
+
+            <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+                <div style={{ fontWeight: 600 }}>画布区域 (Canvas)</div>
+                <PreviewItemStatus
+                  item={previewItem}
+                  loading={previewLoading}
+                  loadError={previewError}
+                  parseError={previewPayloadResult.error}
+                />
+              </div>
+
+              <div style={canvasStyle}>
+                {fields.length === 0 ? (
+                  <EmptyCanvasDiagram />
+                ) : fields.map((field, index) => (
+                  <CanvasField
+                    key={field._draftId}
+                    field={field}
+                    errors={validationErrorsByDraftId.get(field._draftId) ?? []}
+                    isFirst={index === 0}
+                    isLast={index === fields.length - 1}
+                    previewPayload={previewPayloadResult.payload}
+                    selected={field._draftId === selectedId}
+                    dragging={field._draftId === draggingFieldId}
+                    disabled={!canEdit}
+                    onSelect={() => setSelectedId(field._draftId)}
+                    onCopy={() => copyField(field._draftId)}
+                    onDelete={() => deleteField(field._draftId)}
+                    onMoveDown={() => moveField(field._draftId, 1)}
+                    onMoveUp={() => moveField(field._draftId, -1)}
+                    onDragEnd={() => setDraggingFieldId(null)}
+                    onDragOver={(event) => {
+                      if (!canEdit) return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                    }}
+                    onDragStart={(event) => {
+                      if (!canEdit) return
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', field._draftId)
+                      setDraggingFieldId(field._draftId)
+                    }}
+                    onDrop={(event) => {
+                      if (!canEdit) return
+                      event.preventDefault()
+                      const draggedId = draggingFieldId ?? event.dataTransfer.getData('text/plain')
+                      if (draggedId) {
+                        moveFieldToDragTarget(draggedId, field._draftId)
+                      }
+                      setDraggingFieldId(null)
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </main>
 
@@ -481,25 +500,34 @@ function CanvasField({
       onDrop={onDrop}
       style={dragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle}
     >
-      <div style={canvasItemHeaderStyle}>
+      <span aria-hidden="true" style={leftPortStyle} />
+      <span aria-hidden="true" style={rightPortStyle} />
+      <div style={{ ...canvasItemHeaderStyle, background: selected ? 'var(--color-bg)' : '#fafafa' }}>
         <button type="button" aria-label={`select ${field.name}`} onClick={onSelect} style={selectFieldButtonStyle}>
-          <strong>{field.name}</strong>
-          <span>{widgetLabels[field.widget]} · {field.label}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+            <strong style={{ fontSize: 'var(--text-base)', color: selected ? 'var(--color-accent)' : 'var(--color-text)' }}>{field.name}</strong>
+            <span style={{ fontSize: 11, padding: '1px 6px', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 4, color: 'var(--color-text-muted)' }}>{widgetLabels[field.widget]}</span>
+          </div>
+          <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{field.label}</span>
         </button>
         <div style={fieldActionsStyle}>
-          <Button disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`}>Drag</Button>
-          <Button disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>Up</Button>
-          <Button disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>Down</Button>
-          <Button disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>Copy</Button>
-          <Button disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`}>Delete</Button>
+          <Button size="small" theme="light" disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
+          <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
+            <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>↑</Button>
+            <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>↓</Button>
+          </div>
+          <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>复制</Button>
+          <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger">删除</Button>
         </div>
       </div>
       {errors.length > 0 ? (
         <div aria-label={`validation ${field.name}`} style={fieldErrorListStyle}>
-          {errors.map((item) => <div key={`${item.field}-${item.message}`}>{item.field}: {item.message}</div>)}
+          {errors.map((item) => <div key={`${item.field}-${item.message}`} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {item.field}: {item.message}
+          </div>)}
         </div>
       ) : null}
-      <div style={widgetPreviewStyle}>
+      <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8 }}>
         <Widget
           field={field}
           value={field.widget === 'Tags' ? [] : ''}
@@ -510,6 +538,23 @@ function CanvasField({
         />
       </div>
     </section>
+  )
+}
+
+function EmptyCanvasDiagram() {
+  return (
+    <div style={emptyCanvasStyle}>
+      <div style={emptyDiagramStyle} aria-hidden="true">
+        <div style={{ ...emptyNodeStyle, gridColumn: '1 / 2' }} />
+        <div style={emptyConnectorStyle} />
+        <div style={{ ...emptyNodeStyle, gridColumn: '3 / 4' }} />
+        <div style={{ ...emptyNodeStyle, gridColumn: '2 / 3', gridRow: '2 / 3', borderColor: 'var(--color-accent)' }} />
+      </div>
+      <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>从左侧物料面板添加字段开始搭建</div>
+      <div style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+        字段会以节点形式进入画布，并同步到右侧属性面板。
+      </div>
+    </div>
   )
 }
 
@@ -1240,11 +1285,6 @@ const subHeadingStyle: CSSProperties = {
   fontSize: 'var(--text-h2)',
 }
 
-const mutedStyle: CSSProperties = {
-  margin: 'var(--space-xs) 0 0',
-  color: 'var(--color-text-secondary)',
-}
-
 const designerGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '220px minmax(360px, 1fr) 320px',
@@ -1255,9 +1295,12 @@ const designerGridStyle: CSSProperties = {
 const panelStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
-  padding: 'var(--space-md)',
-  border: '1px solid var(--color-border)',
+  padding: 'var(--space-lg)',
+  border: '1px solid var(--color-border-light)',
   background: 'var(--color-surface)',
+  borderRadius: 'var(--radius-lg)',
+  boxShadow: 'var(--shadow-md)',
+  height: 'fit-content',
 }
 
 const paletteStyle: CSSProperties = {
@@ -1265,33 +1308,113 @@ const paletteStyle: CSSProperties = {
   gap: 'var(--space-sm)',
 }
 
+const paletteButtonStyle: CSSProperties = {
+  justifyContent: 'stretch',
+  textAlign: 'left',
+  height: 'auto',
+  padding: 0,
+  borderColor: 'var(--color-node-border)',
+  background: 'var(--color-node-bg)',
+}
+
+const paletteButtonNodeStyle: CSSProperties = {
+  display: 'grid',
+  gap: 3,
+  width: '100%',
+  padding: 'var(--space-sm) var(--space-md)',
+  borderLeft: '3px solid var(--color-rail)',
+}
+
+const paletteWidgetCodeStyle: CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10,
+  color: 'var(--color-text-muted)',
+  textTransform: 'uppercase',
+}
+
+const paletteWidgetLabelStyle: CSSProperties = {
+  color: 'var(--color-text)',
+  fontWeight: 600,
+}
+
 const canvasStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-sm)',
+  gap: 'var(--space-md)',
+  minHeight: 520,
+  padding: 'var(--space-lg)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-lg)',
+  backgroundColor: 'var(--color-canvas)',
+  backgroundImage: 'linear-gradient(var(--color-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px)',
+  backgroundSize: '24px 24px',
+  alignContent: 'start',
+}
+
+const emptyCanvasStyle: CSSProperties = {
+  minHeight: 360,
+  display: 'grid',
+  placeItems: 'center',
+  alignContent: 'center',
+  textAlign: 'center',
+  color: 'var(--color-text-secondary)',
+  border: '1px dashed var(--color-node-border)',
+  borderRadius: 'var(--radius-lg)',
+  background: 'rgba(255,255,255,0.72)',
+}
+
+const emptyDiagramStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '64px 48px 64px',
+  gridTemplateRows: '40px 40px',
+  alignItems: 'center',
+  justifyItems: 'center',
+  marginBottom: 'var(--space-md)',
+}
+
+const emptyNodeStyle: CSSProperties = {
+  width: 58,
+  height: 30,
+  border: '1px solid var(--color-node-border)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-node-bg)',
+  boxShadow: 'var(--shadow-sm)',
+}
+
+const emptyConnectorStyle: CSSProperties = {
+  width: 48,
+  height: 1,
+  background: 'var(--color-node-border)',
 }
 
 const previewStatusStyle: CSSProperties = {
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
   background: 'var(--color-bg)',
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
 }
 
 const canvasItemStyle: CSSProperties = {
+  position: 'relative',
   border: '1px solid var(--color-border-light)',
-  background: 'var(--color-bg)',
+  background: 'var(--color-node-bg)',
+  borderRadius: 'var(--radius-md)',
+  boxShadow: 'var(--shadow-sm)',
+  overflow: 'hidden',
+  transition: 'all var(--duration-fast)',
 }
 
 const selectedCanvasItemStyle: CSSProperties = {
   ...canvasItemStyle,
-  outline: '2px solid var(--color-accent)',
-  outlineOffset: 0,
+  borderColor: 'var(--color-accent)',
+  boxShadow: '0 0 0 2px var(--color-accent-soft)',
 }
 
 const draggingCanvasItemStyle: CSSProperties = {
   ...selectedCanvasItemStyle,
-  opacity: 0.72,
+  opacity: 0.6,
+  transform: 'scale(0.98)',
 }
 
 const canvasItemHeaderStyle: CSSProperties = {
@@ -1299,20 +1422,37 @@ const canvasItemHeaderStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-sm) var(--space-md)',
+  background: '#fafafa',
   borderBottom: '1px solid var(--color-border-light)',
+}
+
+const leftPortStyle: CSSProperties = {
+  position: 'absolute',
+  left: -5,
+  top: 24,
+  width: 8,
+  height: 8,
+  borderRadius: 8,
+  background: 'var(--color-port)',
+  border: '1px solid var(--color-surface)',
+}
+
+const rightPortStyle: CSSProperties = {
+  ...leftPortStyle,
+  left: 'auto',
+  right: -5,
 }
 
 const fieldActionsStyle: CSSProperties = {
   display: 'flex',
-  gap: 4,
+  gap: 8,
   alignItems: 'center',
-  flexWrap: 'wrap',
-  justifyContent: 'flex-end',
 }
 
 const selectFieldButtonStyle: CSSProperties = {
-  display: 'grid',
+  display: 'flex',
+  flexDirection: 'column',
   gap: 2,
   flex: 1,
   minWidth: 0,
@@ -1326,81 +1466,89 @@ const selectFieldButtonStyle: CSSProperties = {
 }
 
 const widgetPreviewStyle: CSSProperties = {
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-lg)',
 }
 
 const fieldErrorListStyle: CSSProperties = {
   display: 'grid',
   gap: 2,
-  padding: 'var(--space-xs) var(--space-sm)',
+  padding: 'var(--space-sm) var(--space-lg)',
   borderBottom: '1px solid var(--color-border-light)',
+  background: '#fff1f0',
   color: 'var(--color-danger)',
   fontSize: 'var(--text-sm)',
 }
 
 const fieldStyle: CSSProperties = {
   display: 'grid',
-  gap: 4,
+  gap: 6,
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
 }
 
 const inputStyle: CSSProperties = {
   width: '100%',
-  minHeight: 36,
-  border: '1px solid var(--color-border-light)',
-  padding: '0 var(--space-sm)',
+  minHeight: 40,
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '0 var(--space-md)',
   boxSizing: 'border-box',
   color: 'var(--color-text)',
   background: 'var(--color-surface)',
+  fontSize: 'var(--text-base)',
 }
 
 const textareaStyle: CSSProperties = {
   ...inputStyle,
-  minHeight: 96,
-  padding: 'var(--space-sm)',
+  minHeight: 120,
+  padding: 'var(--space-sm) var(--space-md)',
   resize: 'vertical',
   fontFamily: 'var(--font-body)',
+  lineHeight: 1.5,
 }
 
 const propertyStackStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-sm)',
+  gap: 'var(--space-lg)',
 }
 
 const nestedEditorStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  gap: 'var(--space-md)',
+  padding: 'var(--space-md)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
   background: 'var(--color-bg)',
 }
 
 const nestedEditorLabelStyle: CSSProperties = {
-  color: 'var(--color-text-secondary)',
+  color: 'var(--color-text)',
   fontSize: 'var(--text-sm)',
+  fontWeight: 600,
 }
 
 const nestedPanelStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--color-surface)',
 }
 
 const nestedFieldRowStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--color-surface)',
 }
 
 const twoColumnStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '1fr 1fr',
-  gap: 'var(--space-sm)',
+  gap: 'var(--space-md)',
 }
 
 const checkboxRowStyle: CSSProperties = {
@@ -1411,22 +1559,40 @@ const checkboxRowStyle: CSSProperties = {
 
 const jsonPreviewStyle: CSSProperties = {
   margin: 0,
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
   background: 'var(--color-bg)',
-  maxHeight: 520,
+  maxHeight: 600,
   overflow: 'auto',
   whiteSpace: 'pre-wrap',
+  fontSize: 12,
+  fontFamily: 'var(--font-mono)',
 }
 
 const backLinkStyle: CSSProperties = {
   color: 'var(--color-accent)',
   textDecoration: 'none',
+  fontWeight: 500,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+}
+
+const latestTemplateLinkStyle: CSSProperties = {
+  ...backLinkStyle,
+  minHeight: 32,
+  padding: '0 var(--space-md)',
+  border: '1px solid var(--color-warning)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--color-warning)',
 }
 
 const alertStyle: CSSProperties = {
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
+  borderRadius: 'var(--radius-md)',
   border: '1px solid var(--color-danger)',
+  background: '#fff1f0',
   color: 'var(--color-danger)',
 }
 

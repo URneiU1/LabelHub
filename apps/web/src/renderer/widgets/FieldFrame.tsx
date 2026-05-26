@@ -20,14 +20,23 @@ export default function FieldFrame({ label, required, children }: FieldFrameProp
 
 const frameStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-xs)',
+  gap: 'var(--space-sm)',
+  marginBottom: 'var(--space-sm)',
+  padding: 'var(--space-sm) 0',
 }
 
 const labelStyle: CSSProperties = {
   fontFamily: 'var(--font-heading)',
+  fontSize: 'var(--text-base)',
   fontWeight: 600,
+  color: 'var(--color-text)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
 }
 
 const requiredStyle: CSSProperties = {
-  color: '#b42318',
+  color: 'var(--color-danger)',
+  fontSize: 'var(--text-base)',
+  lineHeight: 1,
 }

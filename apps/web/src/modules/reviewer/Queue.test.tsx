@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -80,6 +80,46 @@ describe('ReviewerQueue schema runtime flow', () => {
           },
           submission,
           revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+          aiReview: {
+            id: 31,
+            submissionId: 501,
+            revisionId: 901,
+            idempotencyKey: 'abc',
+            promptVersion: 2,
+            verdict: 'pass',
+            overallScore: 92.5,
+            dimensions: [{ name: '相关性', score: 92 }],
+            reason: '关键词覆盖充分，建议通过。',
+            rawResponse: { ok: true },
+            tokensInput: 100,
+            tokensOutput: 20,
+            latencyMs: 1420,
+            status: 'succeeded',
+            retryCount: 1,
+            errorMsg: null,
+            createdAt: '2026-05-26T13:00:00Z',
+            prompt: {
+              id: 41,
+              version: 2,
+              model: 'doubao-pro-32k',
+              promptTemplate: '请审核商品标题',
+              dimensions: [{ name: '相关性', weight: 1 }],
+              passThreshold: 80,
+              uncertainMin: 60,
+            },
+          },
+          auditLogs: [{
+            id: 71,
+            entityType: 'submission',
+            entityId: 501,
+            fromState: { String: 'ai_reviewing', Valid: true },
+            toState: 'human_reviewing',
+            actorType: 'ai_worker',
+            actorId: null,
+            event: 'ai_done',
+            payload: { score: 92.5 },
+            createdAt: '2026-05-26T13:00:00Z',
+          }],
         }
       }
       throw new Error(`unexpected GET ${path}`)
@@ -95,6 +135,9 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getByText('AI pass · 92.5')).toBeInTheDocument()
     expect(screen.getByText('verdict: pass')).toBeInTheDocument()
     expect(screen.getByText('score: 92.5')).toBeInTheDocument()
+    expect(screen.getByText('关键词覆盖充分，建议通过。')).toBeInTheDocument()
+    expect(screen.getByText('请审核商品标题')).toBeInTheDocument()
+    expect(screen.getAllByText('ai_done').length).toBeGreaterThan(0)
   })
 
   it('shows an empty AI review state when no AI verdict exists', async () => {
@@ -163,5 +206,85 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+  })
+
+  it('posts failed AI review retry for the selected submission', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions/501') {
+        return {
+          task,
+          item,
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission,
+          revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+          aiReview: {
+            id: 31,
+            submissionId: 501,
+            revisionId: 901,
+            idempotencyKey: 'abc',
+            promptVersion: 2,
+            verdict: null,
+            overallScore: null,
+            dimensions: [],
+            reason: null,
+            rawResponse: null,
+            tokensInput: 0,
+            tokensOutput: 0,
+            latencyMs: 0,
+            status: 'dead',
+            retryCount: 5,
+            errorMsg: 'provider failed',
+            createdAt: '2026-05-26T13:00:00Z',
+            prompt: null,
+          },
+          auditLogs: [],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValueOnce({
+      submissionId: 501,
+      status: 'ai_reviewing',
+      aiReview: {
+        id: 31,
+        submissionId: 501,
+        revisionId: 901,
+        idempotencyKey: 'abc',
+        promptVersion: 2,
+        verdict: null,
+        overallScore: null,
+        dimensions: [],
+        reason: null,
+        rawResponse: null,
+        tokensInput: 0,
+        tokensOutput: 0,
+        latencyMs: 0,
+        status: 'pending',
+        retryCount: 0,
+        errorMsg: null,
+        createdAt: '2026-05-26T13:00:00Z',
+        prompt: null,
+      },
+    })
+
+    render(<ReviewerQueue />)
+
+    await user.click(await screen.findByText('Submission #501'))
+    await user.click(screen.getByRole('button', { name: '失败重跑' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/reviewer/submissions/501/ai-review/retry', {})
+    })
   })
 })

@@ -615,189 +615,249 @@ export default function OwnerDashboard() {
 
   return (
     <div>
-      <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)' }}>Owner 任务负责人</h1>
-      <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)' }}>任务管理 · baseline · 数据导出</p>
+      <div style={{ marginBottom: 'var(--space-xl)' }}>
+        <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', margin: 0, fontWeight: 700 }}>Owner 任务负责人</h1>
+        <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务发布 · 模板搭建 · 审核配置 · 数据导出</p>
+      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: 'var(--space-lg)', marginTop: 'var(--space-lg)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: 'var(--space-xl)', alignItems: 'start' }}>
         <section style={panelStyle}>
-          <h2 style={headingStyle}>任务</h2>
-          {tasks.map((task) => (
-            <button key={task.id} onClick={() => selectTask(task)} style={task.id === selected?.id ? activeListButtonStyle : listButtonStyle}>
-              <strong>{task.title}</strong>
-              <span>{task.finishedItems}/{task.totalItems} · {task.status}</span>
-            </button>
-          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+            <h2 style={headingStyle}>任务列表</h2>
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
+            {tasks.map((task) => (
+              <button key={task.id} onClick={() => selectTask(task)} style={task.id === selected?.id ? activeListButtonStyle : listButtonStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <strong style={{ fontSize: 'var(--text-base)' }}>{task.title}</strong>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>ID: {task.id}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>进度: {task.finishedItems}/{task.totalItems}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 600 }}>{task.status.toUpperCase()}</span>
+                </div>
+              </button>
+            ))}
+          </div>
         </section>
 
-        <section style={panelStyle}>
+        <section style={{ ...panelStyle, minHeight: 600 }}>
           {selected ? (
             <>
-              <h2 style={headingStyle}>{selected.title}</h2>
-              <p style={{ color: 'var(--color-text-secondary)' }}>
-                官方 qa_quality 主线任务。AI 预审在 Sprint 1 关闭，提交后直接进入人工审核。
-              </p>
-              <div style={{ marginTop: 'var(--space-md)', padding: 'var(--space-md)', border: '1px solid var(--color-border-light)', maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                {selected.baselineDescription || '暂无 baseline'}
+              <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-md)', marginBottom: 'var(--space-lg)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h2 style={{ ...headingStyle, fontSize: 'var(--text-h1)' }}>{selected.title}</h2>
+                  <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                    <Button onClick={() => void exportJSON(selected.id)} theme="light">导出数据</Button>
+                    <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>模板 Designer</a>
+                  </div>
+                </div>
+                <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--space-sm)', fontSize: 'var(--text-base)' }}>
+                  官方 qa_quality 主线任务。配置标注模板与 AI 预审参数。
+                </p>
               </div>
-              <div style={{ marginTop: 'var(--space-md)' }}>
-                <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>模板 Designer</a>
+
+              <div style={controlStripStyle}>
+                <MetricCell label="TASK" value={`#${selected.id}`} detail={`${selected.finishedItems}/${selected.totalItems} finished`} />
+                <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={activePromptId ? promptVersionLabel(activePromptId) : 'no active prompt'} tone={aiReviewEnabled ? 'success' : 'muted'} />
+                <MetricCell label="PROMPTS" value={String(prompts.length)} detail={promptLoading ? 'loading config' : promptLoadFailed ? 'load failed' : 'versions loaded'} />
+                <MetricCell label="EVAL SET" value={String(goldenSamples.length)} detail={goldenSampleLoading ? 'loading samples' : `${Object.keys(goldenRunRows).length} recent runs`} tone="teal" />
+                <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${dryRunHistorySummary.matched} matched / ${dryRunHistorySummary.failed} failed`} />
               </div>
+
+              <div style={{ background: 'var(--color-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--color-border-light)' }}>
+                <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-xs)', textTransform: 'uppercase' }}>Baseline 说明</div>
+                <div style={{ fontSize: 'var(--text-base)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                  {selected.baselineDescription || '暂无 baseline'}
+                </div>
+              </div>
+
               <section style={aiPromptSectionStyle}>
-                <h3 style={subHeadingStyle}>AI Prompt</h3>
-                <div style={aiSettingsRowStyle}>
-                  <span>AI review: {aiReviewEnabled ? '已启用' : '已关闭'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+                  <h3 style={subHeadingStyle}>AI 自动预审配置</h3>
+                  <div style={{ padding: '2px 8px', borderRadius: 10, background: aiReviewEnabled ? '#e1f5fe' : '#f5f5f5', color: aiReviewEnabled ? '#0288d1' : '#9e9e9e', fontSize: 11, fontWeight: 'bold' }}>
+                    AI review: {aiReviewEnabled ? '已启用' : '已关闭'}
+                  </div>
+                </div>
+
+                <div style={{ ...aiSettingsRowStyle, background: 'var(--color-surface)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-light)', marginBottom: 'var(--space-lg)' }}>
+                  <div>
+                    <div style={{ color: 'var(--color-text)', fontWeight: 600 }}>启用 AI review</div>
+                    <div style={{ fontSize: 'var(--text-sm)' }}>开启后，系统将对标注结果进行实时质量评估</div>
+                  </div>
                   {aiReviewEnabled ? (
-                    <Button disabled={promptActionDisabled || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(false)}>
-                      关闭 AI review
+                    <Button aria-label="关闭 AI review" disabled={promptActionDisabled || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(false)} theme="light" type="danger">
+                      关闭服务
                     </Button>
                   ) : (
-                    <Button disabled={!activePromptId || promptActionDisabled || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(true)}>
-                      启用 AI review
+                    <Button aria-label="启用 AI review" disabled={!activePromptId || promptActionDisabled || savingAIReviewSettings} loading={savingAIReviewSettings} onClick={() => void updateAIReviewSettings(true)} theme="solid">
+                      开启服务
                     </Button>
                   )}
                 </div>
-                {!activePromptId ? <p style={mutedStyle}>保存 AI Prompt 后才能启用 AI review</p> : null}
-                {promptError ? <div role="alert" style={alertStyle}>{promptError}</div> : null}
-                <div style={formGridStyle}>
-                  <label style={fieldStyle}>
-                    prompt_template
-                    <textarea aria-label="prompt_template" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} style={textareaStyle} />
-                  </label>
-                  <label style={fieldStyle}>
-                    dimensions
-                    <textarea aria-label="dimensions" value={dimensionsText} onChange={(event) => setDimensionsText(event.target.value)} style={textareaStyle} />
-                  </label>
-                  <label style={fieldStyle}>
-                    pass_threshold
-                    <input aria-label="pass_threshold" type="number" value={passThreshold} onChange={(event) => setPassThreshold(event.target.value)} style={inputStyle} />
-                  </label>
-                  <label style={fieldStyle}>
-                    uncertain_min
-                    <input aria-label="uncertain_min" type="number" value={uncertainMin} onChange={(event) => setUncertainMin(event.target.value)} style={inputStyle} />
-                  </label>
-                  <label style={fieldStyle}>
-                    model
-                    <input aria-label="model" value={model} onChange={(event) => setModel(event.target.value)} style={inputStyle} />
-                  </label>
-                </div>
-                <Button disabled={promptActionDisabled || savingPrompt} loading={savingPrompt} theme="solid" onClick={() => void savePrompt()} style={{ marginTop: 'var(--space-md)' }}>
-                  保存 AI Prompt
-                </Button>
-                <div style={dryRunPanelStyle}>
-                  <div style={dryRunGridStyle}>
+
+                {!activePromptId ? <p style={{ ...mutedStyle, marginBottom: 'var(--space-md)' }}>保存 AI Prompt 后才能启用 AI review</p> : null}
+                {promptError ? <div role="alert" style={{ ...alertStyle, marginBottom: 'var(--space-md)' }}>{promptError}</div> : null}
+
+                <div style={{ display: 'grid', gap: 'var(--space-lg)' }}>
+                  <div style={configEditorGridStyle}>
                     <label style={fieldStyle}>
-                      sample_payload
-                      <textarea aria-label="sample_payload" value={samplePayload} onChange={(event) => setSamplePayload(event.target.value)} style={textareaStyle} />
+                      <span style={{ fontWeight: 600 }}>Prompt 模板 (Handlebars)</span>
+                      <textarea aria-label="prompt_template" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} style={{ ...textareaStyle, height: 200 }} placeholder="输入审阅 Prompt..." />
                     </label>
                     <label style={fieldStyle}>
-                      sample_answer
-                      <textarea aria-label="sample_answer" value={sampleAnswer} onChange={(event) => setSampleAnswer(event.target.value)} style={textareaStyle} />
+                      <span style={{ fontWeight: 600 }}>评分维度 (JSON)</span>
+                      <textarea aria-label="dimensions" value={dimensionsText} onChange={(event) => setDimensionsText(event.target.value)} style={{ ...textareaStyle, height: 200, fontFamily: 'var(--font-mono)' }} />
                     </label>
                   </div>
-                  <Button disabled={!activePromptId || promptActionDisabled || runningDryRun} loading={runningDryRun} onClick={() => void runDryRun()} style={{ marginTop: 'var(--space-sm)' }}>
-                    运行 dry-run
-                  </Button>
-                  {dryRun ? (
-                    <div style={dryRunResultStyle}>
-                      <div><strong>{dryRun.provider}</strong></div>
-                      <div>{dryRun.result.verdict} · {dryRun.result.overall_score}</div>
-                      <div>{dryRun.result.reason}</div>
-                      <ul style={{ margin: 'var(--space-sm) 0 0', paddingLeft: 18 }}>
-                        {dryRun.result.dimensions.map((dimension) => (
-                          <li key={dimension.name}>{dimension.name}: {dimension.score} · {dimension.reason}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : prompts.length === 0 ? (
-                    <p style={mutedStyle}>当前任务未配置 AI Prompt</p>
-                  ) : null}
-                </div>
-                <div style={goldenSampleSectionStyle}>
-                  <div style={aiSettingsRowStyle}>
-                    <h3 style={subHeadingStyle}>Golden Samples</h3>
-                    <Button disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()}>
-                      Run all visible samples
-                    </Button>
-                  </div>
-                  {goldenSampleError ? <div role="alert" style={alertStyle}>{goldenSampleError}</div> : null}
-                  <div style={dryRunGridStyle}>
-                    <label style={fieldStyle}>
-                      golden_sample_payload
-                      <textarea aria-label="golden_sample_payload" value={goldenPayload} onChange={(event) => setGoldenPayload(event.target.value)} style={textareaStyle} />
-                    </label>
-                    <label style={fieldStyle}>
-                      golden_sample_expected_answer
-                      <textarea aria-label="golden_sample_expected_answer" value={goldenExpectedAnswer} onChange={(event) => setGoldenExpectedAnswer(event.target.value)} style={textareaStyle} />
-                    </label>
-                  </div>
+
                   <div style={formGridStyle}>
                     <label style={fieldStyle}>
-                      expected_verdict
-                      <select aria-label="golden_sample_expected_verdict" value={goldenExpectedVerdict} onChange={(event) => setGoldenExpectedVerdict(event.target.value)} style={inputStyle}>
-                        <option value="pass">pass</option>
-                        <option value="reject">reject</option>
-                        <option value="uncertain">uncertain</option>
-                      </select>
+                      <span style={{ fontWeight: 600 }}>通过阈值 (Pass)</span>
+                      <input aria-label="pass_threshold" type="number" value={passThreshold} onChange={(event) => setPassThreshold(event.target.value)} style={inputStyle} />
                     </label>
                     <label style={fieldStyle}>
-                      ai_prompt
-                      <select aria-label="golden_sample_prompt" value={goldenPromptChoice} onChange={(event) => setGoldenPromptChoice(event.target.value)} style={inputStyle}>
-                        <option value="active">当前 active prompt{activePromptId ? ` (#${activePromptId})` : ''}</option>
-                        <option value="none">不绑定 prompt</option>
-                        {prompts.map((prompt) => (
-                          <option key={prompt.id} value={String(prompt.id)}>Prompt v{prompt.version} #{prompt.id}</option>
-                        ))}
-                      </select>
+                      <span style={{ fontWeight: 600 }}>待定区间 (Min)</span>
+                      <input aria-label="uncertain_min" type="number" value={uncertainMin} onChange={(event) => setUncertainMin(event.target.value)} style={inputStyle} />
                     </label>
                     <label style={fieldStyle}>
-                      notes
-                      <input aria-label="golden_sample_notes" value={goldenNotes} onChange={(event) => setGoldenNotes(event.target.value)} style={inputStyle} />
+                      <span style={{ fontWeight: 600 }}>模型选择</span>
+                      <input aria-label="model" value={model} onChange={(event) => setModel(event.target.value)} style={inputStyle} placeholder="gpt-4o / doubao-pro" />
                     </label>
                   </div>
-                  <Button disabled={goldenActionDisabled || creatingGoldenSample} loading={creatingGoldenSample} onClick={() => void createGoldenSample()} style={{ marginTop: 'var(--space-sm)' }}>
-                    创建 golden sample
+                </div>
+
+                <Button aria-label="保存 AI Prompt" disabled={promptActionDisabled || savingPrompt} loading={savingPrompt} theme="solid" onClick={() => void savePrompt()} style={{ marginTop: 'var(--space-lg)', width: 140 }}>
+                  保存配置
+                </Button>
+
+                <div style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
+                  <h4 style={{ ...subHeadingStyle, marginBottom: 'var(--space-md)' }}>AI Dry-run 测试</h4>
+                  <div style={dryRunGridStyle}>
+                    <label style={fieldStyle}>
+                      <span>Sample Payload</span>
+                      <textarea aria-label="sample_payload" value={samplePayload} onChange={(event) => setSamplePayload(event.target.value)} style={{ ...textareaStyle, height: 120 }} />
+                    </label>
+                    <label style={fieldStyle}>
+                      <span>Sample Answer</span>
+                      <textarea aria-label="sample_answer" value={sampleAnswer} onChange={(event) => setSampleAnswer(event.target.value)} style={{ ...textareaStyle, height: 120 }} />
+                    </label>
+                  </div>
+                  <Button aria-label="运行 dry-run" disabled={!activePromptId || promptActionDisabled || runningDryRun} loading={runningDryRun} onClick={() => void runDryRun()} style={{ marginTop: 'var(--space-md)' }}>
+                    执行测试
                   </Button>
-                  {goldenSampleLoading ? (
-                    <p style={mutedStyle}>加载 golden samples...</p>
-                  ) : goldenSamples.length === 0 ? (
-                    <p style={mutedStyle}>暂无 golden samples</p>
-                  ) : (
-                    <div style={goldenSampleListStyle}>
-                      {goldenSamples.map((sample) => {
-                        const runRow = goldenRunRows[sample.id]
-                        return (
-                          <div key={sample.id} style={goldenSampleItemStyle}>
-                            <div style={goldenSampleHeaderStyle}>
-                              <strong>#{sample.id} · {sample.expectedVerdict}</strong>
-                              <span>{promptVersionLabel(sample.aiPromptId)}</span>
-                              <span>{formatDateTime(sample.createdAt)}</span>
-                            </div>
-                            {sample.notes ? <div style={mutedStyle}>{sample.notes}</div> : null}
-                            <div style={dryRunGridStyle}>
-                              <pre style={compactPreviewStyle}>{formatCompactJSON(sample.payload)}</pre>
-                              <pre style={compactPreviewStyle}>{formatCompactJSON(sample.expectedAnswer)}</pre>
-                            </div>
-                            <div style={goldenSampleActionsStyle}>
-                              <Button aria-label={`Run golden sample ${sample.id}`} disabled={goldenActionDisabled || runRow?.status === 'running' || anyGoldenRunRunning} loading={runRow?.status === 'running'} onClick={() => void runGoldenSample(sample)}>
-                                Run
-                              </Button>
-                              <Button aria-label={`查看 golden sample ${sample.id} history`} disabled={dryRunHistoryLoading} onClick={() => setDryRunHistorySampleFilter(String(sample.id))}>
-                                History
-                              </Button>
-                              <Button aria-label={`删除 golden sample ${sample.id}`} disabled={goldenActionDisabled || deletingGoldenSampleId === sample.id || anyGoldenRunRunning} loading={deletingGoldenSampleId === sample.id} onClick={() => void deleteGoldenSample(sample)}>
-                                删除
-                              </Button>
-                            </div>
+                  {dryRun && (
+                    <div style={{ ...dryRunResultStyle, background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
+                        <strong style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{dryRun.provider}</strong>
+                        <span style={{ ...verdictPillStyle, color: dryRun.result.verdict === 'pass' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                          {dryRun.result.verdict} ({dryRun.result.overall_score})
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 'var(--text-base)', marginBottom: 'var(--space-md)' }}>{dryRun.result.reason}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-sm)' }}>
+                        {dryRun.result.dimensions.map((dimension) => (
+                          <div key={dimension.name} style={{ padding: 'var(--space-sm)', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)' }}>
+                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{dimension.name}</div>
+                            <div style={{ fontWeight: 600 }}>{dimension.score}</div>
+                            <div style={{ fontSize: 12, marginTop: 4 }}>{dimension.reason}</div>
                           </div>
-                        )
-                      })}
+                        ))}
+                      </div>
                     </div>
                   )}
+                </div>
+
+                <div style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
+                  <div style={aiSettingsRowStyle}>
+                    <h3 style={subHeadingStyle}>Golden Samples (评测集)</h3>
+                    <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
+                      批量运行评测
+                    </Button>
+                  </div>
+                  {goldenSampleError ? <div role="alert" style={{ ...alertStyle, marginTop: 'var(--space-md)' }}>{goldenSampleError}</div> : null}
+
+                  <div style={{ display: 'grid', gap: 'var(--space-md)', marginTop: 'var(--space-md)', padding: 'var(--space-md)', background: '#f8f9fa', borderRadius: 'var(--radius-md)' }}>
+                    <div style={dryRunGridStyle}>
+                      <label style={fieldStyle}>
+                        <span>Payload</span>
+                        <textarea aria-label="golden_sample_payload" value={goldenPayload} onChange={(event) => setGoldenPayload(event.target.value)} style={{ ...textareaStyle, height: 80 }} />
+                      </label>
+                      <label style={fieldStyle}>
+                        <span>Expected Answer</span>
+                        <textarea aria-label="golden_sample_expected_answer" value={goldenExpectedAnswer} onChange={(event) => setGoldenExpectedAnswer(event.target.value)} style={{ ...textareaStyle, height: 80 }} />
+                      </label>
+                    </div>
+                    <div style={formGridStyle}>
+                      <label style={fieldStyle}>
+                        <span>预期结论</span>
+                        <select aria-label="golden_sample_expected_verdict" value={goldenExpectedVerdict} onChange={(event) => setGoldenExpectedVerdict(event.target.value)} style={inputStyle}>
+                          <option value="pass">pass</option>
+                          <option value="reject">reject</option>
+                          <option value="uncertain">uncertain</option>
+                        </select>
+                      </label>
+                      <label style={fieldStyle}>
+                        <span>绑定 Prompt</span>
+                        <select aria-label="golden_sample_prompt" value={goldenPromptChoice} onChange={(event) => setGoldenPromptChoice(event.target.value)} style={inputStyle}>
+                          <option value="active">当前 active prompt{activePromptId ? ` (#${activePromptId})` : ''}</option>
+                          <option value="none">不绑定 prompt</option>
+                          {prompts.map((prompt) => (
+                            <option key={prompt.id} value={String(prompt.id)}>Prompt v{prompt.version} #{prompt.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={fieldStyle}>
+                        <span>Notes</span>
+                        <input aria-label="golden_sample_notes" value={goldenNotes} onChange={(event) => setGoldenNotes(event.target.value)} style={inputStyle} />
+                      </label>
+                    </div>
+                    <Button aria-label="创建 golden sample" disabled={goldenActionDisabled || creatingGoldenSample} loading={creatingGoldenSample} onClick={() => void createGoldenSample()} theme="solid" style={{ width: 140 }}>
+                      添加样本
+                    </Button>
+                  </div>
+
+                  <div style={{ marginTop: 'var(--space-xl)' }}>
+                    {goldenSampleLoading ? (
+                      <p style={mutedStyle}>加载 golden samples...</p>
+                    ) : goldenSamples.length === 0 ? (
+                      <p style={mutedStyle}>暂无 golden samples</p>
+                    ) : (
+                      <div style={goldenSampleListStyle}>
+                        {goldenSamples.map((sample) => {
+                          const runRow = goldenRunRows[sample.id]
+                          return (
+                            <div key={sample.id} style={{ ...goldenSampleItemStyle, background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: 'var(--space-md)', border: '1px solid var(--color-border-light)' }}>
+                              <div style={goldenSampleHeaderStyle}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                                  <strong style={{ fontSize: 'var(--text-base)' }}>#{sample.id} · {sample.expectedVerdict}</strong>
+                                  <span style={{ padding: '2px 8px', borderRadius: 4, background: '#e8f5e9', color: '#2e7d32', fontSize: 11 }}>{sample.expectedVerdict.toUpperCase()}</span>
+                                </div>
+                                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{promptVersionLabel(sample.aiPromptId)}</span>
+                                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{formatDateTime(sample.createdAt)}</span>
+                              </div>
+                              {sample.notes ? <div style={{ ...mutedStyle, marginTop: 'var(--space-sm)' }}>{sample.notes}</div> : null}
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-sm)', marginTop: 'var(--space-md)' }}>
+                                <pre style={{ ...compactPreviewStyle, fontSize: 11 }}>{formatCompactJSON(sample.payload)}</pre>
+                                <pre style={{ ...compactPreviewStyle, fontSize: 11 }}>{formatCompactJSON(sample.expectedAnswer)}</pre>
+                              </div>
+                              <div style={{ ...goldenSampleActionsStyle, justifyContent: 'flex-end', marginTop: 'var(--space-sm)' }}>
+                                <Button aria-label={`Run golden sample ${sample.id}`} size="small" disabled={goldenActionDisabled || runRow?.status === 'running' || anyGoldenRunRunning} loading={runRow?.status === 'running'} onClick={() => void runGoldenSample(sample)} theme="solid">测试</Button>
+                                <Button aria-label={`查看 golden sample ${sample.id} history`} size="small" disabled={dryRunHistoryLoading} onClick={() => setDryRunHistorySampleFilter(String(sample.id))} theme="light">历史</Button>
+                                <Button aria-label={`删除 golden sample ${sample.id}`} size="small" disabled={goldenActionDisabled || deletingGoldenSampleId === sample.id || anyGoldenRunRunning} loading={deletingGoldenSampleId === sample.id} onClick={() => void deleteGoldenSample(sample)} type="danger" theme="light">删除</Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                   {goldenRunResults.length > 0 ? (
                     <div style={resultTableWrapStyle}>
                       <table style={resultTableStyle}>
                         <thead>
-                          <tr>
+                          <tr style={{ background: '#f8f9fa' }}>
                             <th style={resultCellStyle}>sample</th>
                             <th style={resultCellStyle}>expected</th>
                             <th style={resultCellStyle}>actual</th>
@@ -825,48 +885,50 @@ export default function OwnerDashboard() {
                       </table>
                     </div>
                   ) : null}
+
                   <div style={historyPanelStyle}>
                     <div style={aiSettingsRowStyle}>
-                      <h3 style={subHeadingStyle}>Dry-run History</h3>
-                      <Button disabled={!selected || dryRunHistoryLoading} loading={dryRunHistoryLoading} onClick={() => selected && void loadDryRunHistory(selected.id, selectedHistorySampleID)}>
-                        Refresh history
+                      <h3 style={subHeadingStyle}>Dry-run 历史记录</h3>
+                      <Button disabled={!selected || dryRunHistoryLoading} loading={dryRunHistoryLoading} onClick={() => selected && void loadDryRunHistory(selected.id, selectedHistorySampleID)} theme="light">
+                        刷新
                       </Button>
                     </div>
-                    <label style={{ ...fieldStyle, marginTop: 'var(--space-sm)' }}>
-                      history_sample_filter
-                      <select aria-label="dry_run_history_sample_filter" value={dryRunHistorySampleFilter} onChange={(event) => setDryRunHistorySampleFilter(event.target.value)} style={inputStyle}>
-                        <option value="all">最近全部 dry-runs</option>
+                    <label style={{ ...fieldStyle, marginTop: 'var(--space-md)' }}>
+                      <span>按样本筛选</span>
+                      <select aria-label="dry_run_history_sample_filter" value={dryRunHistorySampleFilter} onChange={(event) => setDryRunHistorySampleFilter(event.target.value)} style={{ ...inputStyle, width: 260 }}>
+                        <option value="all">全部记录</option>
                         {goldenSamples.map((sample) => (
-                          <option key={sample.id} value={String(sample.id)}>Golden sample #{sample.id}</option>
+                          <option key={sample.id} value={String(sample.id)}>Sample #{sample.id}</option>
                         ))}
                       </select>
                     </label>
                     {dryRunHistoryError ? <p style={errorTextStyle}>{dryRunHistoryError}</p> : null}
-                    {dryRunHistory.length > 0 ? (
-                      <div style={historySummaryStyle}>
-                        <span>total {dryRunHistorySummary.total}</span>
-                        <span>matched {dryRunHistorySummary.matched}</span>
-                        <span>mismatch {dryRunHistorySummary.mismatch}</span>
-                        <span>failed {dryRunHistorySummary.failed}</span>
+                    {dryRunHistory.length > 0 && (
+                      <div style={{ ...historySummaryStyle, background: 'var(--color-bg)', padding: 'var(--space-sm) var(--space-md)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border-light)' }}>
+                        <span style={{ fontWeight: 600 }}>统计:</span>
+                        <span>总计 {dryRunHistorySummary.total}</span>
+                        <span style={{ color: 'var(--color-success)' }}>匹配 {dryRunHistorySummary.matched}</span>
+                        <span style={{ color: 'var(--color-danger)' }}>不匹配 {dryRunHistorySummary.mismatch}</span>
+                        <span style={{ color: 'var(--color-text-muted)' }}>失败 {dryRunHistorySummary.failed}</span>
                       </div>
-                    ) : null}
+                    )}
                     {dryRunHistoryLoading ? (
                       <p style={mutedStyle}>加载 dry-run history...</p>
                     ) : dryRunHistory.length === 0 ? (
-                      <p style={mutedStyle}>暂无 dry-run history</p>
+                      <p style={{ ...mutedStyle, marginTop: 'var(--space-md)' }}>暂无 dry-run history</p>
                     ) : (
                       <div style={resultTableWrapStyle}>
                         <table style={resultTableStyle}>
                           <thead>
-                            <tr>
-                              <th style={resultCellStyle}>dryRunId</th>
-                              <th style={resultCellStyle}>sample</th>
-                              <th style={resultCellStyle}>expected</th>
-                              <th style={resultCellStyle}>actual</th>
-                              <th style={resultCellStyle}>matched</th>
-                              <th style={resultCellStyle}>status / error</th>
-                              <th style={resultCellStyle}>prompt</th>
-                              <th style={resultCellStyle}>finished</th>
+                            <tr style={{ background: '#f8f9fa' }}>
+                              <th style={resultCellStyle}>ID</th>
+                              <th style={resultCellStyle}>样本</th>
+                              <th style={resultCellStyle}>预期</th>
+                              <th style={resultCellStyle}>实际</th>
+                              <th style={resultCellStyle}>匹配</th>
+                              <th style={resultCellStyle}>状态</th>
+                              <th style={resultCellStyle}>Prompt</th>
+                              <th style={resultCellStyle}>完成时间</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -876,7 +938,11 @@ export default function OwnerDashboard() {
                                 <td style={resultCellStyle}>{run.goldenSampleId ? `#${run.goldenSampleId}` : '-'}</td>
                                 <td style={resultCellStyle}>{run.expectedVerdict || '-'}</td>
                                 <td style={resultCellStyle}>{run.actualVerdict || '-'}</td>
-                                <td style={resultCellStyle}>{formatMatched(run.matchedExpected)}</td>
+                                <td style={resultCellStyle}>
+                                  <span style={{ color: run.matchedExpected ? 'var(--color-success)' : run.matchedExpected === false ? 'var(--color-danger)' : 'inherit', fontWeight: 600 }}>
+                                    {formatMatched(run.matchedExpected)}
+                                  </span>
+                                </td>
                                 <td style={resultCellStyle}>{[run.status, run.errorMsg].filter(Boolean).join(' · ')}</td>
                                 <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
                                 <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
@@ -889,20 +955,30 @@ export default function OwnerDashboard() {
                   </div>
                 </div>
               </section>
-              <Button onClick={() => void exportJSON(selected.id)} style={{ marginTop: 'var(--space-md)' }}>
-                导出 approved JSON
-              </Button>
               {exportRows.length > 0 ? (
-                <pre style={{ marginTop: 'var(--space-md)', padding: 'var(--space-md)', background: 'var(--color-bg)', overflow: 'auto', maxHeight: 260 }}>
+                <pre style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: 'var(--color-bg)', overflow: 'auto', maxHeight: 260, borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-light)' }}>
                   {JSON.stringify(exportRows.slice(0, 3), null, 2)}
                 </pre>
               ) : null}
             </>
           ) : (
-            <p>暂无任务</p>
+            <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
+              请在左侧选择一个标注任务进行管理
+            </div>
           )}
         </section>
       </div>
+    </div>
+  )
+}
+
+function MetricCell({ label, value, detail, tone = 'muted' }: { label: string, value: string, detail: string, tone?: 'success' | 'teal' | 'muted' }) {
+  const accent = tone === 'success' ? 'var(--color-success)' : tone === 'teal' ? 'var(--color-teal)' : 'var(--color-text)'
+  return (
+    <div style={metricCellStyle}>
+      <div style={metricLabelStyle}>{label}</div>
+      <div style={{ ...metricValueStyle, color: accent }}>{value}</div>
+      <div style={metricDetailStyle}>{detail}</div>
     </div>
   )
 }
@@ -1040,100 +1116,155 @@ function summarizeDryRunHistory(runs: AIDryRunHistoryItem[]) {
 
 const panelStyle: React.CSSProperties = {
   background: 'var(--color-surface)',
-  border: '1px solid var(--color-border)',
-  padding: 'var(--space-lg)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-lg)',
+  padding: 'var(--space-xl)',
+  boxShadow: 'var(--shadow-md)',
 }
 
 const headingStyle: React.CSSProperties = {
   fontFamily: 'var(--font-heading)',
   fontSize: 'var(--text-h2)',
   margin: 0,
+  color: 'var(--color-text)',
+  fontWeight: 600,
 }
 
 const subHeadingStyle: React.CSSProperties = {
   fontFamily: 'var(--font-heading)',
-  fontSize: 'var(--text-base)',
+  fontSize: '1.1rem',
   margin: 0,
+  color: 'var(--color-text)',
+  fontWeight: 600,
 }
 
 const aiPromptSectionStyle: React.CSSProperties = {
-  marginTop: 'var(--space-lg)',
-  paddingTop: 'var(--space-md)',
-  borderTop: '1px solid var(--color-border-light)',
+  marginTop: 'var(--space-2xl)',
+}
+
+const controlStripStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+  gap: 'var(--space-sm)',
+  marginBottom: 'var(--space-lg)',
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-lg)',
+  background: 'var(--color-canvas)',
+}
+
+const metricCellStyle: React.CSSProperties = {
+  minWidth: 0,
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-surface)',
+}
+
+const metricLabelStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10,
+  color: 'var(--color-text-muted)',
+}
+
+const metricValueStyle: React.CSSProperties = {
+  marginTop: 4,
+  fontWeight: 700,
+  fontSize: 'var(--text-h2)',
+}
+
+const metricDetailStyle: React.CSSProperties = {
+  marginTop: 2,
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 }
 
 const aiSettingsRowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-sm)',
-  color: 'var(--color-text-secondary)',
+  gap: 'var(--space-md)',
 }
 
 const formGridStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-sm)',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+  gap: 'var(--space-lg)',
+}
+
+const configEditorGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+  gap: 'var(--space-lg)',
 }
 
 const dryRunGridStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: 'var(--space-sm)',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+  gap: 'var(--space-lg)',
 }
 
 const fieldStyle: React.CSSProperties = {
   display: 'grid',
-  gap: 4,
+  gap: 8,
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
 }
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  minHeight: 36,
-  border: '1px solid var(--color-border-light)',
-  padding: '0 var(--space-sm)',
+  minHeight: 40,
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  padding: '0 var(--space-md)',
   boxSizing: 'border-box',
+  fontSize: 'var(--text-base)',
+  transition: 'border-color var(--duration-fast)',
 }
 
 const textareaStyle: React.CSSProperties = {
   ...inputStyle,
-  minHeight: 82,
-  padding: 'var(--space-sm)',
+  minHeight: 100,
+  padding: 'var(--space-sm) var(--space-md)',
   resize: 'vertical',
   fontFamily: 'var(--font-body)',
+  lineHeight: 1.5,
 }
 
 const dryRunPanelStyle: React.CSSProperties = {
-  marginTop: 'var(--space-md)',
+  marginTop: 'var(--space-xl)',
 }
 
 const dryRunResultStyle: React.CSSProperties = {
-  marginTop: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  marginTop: 'var(--space-lg)',
+  padding: 'var(--space-lg)',
+}
+
+const verdictPillStyle: React.CSSProperties = {
+  padding: '2px 8px',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-code-bg)',
   border: '1px solid var(--color-border-light)',
-  background: 'var(--color-bg)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 700,
 }
 
 const goldenSampleSectionStyle: React.CSSProperties = {
-  marginTop: 'var(--space-lg)',
-  paddingTop: 'var(--space-md)',
-  borderTop: '1px solid var(--color-border-light)',
+  marginTop: 'var(--space-xl)',
 }
 
 const goldenSampleListStyle: React.CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-md)',
+  gap: 'var(--space-md)',
+  marginTop: 'var(--space-lg)',
 }
 
 const goldenSampleItemStyle: React.CSSProperties = {
-  padding: 'var(--space-sm)',
-  border: '1px solid var(--color-border-light)',
-  background: 'var(--color-bg)',
+  transition: 'transform var(--duration-fast)',
 }
 
 const goldenSampleHeaderStyle: React.CSSProperties = {
@@ -1142,62 +1273,64 @@ const goldenSampleHeaderStyle: React.CSSProperties = {
   gap: 'var(--space-sm)',
   alignItems: 'center',
   justifyContent: 'space-between',
-  color: 'var(--color-text-secondary)',
 }
 
 const goldenSampleActionsStyle: React.CSSProperties = {
   display: 'flex',
   gap: 'var(--space-sm)',
-  marginTop: 'var(--space-sm)',
 }
 
 const compactPreviewStyle: React.CSSProperties = {
-  margin: 'var(--space-sm) 0 0',
+  margin: 0,
   padding: 'var(--space-sm)',
-  background: 'var(--color-surface)',
+  background: 'var(--color-bg)',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--color-border-light)',
   maxHeight: 120,
   overflow: 'auto',
   whiteSpace: 'pre-wrap',
+  color: 'var(--color-text-secondary)',
 }
 
 const resultTableWrapStyle: React.CSSProperties = {
-  marginTop: 'var(--space-md)',
+  marginTop: 'var(--space-lg)',
   overflowX: 'auto',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-border-light)',
 }
 
 const resultTableStyle: React.CSSProperties = {
   width: '100%',
   borderCollapse: 'collapse',
   fontSize: 'var(--text-sm)',
+  background: 'white',
 }
 
 const resultCellStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border-light)',
-  padding: 'var(--space-sm)',
+  borderBottom: '1px solid var(--color-border-light)',
+  padding: 'var(--space-md)',
   textAlign: 'left',
   verticalAlign: 'top',
 }
 
 const historyPanelStyle: React.CSSProperties = {
-  marginTop: 'var(--space-md)',
-  paddingTop: 'var(--space-md)',
-  borderTop: '1px solid var(--color-border-light)',
+  marginTop: 'var(--space-2xl)',
 }
 
 const historySummaryStyle: React.CSSProperties = {
   display: 'flex',
   flexWrap: 'wrap',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-sm)',
+  gap: 'var(--space-md)',
+  marginTop: 'var(--space-md)',
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
 }
 
 const alertStyle: React.CSSProperties = {
-  marginTop: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
+  borderRadius: 'var(--radius-md)',
   border: '1px solid var(--color-danger)',
+  background: '#fff1f0',
   color: 'var(--color-danger)',
 }
 
@@ -1207,34 +1340,41 @@ const errorTextStyle: React.CSSProperties = {
 }
 
 const mutedStyle: React.CSSProperties = {
-  color: 'var(--color-text-secondary)',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
 }
 
 const listButtonStyle: React.CSSProperties = {
   display: 'grid',
   gap: 4,
   width: '100%',
-  marginTop: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-md)',
   textAlign: 'left',
   background: 'var(--color-surface)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  cursor: 'pointer',
+  transition: 'all var(--duration-fast)',
 }
 
 const activeListButtonStyle: React.CSSProperties = {
   ...listButtonStyle,
   borderColor: 'var(--color-accent)',
-  background: 'var(--color-bg)',
+  background: 'var(--color-surface-hover)',
+  boxShadow: 'var(--shadow-sm)',
 }
 
 const templateDesignerLinkStyle: React.CSSProperties = {
   display: 'inline-flex',
-  minHeight: 36,
   alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: 32,
   padding: '0 var(--space-md)',
-  border: '1px solid var(--color-border)',
-  color: 'var(--color-text)',
-  background: 'var(--color-surface)',
-  textDecoration: 'none',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-accent)',
+  color: '#fff',
   fontFamily: 'var(--font-body)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  textDecoration: 'none',
 }

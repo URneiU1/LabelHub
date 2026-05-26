@@ -94,7 +94,7 @@ function renderField(
 
 const formStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-md)',
+  gap: 'var(--space-lg)',
 }
 
 const fieldBlockStyle: CSSProperties = {
@@ -104,32 +104,43 @@ const fieldBlockStyle: CSSProperties = {
 const groupStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
-  padding: 'var(--space-sm)',
+  padding: 'var(--space-lg)',
   border: '1px solid var(--color-border-light)',
-  background: 'var(--color-bg)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-canvas)',
+  borderLeft: '3px solid var(--color-rail)',
 }
 
 const tabStackStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-sm)',
+  gap: 'var(--space-md)',
 }
 
 const tabPanelStyle: CSSProperties = {
   display: 'grid',
-  gap: 'var(--space-sm)',
-  padding: 'var(--space-sm)',
+  gap: 'var(--space-md)',
+  padding: 'var(--space-lg)',
   border: '1px solid var(--color-border-light)',
-  background: 'var(--color-bg)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-canvas)',
 }
 
 const tabHeadingStyle: CSSProperties = {
   margin: 0,
   fontFamily: 'var(--font-heading)',
   fontSize: 'var(--text-base)',
+  fontWeight: 600,
+  color: 'var(--color-text)',
+  borderBottom: '2px solid var(--color-accent)',
+  width: 'fit-content',
+  paddingBottom: 4,
 }
 
 const errorStyle: CSSProperties = {
-  marginTop: 4,
-  color: 'var(--color-danger, #b42318)',
+  marginTop: 6,
+  color: 'var(--color-danger)',
   fontSize: 'var(--text-sm)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
 }

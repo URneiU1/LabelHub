@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-26 `s3-reviewer-ai-detail-wiring`: Reviewer Detail 接入真实 AI 预审详情:后端 `/reviewer/submissions/:submissionId` 返回当前 submission/revision 的 latest `ai_reviews`、对应 prompt version 元数据和 submission audit logs;新增 `POST /reviewer/submissions/:submissionId/ai-review/retry`,仅允许 failed/dead AI review 重置为 pending 并重新写入 outbox;前端 Reviewer Queue 优先渲染真实 AI verdict/score/dimensions/reason/tokens/latency、Prompt 模板和处理日志,并把失败重跑按钮接到真实 API。
 - 2026-05-26 `s2-designer-nested-visual-editing`: S2 Designer 把 Group/Tabs 子字段属性栏从 JSON textarea 升级为直接编辑控件:可改子字段 name/label/widget/required/options,可添加/删除/上下移动子字段,可增删 Tabs tab 并改 tab label;保存仍走原有递归 schema/export_fields 路径。修复嵌套编辑行用正在编辑的 child name 做 React key 导致输入中断、重复 name 校验误触发的问题。
 - 2026-05-25 `s2-s3-structure-and-dryrun-guard`: S2 Designer/Renderer 补齐 Tabs/Group 加分物料最小闭环: schema parser 支持递归 `Group.fields` 与 `Tabs.tabs[].fields`,全局校验字段 name/LLM target;Renderer 递归渲染容器且答案继续保持 flat answer model;Designer 可添加 Group/Tabs,属性栏用 JSON 编辑子结构,保存时递归剥离 `_draftId` 并把 `export_fields` 展开为叶子字段顺序。S3 dry-run 增加 env-gated task-scoped quota/circuit breaker: `LLM_DRY_RUN_QUOTA_MAX_RUNS`、`LLM_DRY_RUN_CIRCUIT_MAX_FAILURES`、`LLM_DRY_RUN_GUARD_WINDOW_MINUTES`,对 ad-hoc prompt dry-run、单样本 golden dry-run、batch golden dry-run 超限返回 429 且不调用 provider。
 - 2026-05-25 `s2-designer-drag-ordering`: Template Designer 增加字段拖拽排序体验:latest 模板的 canvas field 提供 Drag handle,拖拽只按 `_draftId` 重排现有 `fields` 数组,保留选中字段和 Copy/Up/Down 键盘 fallback;历史只读、task mismatch、schema error 等不可编辑状态会禁用拖拽,保存 payload 的 `fields/export_fields` 顺序跟随画布且继续剥离 `_draftId`。
@@ -85,18 +86,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 ### 仍需提升
 
 - S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/Up-Down/drag order/simple property editing、逐字段 validation、真实 item payload 预览、Tabs/Group 最小结构物料、子字段属性栏可视化编辑和 Save as new version;但 Tabs/Group 子字段还不是画布内嵌套拖拽,layout 编辑也仍较基础。
-- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score 展示、同步串行 batch dry-run endpoint、基础 batch delay 配置、provider 429/backoff 短重试和 server-side dry-run quota/circuit breaker 已具备,但更丰富的 trend/history 分析还未做。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score/detail/audit 展示、Reviewer failed/dead AI retry、同步串行 batch dry-run endpoint、基础 batch delay 配置、provider 429/backoff 短重试和 server-side dry-run quota/circuit breaker 已具备,但 Reviewer 的规则配置仍是详情展示入口,更丰富的 trend/history 分析也还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
-- 推进 S3 下一段:补更丰富的 Owner dry-run trend/history 分析,或把 quota/circuit breaker 状态展示到 Owner UI。
+- 推进 S3 下一段:把 Reviewer 的规则配置扩展为真实规则编辑/切换入口,补更丰富的 Owner dry-run trend/history 分析,或把 quota/circuit breaker 状态展示到 Owner UI。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-26 S3 Reviewer AI detail wiring/retry: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'RetryAIReview|ReviewerDetailIncludesAIReviewAndAuditLogs'` 通过;targeted `pnpm -F web test -- Queue` 通过;full `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-26 S2 Designer nested visual editing: targeted `pnpm -F web test -- Designer.integration.test.tsx SchemaRenderer` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S2 Tabs/Group + S3 dry-run guard: targeted `pnpm -F web test -- SchemaRenderer Designer.integration.test.tsx` 通过;targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun|GoldenSample.*DryRun|DryRunGuard'` 通过;full `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S2 Designer drag ordering: targeted `pnpm -F web test -- Designer.integration.test.tsx` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。

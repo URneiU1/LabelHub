@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/gorm"
@@ -228,6 +229,123 @@ func TestReviewerQueueOwnerScopedToOwnTasks(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 5, 26, 13, 0, 0, 0, time.UTC)
+	revisionID := uint64(901)
+	verdict := "pass"
+	score := 92.5
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id", "ai_verdict", "ai_score"}).
+			AddRow(501, 1, 11, 3, 8, "human_reviewing", revisionID, verdict, score))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "商品标题清洗", "published"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "payload", "status"}).
+			AddRow(11, 1, `{"title":"raw"}`, "finished"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 3, `{"title":"v3","fields":[]}`))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_no", "answer", "draft", "created_by"}).
+			AddRow(revisionID, 501, 1, `{"cleaned_title":"ok"}`, false, 8))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key", "prompt_version", "verdict", "overall_score", "dimensions", "reason", "raw_response", "tokens_input", "tokens_output", "latency_ms", "status", "retry_count", "created_at"}).
+			AddRow(31, 501, revisionID, "abc", 2, verdict, score, `[{"name":"相关性","score":92}]`, "looks good", `{"ok":true}`, 100, 20, 1420, "succeeded", 1, now))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model"}).
+			AddRow(41, 1, 2, "score this", `[{"name":"相关性","weight":1}]`, 80, 60, "doubao-pro-32k"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .audit_logs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "entity_type", "entity_id", "from_state", "to_state", "actor_type", "event", "payload", "created_at"}).
+			AddRow(71, "submission", 501, "ai_reviewing", "human_reviewing", "ai_worker", "ai_done", `{"score":92.5}`, now))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions/501", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	aiReview := data["aiReview"].(map[string]any)
+	if aiReview["reason"] != "looks good" {
+		t.Fatalf("aiReview.reason = %v", aiReview["reason"])
+	}
+	dimensions := aiReview["dimensions"].([]any)
+	if dimensions[0].(map[string]any)["name"] != "相关性" {
+		t.Fatalf("aiReview.dimensions = %v", dimensions)
+	}
+	prompt := aiReview["prompt"].(map[string]any)
+	if prompt["promptTemplate"] != "score this" {
+		t.Fatalf("promptTemplate = %v", prompt["promptTemplate"])
+	}
+	auditLogs := data["auditLogs"].([]any)
+	if auditLogs[0].(map[string]any)["event"] != "ai_done" {
+		t.Fatalf("auditLogs = %v", auditLogs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	revisionID := uint64(901)
+	key := reviewerAIReviewIdempotencyKey(501, revisionID, 41, 2)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id", "ai_verdict", "ai_score"}).
+			AddRow(501, 1, 11, 3, 8, "human_reviewing", revisionID, "uncertain", nil))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "商品标题清洗", "published"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key", "prompt_version", "status", "retry_count"}).
+			AddRow(31, 501, revisionID, key, 2, "dead", 5))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model"}).
+			AddRow(41, 1, 2, "score this", `[{"name":"相关性","weight":1}]`, 80, 60, "mock-model"))
+	mock.ExpectExec(`(?is)^UPDATE .ai_reviews. SET .+WHERE id = .+status IN`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+WHERE id = .+status = .+current_revision_id`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .outbox_events.`).
+		WillReturnResult(sqlmock.NewResult(81, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(91, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/reviewer/submissions/501/ai-review/retry", map[string]any{}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if data["status"] != "ai_reviewing" {
+		t.Fatalf("status = %v", data["status"])
+	}
+	aiReview := data["aiReview"].(map[string]any)
+	if aiReview["status"] != "pending" {
+		t.Fatalf("aiReview.status = %v", aiReview["status"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

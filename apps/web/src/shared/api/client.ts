@@ -12,18 +12,40 @@ type ApiErrorEnvelope = {
 }
 
 const TOKEN_KEY = 'labelhub_access_token'
+const USER_KEY = 'labelhub_current_user'
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
+export function getCurrentUser(): DemoUser | null {
+  const raw = localStorage.getItem(USER_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const user = JSON.parse(raw) as DemoUser
+    return Array.isArray(user.roles) ? user : null
+  } catch {
+    return null
+  }
+}
+
+export function hasAnyRole(allowedRoles: string[]) {
+  const user = getCurrentUser()
+  return Boolean(user?.roles.some((role) => allowedRoles.includes(role)))
+}
+
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
 }
 
 export async function login(username: string, password: string) {
   const data = await apiPost<{ tokens: { accessToken: string }, user: DemoUser }>('/auth/login', { username, password }, false)
   localStorage.setItem(TOKEN_KEY, data.tokens.accessToken)
+  localStorage.setItem(USER_KEY, JSON.stringify(data.user))
   return data.user
 }
 
@@ -152,10 +174,57 @@ export type SubmissionRevision = {
   draft: boolean
 }
 
+export type AIPromptSummary = {
+  id: number
+  version: number
+  model: string
+  promptTemplate: string
+  dimensions: unknown
+  passThreshold: number
+  uncertainMin: number
+}
+
+export type AIReviewDetail = {
+  id: number
+  submissionId: number
+  revisionId: number
+  idempotencyKey: string
+  promptVersion: number
+  verdict?: string | null
+  overallScore?: number | null
+  dimensions?: unknown
+  reason?: string | null
+  rawResponse?: unknown
+  tokensInput: number
+  tokensOutput: number
+  latencyMs: number
+  status: string
+  retryCount: number
+  errorMsg?: string | null
+  createdAt: string
+  finishedAt?: unknown
+  prompt?: AIPromptSummary | null
+}
+
+export type AuditLog = {
+  id: number
+  entityType: string
+  entityId: number
+  fromState?: { String?: string, Valid?: boolean } | null
+  toState: string
+  actorType: string
+  actorId?: number | null
+  event: string
+  payload?: unknown
+  createdAt: string
+}
+
 export type TaskBundle = {
   task: Task
   item?: TaskItem
   template?: TaskTemplate
   submission?: Submission
   revision?: SubmissionRevision | null
+  aiReview?: AIReviewDetail | null
+  auditLogs?: AuditLog[]
 }

@@ -89,63 +89,111 @@ export default function LabelerPlaza() {
 
   return (
     <div>
-      <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)' }}>标注员工作台</h1>
-      <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)' }}>任务广场 · 领取 · 作答 · 草稿 · 提交</p>
+      <div style={{ marginBottom: 'var(--space-xl)' }}>
+        <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', margin: 0, fontWeight: 700 }}>标注工作台</h1>
+        <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务领取 · 在线作答 · AI 辅助 · 结果提交</p>
+      </div>
 
       <div style={layoutStyle}>
         <section style={panelStyle}>
-          <h2 style={headingStyle}>任务广场</h2>
-          {tasks.map((task) => (
-            <div key={task.id} style={taskCardStyle}>
-              <strong>{task.title}</strong>
-              <span style={mutedStyle}>{task.finishedItems}/{task.totalItems} · {task.status}</span>
-              <Button loading={loading} onClick={() => void claim(task.id)} style={{ marginTop: 'var(--space-sm)' }}>
-                领取题目
-              </Button>
-            </div>
-          ))}
-          {tasks.length === 0 ? <p style={mutedStyle}>暂无可领取任务</p> : null}
+          <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+            <h2 style={headingStyle}>任务广场</h2>
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
+            {tasks.map((task) => (
+              <div key={task.id} style={taskCardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <strong style={{ fontSize: 'var(--text-base)' }}>{task.title}</strong>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 4 }}>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>完成: {task.finishedItems}/{task.totalItems}</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 600 }}>{task.status.toUpperCase()}</span>
+                </div>
+                <ProgressBar value={task.finishedItems} total={task.totalItems} />
+                <Button aria-label="领取题目" loading={loading} onClick={() => void claim(task.id)} theme="solid" style={{ marginTop: 'var(--space-md)' }}>
+                  领取新题目
+                </Button>
+              </div>
+            ))}
+            {tasks.length === 0 ? (
+              <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-text-muted)', background: 'var(--color-bg)', borderRadius: 'var(--radius-md)' }}>
+                暂无可领取任务
+              </div>
+            ) : null}
+          </div>
         </section>
 
-        <main style={{ display: 'grid', gap: 'var(--space-lg)' }}>
+        <main style={{ display: 'grid', gap: 'var(--space-lg)', alignContent: 'start' }}>
           {bundle?.item ? (
-            <section style={panelStyle}>
+            <section style={{ ...panelStyle, minHeight: 600 }}>
               <div style={formHeaderStyle}>
-                <h2 style={headingStyle}>{schema.ok ? schema.schema.title : '标注表单'}</h2>
-                <span style={mutedStyle}>提交状态: {bundle.submission?.status || '未提交'}</span>
+                <div>
+                  <h2 style={{ ...headingStyle, fontSize: 'var(--text-h1)' }}>{schema.ok ? schema.schema.title : '标注表单'}</h2>
+                  <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-xs)' }}>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>任务 ID: {bundle.task.id}</span>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>题目 ID: {bundle.item.id}</span>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ padding: '4px 12px', borderRadius: 12, background: bundle.submission ? '#e8f5e9' : '#fff3e0', color: bundle.submission ? '#2e7d32' : '#ef6c00', fontSize: 12, fontWeight: 'bold' }}>
+                    {bundle.submission?.status.toUpperCase() || 'NEW'}
+                  </div>
+                </div>
               </div>
 
-              {schema.ok ? (
-                <SchemaRenderer
-                  schema={schema.schema}
-                  payload={payload}
-                  value={answer}
-                  errors={errors}
-                  runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
-                  onChange={(next) => {
-                    setAnswer(next)
-                    if (errors.length > 0) {
-                      setErrors(validateAnswer(schema.schema, next))
-                    }
-                  }}
-                />
-              ) : (
-                <div role="alert" style={errorBannerStyle}>{schema.message}</div>
-              )}
+              <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-xl)', marginTop: 'var(--space-md)' }}>
+                {schema.ok ? (
+                  <SchemaRenderer
+                    schema={schema.schema}
+                    payload={payload}
+                    value={answer}
+                    errors={errors}
+                    runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
+                    onChange={(next) => {
+                      setAnswer(next)
+                      if (errors.length > 0) {
+                        setErrors(validateAnswer(schema.schema, next))
+                      }
+                    }}
+                  />
+                ) : (
+                  <div role="alert" style={errorBannerStyle}>{schema.message}</div>
+                )}
+              </div>
 
-              <div style={actionRowStyle}>
-                <Button disabled={!schema.ok} onClick={() => void saveDraft()}>保存草稿</Button>
-                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()}>提交审核</Button>
+              <div style={{ ...actionRowStyle, borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)', marginTop: 'var(--space-2xl)' }}>
+                <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light" style={{ width: 120 }}>保存草稿</Button>
+                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} style={{ width: 120 }}>提交审核</Button>
               </div>
             </section>
           ) : (
-            <section style={panelStyle}>
-              <h2 style={headingStyle}>当前题目</h2>
-              <p style={mutedStyle}>从左侧领取一条任务数据后开始标注。</p>
+            <section style={{ ...panelStyle, border: '1px dashed var(--color-border-light)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+              <SchematicEmptyState />
+              <h2 style={{ ...headingStyle, color: 'var(--color-text-muted)' }}>准备开始标注</h2>
+              <p style={{ ...mutedStyle, marginTop: 'var(--space-sm)' }}>请在左侧任务广场选择并领取一个任务开始工作。</p>
             </section>
           )}
         </main>
       </div>
+    </div>
+  )
+}
+
+function ProgressBar({ value, total }: { value: number, total: number }) {
+  const width = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
+  return (
+    <div style={progressTrackStyle} aria-hidden="true">
+      <div style={{ ...progressFillStyle, width: `${width}%` }} />
+    </div>
+  )
+}
+
+function SchematicEmptyState() {
+  return (
+    <div style={emptyDiagramStyle} aria-hidden="true">
+      <span style={emptyNodeStyle} />
+      <span style={emptyLineStyle} />
+      <span style={{ ...emptyNodeStyle, borderColor: 'var(--color-accent)' }} />
     </div>
   )
 }
@@ -163,53 +211,96 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
 
 const layoutStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '280px minmax(0, 1fr)',
-  gap: 'var(--space-lg)',
-  marginTop: 'var(--space-lg)',
+  gridTemplateColumns: '320px minmax(0, 1fr)',
+  gap: 'var(--space-xl)',
+  alignItems: 'start',
 }
 
 const panelStyle: CSSProperties = {
   background: 'var(--color-surface)',
-  border: '1px solid var(--color-border)',
-  padding: 'var(--space-lg)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-lg)',
+  padding: 'var(--space-xl)',
+  boxShadow: 'var(--shadow-md)',
 }
 
 const headingStyle: CSSProperties = {
   fontFamily: 'var(--font-heading)',
   fontSize: 'var(--text-h2)',
   margin: 0,
+  fontWeight: 600,
+  color: 'var(--color-text)',
 }
 
 const mutedStyle: CSSProperties = {
-  color: 'var(--color-text-secondary)',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-base)',
 }
 
 const taskCardStyle: CSSProperties = {
   display: 'grid',
-  gap: 4,
-  marginTop: 'var(--space-md)',
-  padding: 'var(--space-md)',
+  gap: 'var(--space-xs)',
+  padding: 'var(--space-lg)',
+  background: 'var(--color-bg)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  transition: 'transform var(--duration-fast)',
+  borderLeft: '3px solid var(--color-rail)',
+}
+
+const progressTrackStyle: CSSProperties = {
+  height: 4,
+  marginTop: 'var(--space-xs)',
+  background: 'var(--color-border-light)',
+  borderRadius: 99,
+  overflow: 'hidden',
+}
+
+const progressFillStyle: CSSProperties = {
+  height: '100%',
+  background: 'var(--color-accent)',
 }
 
 const formHeaderStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   gap: 'var(--space-md)',
-  alignItems: 'center',
-  marginBottom: 'var(--space-lg)',
+  alignItems: 'flex-start',
 }
 
 const errorBannerStyle: CSSProperties = {
-  padding: 'var(--space-md)',
-  border: '1px solid var(--color-danger, #b42318)',
-  color: 'var(--color-danger, #b42318)',
-  background: 'var(--color-bg)',
+  padding: 'var(--space-lg)',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-danger)',
+  color: 'var(--color-danger)',
+  background: '#fff1f0',
 }
 
 const actionRowStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-lg)',
+  gap: 'var(--space-md)',
+}
+
+const emptyDiagramStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '56px 44px 56px',
+  alignItems: 'center',
+  justifyItems: 'center',
+  marginBottom: 'var(--space-md)',
+}
+
+const emptyNodeStyle: CSSProperties = {
+  width: 52,
+  height: 32,
+  border: '1px solid var(--color-node-border)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-node-bg)',
+  boxShadow: 'var(--shadow-sm)',
+}
+
+const emptyLineStyle: CSSProperties = {
+  width: 44,
+  height: 1,
+  background: 'var(--color-node-border)',
 }

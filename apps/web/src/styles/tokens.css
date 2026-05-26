@@ -1,36 +1,55 @@
 /* ============================================================
-   LabelHub Editorial/Magazine Design Tokens
-   Editorial 风格:浅米色主背景 + 黑色主文字 + 暖红强调 +
-   IBM Plex Serif 标题 + Inter 正文 + 1px 黑色细线分隔
+   LabelHub Schematic Enterprise Design Tokens
+   Schematic 风格: 图解化控制面板 + 细边框 + 网格 + 状态强调
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   /* — Color — */
-  --color-bg: #F5F1E8;
-  --color-surface: #FFFFFF;
-  --color-surface-hover: #F0EBE0;
-  --color-text: #1A1A1A;
-  --color-text-secondary: #5C5C5C;
-  --color-text-muted: #999999;
-  --color-accent: #C73E1D;
-  --color-accent-hover: #A83217;
-  --color-border: #1A1A1A;
-  --color-border-light: #D4CFC6;
-  --color-success: #2D6A4F;
-  --color-warning: #B8860B;
-  --color-danger: #C73E1D;
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f0f4f8;
+  --color-text: #161616;
+  --color-text-secondary: #525252;
+  --color-text-muted: #8d8d8d;
+  --color-accent: #0f62fe;
+  --color-accent-hover: #0353e9;
+  --color-border: #d2d2d7;
+  --color-border-light: #e0e0e0;
+  --color-success: #198038;
+  --color-warning: #f1c21b;
+  --color-danger: #da1e28;
+
+  /* — Diagram Specific Tokens — */
+  --color-canvas: #f8f9fb;
+  --color-grid-line: rgba(0, 0, 0, 0.04);
+  --color-node-bg: #ffffff;
+  --color-node-border: #c6cace;
+  --color-panel-header: #f4f4f4;
+  --color-info-bg: #edf5ff;
+  --color-accent-soft: #d0e2ff;
+  --color-rail: #8ab6ff;
+  --color-port: #78a9ff;
+  --color-code-bg: #f4f4f4;
+
+  /* — Status specific (克制使用) — */
+  --color-teal: #007d79;
+  --color-amber: #b46b00;
+  --color-violet: #8a3ffc;
+  --color-success-soft: #defbe6;
+  --color-warning-soft: #fcf4d6;
+  --color-danger-soft: #fff1f1;
 
   /* — Typography — */
-  --font-heading: 'IBM Plex Serif', Georgia, serif;
+  --font-heading: 'Inter', -apple-system, sans-serif;
   --font-body: 'Inter', -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --text-hero: clamp(2rem, 1.5rem + 2vw, 3rem);
-  --text-h1: clamp(1.5rem, 1.2rem + 1vw, 2rem);
-  --text-h2: 1.25rem;
-  --text-base: 0.9375rem;
-  --text-sm: 0.8125rem;
+  --font-mono: 'JetBrains Mono', monospace;
+  --text-hero: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+  --text-h1: 1.25rem;
+  --text-h2: 1.125rem;
+  --text-base: 0.875rem;
+  --text-sm: 0.75rem;
 
   /* — Spacing — */
   --space-xs: 4px;
@@ -39,20 +58,39 @@
   --space-lg: 24px;
   --space-xl: 32px;
   --space-2xl: 48px;
-  --space-section: clamp(2rem, 1.5rem + 3vw, 4rem);
+  --space-section: 40px;
 
   /* — Border — */
   --radius-sm: 2px;
   --radius-md: 4px;
+  --radius-lg: 8px;
   --border-width: 1px;
   --border-style: solid;
 
   /* — Shadow — */
-  --shadow-sm: 1px 1px 0 rgba(0,0,0,0.08);
-  --shadow-md: 2px 2px 0 rgba(0,0,0,0.12);
+  --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.03);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 12px 24px rgba(0,0,0,0.12);
 
   /* — Duration — */
-  --duration-fast: 120ms;
-  --duration-normal: 250ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+* {
+  box-sizing: border-box;
 }

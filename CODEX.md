@@ -48,13 +48,14 @@ After every code-writing turn:
 - Owner Run all now uses the backend batch endpoint and maps partial results into the existing result table; batch dry-runs can be paced with `LLM_BATCH_DRY_RUN_DELAY_MS` when a provider needs request spacing.
 - Owner dry-run history/trend UI is in place: the Golden Samples area loads recent task dry-runs, supports per-sample filtering through the existing history API, shows compact total/matched/mismatch/failed summary, and lists expected/actual verdict, match state, status/error, prompt version, and finished time with stale task guards.
 - Owner single-sample golden dry-run failures now refresh the current dry-run history filter, so persisted failed records appear in the history/trend table immediately after the row-level error state.
-- Reviewer AI verdict display is in place: Reviewer Queue and detail use existing submission `aiVerdict/aiScore` fields to show AI precheck verdict/score, with an empty state when no AI result exists.
+- Reviewer AI detail/retry display is in place: Reviewer Queue and detail use submission `aiVerdict/aiScore` plus latest `ai_reviews`, prompt version metadata, and submission audit logs to show AI verdict/score/dimensions/reason/tokens/latency, prompt template, and processing timeline, with an empty state when no AI result exists; failed/dead AI reviews can be requeued through `POST /reviewer/submissions/:submissionId/ai-review/retry`.
 - OpenAI-compatible provider retry/backoff controls are in place: `LLM_RETRY_MAX_ATTEMPTS`, `LLM_RETRY_BACKOFF_MS`, and `LLM_RETRY_MAX_BACKOFF_MS` bound short retries to network errors, HTTP 429, and 5xx while keeping 400/401/schema/threshold failures fail-fast and sanitized.
 - Server-side dry-run cost guard is in place behind env switches: `LLM_DRY_RUN_QUOTA_MAX_RUNS`, `LLM_DRY_RUN_CIRCUIT_MAX_FAILURES`, and `LLM_DRY_RUN_GUARD_WINDOW_MINUTES` enforce task-scoped recent-run quota/failure circuit breaker across ad-hoc prompt dry-run, single golden sample dry-run, and batch golden sample dry-run before provider calls.
 
 ## Next Work
 
 - Continue Designer implementation with canvas-level nested dragging and richer layout editing for Tabs/Group if contest polish requires it.
+- Expand Reviewer rule configuration into a real edit/switch entry if contest polish needs it.
 - Add richer Owner dry-run trend/history analysis after the minimal summary table proves useful.
 - Surface dry-run quota/circuit breaker state in Owner UI if real provider usage needs operator feedback.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
