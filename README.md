@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s2-designer-real-item-preview`: Template Designer 接入真实 task item payload 预览:新增 owner/admin `GET /tasks/:taskId/item-preview` 窄接口,只返回当前 task 第一条 available item 的 `id/externalId/payload` JSON value,不暴露 claimed/status/submission/revision;Designer 自动加载该 payload 并传给 widget preview,ShowItem 默认 path 修正为 `$payload`,切换 task 后晚到 preview response 不污染当前画布。
 - 2026-05-25 `s2-designer-field-controls`: Template Designer 增加字段级 Copy/Up/Down 控制和逐字段 validation 提示:复制字段会生成唯一 name 并保持 `_draftId` 不入保存 payload;上/下移调整 `fields` 与 `export_fields` 顺序;重复 name、空 options、长度范围、LLM target 等错误会显示在对应 canvas field 和属性栏,Save 在校验错误时继续禁用。
 - 2026-05-25 `s2-designer-route-race-hardening`: 加固 Template Designer route 异步一致性:快速切换 `/owner/tasks/:taskId/templates/:templateId` 时旧模板加载响应不再覆盖当前页面;invalid template id、404/network load failure、task/template mismatch 都会 fail closed 清空旧草稿并禁用编辑;save/fork 请求 resolve 后若 route 已变化,不会再 Toast 或 navigate 回旧模板。
 - 2026-05-25 `s2-designer-task-mismatch-hardening`: 加固 Template Designer route/template 归属一致性:加载 `/templates/:templateId` 后校验返回的 `template.taskId` 必须等于 URL 中的 `taskId`;不一致时显示错误、清空草稿并禁止 save/fork,避免手改 URL 或未来跳转 bug 把模板保存到错误 task。
@@ -80,14 +81,14 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/order/simple property editing、逐字段 validation 和 Save as new version,但还没有拖拽排序、Tabs/Group 或用真实 task item payload 做预览。
+- S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/order/simple property editing、逐字段 validation、真实 item payload 预览和 Save as new version,但还没有拖拽排序或 Tabs/Group 加分物料。
 - AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score 展示、同步串行 batch dry-run endpoint、基础 batch delay 配置和 provider 429/backoff 短重试已具备,但 server-side quota/circuit breaker 与更丰富的 trend/history 分析还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
-- 推进 S2 后续:补 Designer 真实样本预览、拖拽排序体验或 Tabs/Group 加分物料。
+- 推进 S2 后续:补 Designer 拖拽排序体验或 Tabs/Group 加分物料。
 - 推进 S3 下一段:补 server-side dry-run quota/circuit breaker 或更丰富的 Owner dry-run trend/history 分析。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 

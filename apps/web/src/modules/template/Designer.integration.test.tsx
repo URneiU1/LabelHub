@@ -34,6 +34,14 @@ const baseSchema = {
   ],
 }
 
+const showItemSchema = {
+  title: 'Preview template',
+  layout: 'single_page',
+  fields: [
+    { name: 'source_display', widget: 'ShowItem', label: '原始数据', path: '$payload', mode: 'auto' },
+  ],
+}
+
 describe('TemplateDesigner', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -168,6 +176,94 @@ describe('TemplateDesigner', () => {
     expect(screen.getByLabelText('validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
     expect(screen.getByLabelText('selected validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
     expect(screen.getByRole('button', { name: 'Save as new version' })).toBeDisabled()
+  })
+
+  it('renders ShowItem preview from a real task item payload without saving preview data', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, showItemSchema, true)
+      }
+      if (path === '/templates/11') {
+        return templateDetail(11, showItemSchema, true)
+      }
+      if (path === '/tasks/1/item-preview') {
+        return previewItem(11, {
+          id: 'row-001',
+          prompt: 'Real preview prompt',
+          model_answer: 'Real preview answer',
+          media_type: 'text',
+        })
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      id: 11,
+      taskId: 1,
+      version: 2,
+      schemaJson: '',
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    expect(await screen.findByText('Real preview prompt')).toBeInTheDocument()
+    expect(screen.getByText('Real preview answer')).toBeInTheDocument()
+    expect(screen.getByLabelText('preview_item_status')).toHaveTextContent('Preview item #11')
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.any(Object))
+    })
+    const [, body] = mockApiPost.mock.calls[0]
+    expect(JSON.stringify(body)).not.toContain('Real preview prompt')
+    expect(JSON.stringify(body)).not.toContain('_draftId')
+  })
+
+  it('ignores stale preview item responses after a route switch', async () => {
+    const user = userEvent.setup()
+    const stalePreviewLoad = deferred<ReturnType<typeof previewItem>>()
+    mockApiGet.mockImplementation((path) => {
+      if (path === '/templates/10') {
+        return Promise.resolve(templateDetail(10, showItemSchema, true, 1))
+      }
+      if (path === '/templates/20') {
+        return Promise.resolve(templateDetail(20, showItemSchema, true, 2))
+      }
+      if (path === '/tasks/1/item-preview') {
+        return stalePreviewLoad.promise
+      }
+      if (path === '/tasks/2/item-preview') {
+        return Promise.resolve(previewItem(22, {
+          id: 'row-002',
+          prompt: 'Task B preview prompt',
+          model_answer: 'Task B preview answer',
+          media_type: 'text',
+        }))
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    renderDesignerWithRouteSwitch('/owner/tasks/1/templates/10', '/owner/tasks/2/templates/20')
+
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith('/tasks/1/item-preview')
+    })
+    await user.click(screen.getByRole('button', { name: 'Switch route' }))
+    expect(await screen.findByText('Task B preview prompt')).toBeInTheDocument()
+
+    await act(async () => {
+      stalePreviewLoad.resolve(previewItem(11, {
+        id: 'row-001',
+        prompt: 'Task A stale preview prompt',
+        model_answer: 'Task A stale preview answer',
+        media_type: 'text',
+      }))
+      await stalePreviewLoad.promise
+    })
+
+    expect(screen.getByText('Task B preview prompt')).toBeInTheDocument()
+    expect(screen.queryByText('Task A stale preview prompt')).not.toBeInTheDocument()
   })
 
   it('keeps historical templates readonly but allows fork as a new version', async () => {
@@ -460,5 +556,15 @@ function templateDetail(id: number, schema: unknown, isLatest: boolean, template
     },
     isLatest,
     latestTemplateId: isLatest ? id : 10,
+  }
+}
+
+function previewItem(id: number, payload: unknown) {
+  return {
+    item: {
+      id,
+      externalId: `row-${id}`,
+      payload,
+    },
   }
 }

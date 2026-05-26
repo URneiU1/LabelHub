@@ -5,12 +5,22 @@ import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
 import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
 import { parseTemplateSchema } from '../../renderer/parser'
 import { widgetRegistry } from '../../renderer/widgets'
-import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type ShowItemMode, type TemplateSchema, type WidgetType } from '../../renderer/types'
+import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TemplateSchema, type WidgetType } from '../../renderer/types'
 
 type TemplateDetailResponse = {
   template: TaskTemplate
   isLatest: boolean
   latestTemplateId: number
+}
+
+type PreviewItemResponse = {
+  item: PreviewItem | null
+}
+
+type PreviewItem = {
+  id: number
+  externalId: string | null
+  payload: unknown
 }
 
 type DraftField = FieldSchema & {
@@ -64,6 +74,9 @@ export default function TemplateDesigner() {
   const [error, setError] = useState('')
   const [schemaError, setSchemaError] = useState<{ field: string, message: string } | null>(null)
   const [taskMismatch, setTaskMismatch] = useState(false)
+  const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
   const loadSeq = useRef(0)
   const routeRef = useRef({ taskId: numericTaskId, templateId: numericTemplateId })
 
@@ -151,7 +164,48 @@ export default function TemplateDesigner() {
     void loadTemplate()
   }, [loadTemplate])
 
+  useEffect(() => {
+    let cancelled = false
+    const routeTaskId = numericTaskId
+    if (!Number.isFinite(routeTaskId) || routeTaskId <= 0) {
+      Promise.resolve().then(() => {
+        if (cancelled) return
+        setPreviewItem(null)
+        setPreviewError('')
+        setPreviewLoading(false)
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+    Promise.resolve()
+      .then(() => {
+        if (cancelled) return null
+        setPreviewLoading(true)
+        setPreviewError('')
+        return apiGet<PreviewItemResponse>(`/tasks/${routeTaskId}/item-preview`)
+      })
+      .then((data) => {
+        if (cancelled || !data) return
+        setPreviewItem(data.item ?? null)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setPreviewItem(null)
+        setPreviewError(error instanceof Error ? error.message : '加载预览样本失败')
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPreviewLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [numericTaskId])
+
   const selectedField = fields.find((field) => field._draftId === selectedId) ?? null
+  const previewPayloadResult = useMemo(() => parsePreviewPayload(previewItem), [previewItem])
   const validationErrors = useMemo(() => validateDraftFields(fields), [fields])
   const validationErrorsByDraftId = useMemo(() => groupValidationErrorsByDraftId(validationErrors), [validationErrors])
   const canEdit = isLatest && !schemaError && !taskMismatch
@@ -311,6 +365,12 @@ export default function TemplateDesigner() {
             title
             <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} />
           </label>
+          <PreviewItemStatus
+            item={previewItem}
+            loading={previewLoading}
+            loadError={previewError}
+            parseError={previewPayloadResult.error}
+          />
           <div style={canvasStyle}>
             {fields.length === 0 ? (
               <p style={mutedStyle}>从左侧添加一个字段开始。</p>
@@ -321,6 +381,7 @@ export default function TemplateDesigner() {
                 errors={validationErrorsByDraftId.get(field._draftId) ?? []}
                 isFirst={index === 0}
                 isLast={index === fields.length - 1}
+                previewPayload={previewPayloadResult.payload}
                 selected={field._draftId === selectedId}
                 disabled={!canEdit}
                 onSelect={() => setSelectedId(field._draftId)}
@@ -352,6 +413,7 @@ function CanvasField({
   errors,
   isFirst,
   isLast,
+  previewPayload,
   selected,
   disabled,
   onSelect,
@@ -364,6 +426,7 @@ function CanvasField({
   errors: DraftValidationError[]
   isFirst: boolean
   isLast: boolean
+  previewPayload: RenderPayload
   selected: boolean
   disabled: boolean
   onSelect: () => void
@@ -397,13 +460,32 @@ function CanvasField({
           field={field}
           value={field.widget === 'Tags' ? [] : ''}
           answer={{}}
-          payload={{ prompt: 'Preview payload', model_answer: 'Preview answer' }}
+          payload={previewPayload}
           readOnly
           onChange={() => undefined}
         />
       </div>
     </section>
   )
+}
+
+function PreviewItemStatus({ item, loading, loadError, parseError }: {
+  item: PreviewItem | null
+  loading: boolean
+  loadError: string
+  parseError: string
+}) {
+  let text = '暂无导入样本, 使用示例 payload'
+  if (loading) {
+    text = '加载预览样本...'
+  } else if (loadError) {
+    text = `预览样本加载失败: ${loadError}`
+  } else if (parseError) {
+    text = parseError
+  } else if (item) {
+    text = `Preview item #${item.id}${item.externalId ? ` · ${item.externalId}` : ''}`
+  }
+  return <div aria-label="preview_item_status" style={previewStatusStyle}>{text}</div>
 }
 
 function PropertyPanel({ field, errors, fields, disabled, onChange }: {
@@ -524,7 +606,7 @@ function ShowItemControls({ field, disabled, onChange }: {
     <>
       <label style={fieldStyle}>
         path
-        <input aria-label="field_path" disabled={disabled} value={field.path ?? 'payload'} onChange={(event) => onChange({ path: event.target.value })} style={inputStyle} />
+        <input aria-label="field_path" disabled={disabled} value={field.path ?? '$payload'} onChange={(event) => onChange({ path: event.target.value })} style={inputStyle} />
       </label>
       <label style={fieldStyle}>
         mode
@@ -567,7 +649,7 @@ function createDefaultField(widget: WidgetType, current: DraftField[]): DraftFie
     label: widgetLabels[widget],
     required: false,
     ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
-    ...(widget === 'ShowItem' ? { path: 'payload', mode: 'auto' as ShowItemMode } : {}),
+    ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
     ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
   })
@@ -727,6 +809,25 @@ function parseOptionsInput(value: string): FieldOption[] {
   return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
 }
 
+const fallbackPreviewPayload: RenderPayload = {
+  prompt: 'Preview payload',
+  model_answer: 'Preview answer',
+}
+
+function parsePreviewPayload(item: PreviewItem | null): { payload: RenderPayload, error: string } {
+  if (!item) {
+    return { payload: fallbackPreviewPayload, error: '' }
+  }
+  if (isRecordValue(item.payload)) {
+    return { payload: item.payload, error: '' }
+  }
+  return { payload: { value: item.payload }, error: '' }
+}
+
+function isRecordValue(value: unknown): value is RenderPayload {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 const pageStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-lg)',
@@ -786,6 +887,14 @@ const paletteStyle: CSSProperties = {
 const canvasStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-sm)',
+}
+
+const previewStatusStyle: CSSProperties = {
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  background: 'var(--color-bg)',
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
 }
 
 const canvasItemStyle: CSSProperties = {
