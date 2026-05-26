@@ -17,6 +17,12 @@ type DraftField = FieldSchema & {
   _draftId: string
 }
 
+type DraftValidationError = {
+  field: string
+  message: string
+  draftId?: string
+}
+
 const widgetLabels: Record<WidgetType, string> = {
   ShowItem: '展示素材',
   Input: '单行输入',
@@ -147,6 +153,7 @@ export default function TemplateDesigner() {
 
   const selectedField = fields.find((field) => field._draftId === selectedId) ?? null
   const validationErrors = useMemo(() => validateDraftFields(fields), [fields])
+  const validationErrorsByDraftId = useMemo(() => groupValidationErrorsByDraftId(validationErrors), [validationErrors])
   const canEdit = isLatest && !schemaError && !taskMismatch
   const saveDisabled = saving || !canEdit || validationErrors.length > 0 || fields.length === 0
 
@@ -168,6 +175,26 @@ export default function TemplateDesigner() {
       }
       return next
     })
+  }
+
+  function copyField(fieldId: string) {
+    if (!canEdit) return
+    const index = fields.findIndex((field) => field._draftId === fieldId)
+    if (index < 0) return
+    const copy = cloneDraftField(fields[index], fields)
+    setFields([...fields.slice(0, index + 1), copy, ...fields.slice(index + 1)])
+    setSelectedId(copy._draftId)
+  }
+
+  function moveField(fieldId: string, direction: -1 | 1) {
+    if (!canEdit) return
+    const index = fields.findIndex((field) => field._draftId === fieldId)
+    const nextIndex = index + direction
+    if (index < 0 || nextIndex < 0 || nextIndex >= fields.length) return
+    const next = [...fields]
+    const [field] = next.splice(index, 1)
+    next.splice(nextIndex, 0, field)
+    setFields(next)
   }
 
   function updateSelected(patch: Partial<FieldSchema>) {
@@ -287,14 +314,20 @@ export default function TemplateDesigner() {
           <div style={canvasStyle}>
             {fields.length === 0 ? (
               <p style={mutedStyle}>从左侧添加一个字段开始。</p>
-            ) : fields.map((field) => (
+            ) : fields.map((field, index) => (
               <CanvasField
                 key={field._draftId}
                 field={field}
+                errors={validationErrorsByDraftId.get(field._draftId) ?? []}
+                isFirst={index === 0}
+                isLast={index === fields.length - 1}
                 selected={field._draftId === selectedId}
                 disabled={!canEdit}
                 onSelect={() => setSelectedId(field._draftId)}
+                onCopy={() => copyField(field._draftId)}
                 onDelete={() => deleteField(field._draftId)}
+                onMoveDown={() => moveField(field._draftId, 1)}
+                onMoveUp={() => moveField(field._draftId, -1)}
               />
             ))}
           </div>
@@ -303,6 +336,7 @@ export default function TemplateDesigner() {
         <aside style={panelStyle}>
           <PropertyPanel
             field={selectedField}
+            errors={selectedField ? validationErrorsByDraftId.get(selectedField._draftId) ?? [] : []}
             fields={fields}
             disabled={!canEdit}
             onChange={updateSelected}
@@ -313,12 +347,30 @@ export default function TemplateDesigner() {
   )
 }
 
-function CanvasField({ field, selected, disabled, onSelect, onDelete }: {
+function CanvasField({
+  field,
+  errors,
+  isFirst,
+  isLast,
+  selected,
+  disabled,
+  onSelect,
+  onCopy,
+  onDelete,
+  onMoveDown,
+  onMoveUp,
+}: {
   field: DraftField
+  errors: DraftValidationError[]
+  isFirst: boolean
+  isLast: boolean
   selected: boolean
   disabled: boolean
   onSelect: () => void
+  onCopy: () => void
   onDelete: () => void
+  onMoveDown: () => void
+  onMoveUp: () => void
 }) {
   const Widget = widgetRegistry[field.widget]
   return (
@@ -328,8 +380,18 @@ function CanvasField({ field, selected, disabled, onSelect, onDelete }: {
           <strong>{field.name}</strong>
           <span>{widgetLabels[field.widget]} · {field.label}</span>
         </button>
-        <Button disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`}>Delete</Button>
+        <div style={fieldActionsStyle}>
+          <Button disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>Up</Button>
+          <Button disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>Down</Button>
+          <Button disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>Copy</Button>
+          <Button disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`}>Delete</Button>
+        </div>
       </div>
+      {errors.length > 0 ? (
+        <div aria-label={`validation ${field.name}`} style={fieldErrorListStyle}>
+          {errors.map((item) => <div key={`${item.field}-${item.message}`}>{item.field}: {item.message}</div>)}
+        </div>
+      ) : null}
       <div style={widgetPreviewStyle}>
         <Widget
           field={field}
@@ -344,8 +406,9 @@ function CanvasField({ field, selected, disabled, onSelect, onDelete }: {
   )
 }
 
-function PropertyPanel({ field, fields, disabled, onChange }: {
+function PropertyPanel({ field, errors, fields, disabled, onChange }: {
   field: DraftField | null
+  errors: DraftValidationError[]
   fields: DraftField[]
   disabled: boolean
   onChange: (patch: Partial<FieldSchema>) => void
@@ -363,6 +426,11 @@ function PropertyPanel({ field, fields, disabled, onChange }: {
     <>
       <h2 style={subHeadingStyle}>属性</h2>
       <div style={propertyStackStyle}>
+        {errors.length > 0 ? (
+          <div aria-label={`selected validation ${field.name}`} style={fieldErrorListStyle}>
+            {errors.map((item) => <div key={`${item.field}-${item.message}`}>{item.field}: {item.message}</div>)}
+          </div>
+        ) : null}
         <label style={fieldStyle}>
           name
           <input aria-label="field_name" disabled={disabled} value={field.name} onChange={(event) => onChange({ name: event.target.value })} style={inputStyle} />
@@ -515,6 +583,26 @@ function nextFieldName(widget: WidgetType, current: DraftField[]) {
   return `${prefix}_${index}`
 }
 
+function cloneDraftField(field: DraftField, current: DraftField[]): DraftField {
+  return normalizeDraftField({
+    ...field,
+    _draftId: createDraftId(),
+    name: nextCopyFieldName(field.name, current),
+  })
+}
+
+function nextCopyFieldName(name: string, current: DraftField[]) {
+  const base = name.trim() || 'field'
+  const names = new Set(current.map((field) => field.name.trim()))
+  let candidate = `${base}_copy`
+  let index = 2
+  while (names.has(candidate)) {
+    candidate = `${base}_copy_${index}`
+    index += 1
+  }
+  return candidate
+}
+
 function createDraftId() {
   return globalThis.crypto?.randomUUID?.() ?? `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
@@ -584,34 +672,44 @@ function stripDraftField(field: DraftField): FieldSchema {
   return result
 }
 
-function validateDraftFields(fields: DraftField[]) {
-  const errors: Array<{ field: string, message: string }> = []
+function validateDraftFields(fields: DraftField[]): DraftValidationError[] {
+  const errors: DraftValidationError[] = []
   const names = new Set<string>()
   for (const [index, field] of fields.entries()) {
     const path = `fields[${index}]`
     const name = field.name.trim()
     if (!name) {
-      errors.push({ field: `${path}.name`, message: 'name is required' })
+      errors.push({ draftId: field._draftId, field: `${path}.name`, message: 'name is required' })
     } else if (names.has(name)) {
-      errors.push({ field: `${path}.name`, message: `duplicate name ${name}` })
+      errors.push({ draftId: field._draftId, field: `${path}.name`, message: `duplicate name ${name}` })
     } else {
       names.add(name)
     }
     if ((field.widget === 'Radio' || field.widget === 'Tags') && (!field.options || field.options.length === 0)) {
-      errors.push({ field: `${path}.options`, message: 'options must be non-empty' })
+      errors.push({ draftId: field._draftId, field: `${path}.options`, message: 'options must be non-empty' })
     }
     if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {
-      errors.push({ field: `${path}.maxLength`, message: 'minLength cannot exceed maxLength' })
+      errors.push({ draftId: field._draftId, field: `${path}.maxLength`, message: 'minLength cannot exceed maxLength' })
     }
   }
   for (const [index, field] of fields.entries()) {
     if (field.widget !== 'LLMTrigger') continue
     const allowExternal = field['x-allow-external-target'] === true
     if (!allowExternal && (!field.target_field || !names.has(field.target_field.trim()))) {
-      errors.push({ field: `fields[${index}].target_field`, message: 'target_field must reference an existing field' })
+      errors.push({ draftId: field._draftId, field: `fields[${index}].target_field`, message: 'target_field must reference an existing field' })
     }
   }
   return errors
+}
+
+function groupValidationErrorsByDraftId(errors: DraftValidationError[]) {
+  const grouped = new Map<string, DraftValidationError[]>()
+  for (const error of errors) {
+    if (!error.draftId) continue
+    const items = grouped.get(error.draftId) ?? []
+    grouped.set(error.draftId, [...items, error])
+  }
+  return grouped
 }
 
 function optionalNumberInput(value: string) {
@@ -710,6 +808,14 @@ const canvasItemHeaderStyle: CSSProperties = {
   borderBottom: '1px solid var(--color-border-light)',
 }
 
+const fieldActionsStyle: CSSProperties = {
+  display: 'flex',
+  gap: 4,
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+}
+
 const selectFieldButtonStyle: CSSProperties = {
   display: 'grid',
   gap: 2,
@@ -726,6 +832,15 @@ const selectFieldButtonStyle: CSSProperties = {
 
 const widgetPreviewStyle: CSSProperties = {
   padding: 'var(--space-sm)',
+}
+
+const fieldErrorListStyle: CSSProperties = {
+  display: 'grid',
+  gap: 2,
+  padding: 'var(--space-xs) var(--space-sm)',
+  borderBottom: '1px solid var(--color-border-light)',
+  color: 'var(--color-danger)',
+  fontSize: 'var(--text-sm)',
 }
 
 const fieldStyle: CSSProperties = {

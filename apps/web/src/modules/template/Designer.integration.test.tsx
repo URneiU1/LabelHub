@@ -99,6 +99,77 @@ describe('TemplateDesigner', () => {
     })
   })
 
+  it('copies and reorders fields before saving a new version', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      if (path === '/templates/12') {
+        return templateDetail(12, {
+          ...baseSchema,
+          fields: [
+            baseSchema.fields[0],
+            { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
+            { name: 'summary_copy', widget: 'Input', label: 'Summary', required: true },
+          ],
+        }, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      id: 12,
+      taskId: 1,
+      version: 3,
+      schemaJson: '',
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    await screen.findByRole('button', { name: /select summary/ })
+    await user.click(screen.getByRole('button', { name: 'copy summary' }))
+    expect(screen.getByRole('button', { name: /select summary_copy/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add Radio' }))
+    await user.click(screen.getByRole('button', { name: 'move up radio_1' }))
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        export_fields: ['summary', 'radio_1', 'summary_copy'],
+      }))
+    })
+    const [, body] = mockApiPost.mock.calls[0]
+    expect(body).toMatchObject({
+      fields: [
+        { name: 'summary', widget: 'Input', label: 'Summary', required: true },
+        { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
+        { name: 'summary_copy', widget: 'Input', label: 'Summary', required: true },
+      ],
+    })
+    expect(JSON.stringify(body)).not.toContain('_draftId')
+  })
+
+  it('shows field-level validation and blocks saving invalid fields', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    await screen.findByRole('button', { name: /select summary/ })
+    await user.click(screen.getByRole('button', { name: 'Add Radio' }))
+    fireEvent.change(screen.getByLabelText('field_options'), { target: { value: '' } })
+
+    expect(screen.getByLabelText('validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
+    expect(screen.getByLabelText('selected validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
+    expect(screen.getByRole('button', { name: 'Save as new version' })).toBeDisabled()
+  })
+
   it('keeps historical templates readonly but allows fork as a new version', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
