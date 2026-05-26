@@ -47,6 +47,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-25 `s2-s3-structure-and-dryrun-guard`: S2 Designer/Renderer 补齐 Tabs/Group 加分物料最小闭环: schema parser 支持递归 `Group.fields` 与 `Tabs.tabs[].fields`,全局校验字段 name/LLM target;Renderer 递归渲染容器且答案继续保持 flat answer model;Designer 可添加 Group/Tabs,属性栏用 JSON 编辑子结构,保存时递归剥离 `_draftId` 并把 `export_fields` 展开为叶子字段顺序。S3 dry-run 增加 env-gated task-scoped quota/circuit breaker: `LLM_DRY_RUN_QUOTA_MAX_RUNS`、`LLM_DRY_RUN_CIRCUIT_MAX_FAILURES`、`LLM_DRY_RUN_GUARD_WINDOW_MINUTES`,对 ad-hoc prompt dry-run、单样本 golden dry-run、batch golden dry-run 超限返回 429 且不调用 provider。
 - 2026-05-25 `s2-designer-drag-ordering`: Template Designer 增加字段拖拽排序体验:latest 模板的 canvas field 提供 Drag handle,拖拽只按 `_draftId` 重排现有 `fields` 数组,保留选中字段和 Copy/Up/Down 键盘 fallback;历史只读、task mismatch、schema error 等不可编辑状态会禁用拖拽,保存 payload 的 `fields/export_fields` 顺序跟随画布且继续剥离 `_draftId`。
 - 2026-05-25 `s2-designer-real-item-preview`: Template Designer 接入真实 task item payload 预览:新增 owner/admin `GET /tasks/:taskId/item-preview` 窄接口,只返回当前 task 第一条 available item 的 `id/externalId/payload` JSON value,不暴露 claimed/status/submission/revision;Designer 自动加载该 payload 并传给 widget preview,ShowItem 默认 path 修正为 `$payload`,切换 task 后晚到 preview response 不污染当前画布。
 - 2026-05-25 `s2-designer-field-controls`: Template Designer 增加字段级 Copy/Up/Down 控制和逐字段 validation 提示:复制字段会生成唯一 name 并保持 `_draftId` 不入保存 payload;上/下移调整 `fields` 与 `export_fields` 顺序;重复 name、空 options、长度范围、LLM target 等错误会显示在对应 canvas field 和属性栏,Save 在校验错误时继续禁用。
@@ -82,19 +83,20 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/Up-Down/drag order/simple property editing、逐字段 validation、真实 item payload 预览和 Save as new version,但还没有 Tabs/Group 加分物料。
-- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score 展示、同步串行 batch dry-run endpoint、基础 batch delay 配置和 provider 429/backoff 短重试已具备,但 server-side quota/circuit breaker 与更丰富的 trend/history 分析还未做。
+- S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/Up-Down/drag order/simple property editing、逐字段 validation、真实 item payload 预览、Tabs/Group 最小结构物料和 Save as new version;但 Tabs/Group 的子字段仍通过 JSON textarea 编辑,还不是可视化嵌套拖拽。
+- AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend 最小视图、Reviewer AI verdict/score 展示、同步串行 batch dry-run endpoint、基础 batch delay 配置、provider 429/backoff 短重试和 server-side dry-run quota/circuit breaker 已具备,但更丰富的 trend/history 分析还未做。
 - FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
-- 推进 S2 后续:补 Designer Tabs/Group 加分物料或更完整的布局编辑。
-- 推进 S3 下一段:补 server-side dry-run quota/circuit breaker 或更丰富的 Owner dry-run trend/history 分析。
+- 推进 S2 后续:把 Tabs/Group 子字段编辑从 JSON textarea 升级为可视化嵌套编辑/拖拽。
+- 推进 S3 下一段:补更丰富的 Owner dry-run trend/history 分析,或把 quota/circuit breaker 状态展示到 Owner UI。
 - 补 FileUpload 下载/预览授权与 orphan cleanup。
 
 ### 验证记录
 
+- 2026-05-25 S2 Tabs/Group + S3 dry-run guard: targeted `pnpm -F web test -- SchemaRenderer Designer.integration.test.tsx` 通过;targeted `cd apps/api && go test -count=1 ./internal/handler -run 'AIPromptDryRun|GoldenSample.*DryRun|DryRunGuard'` 通过;full `cd apps/api && go test -count=1 ./...` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。
 - 2026-05-25 S2 Designer drag ordering: targeted `pnpm -F web test -- Designer.integration.test.tsx` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。未改后端。
 - 2026-05-25 S2 Designer task mismatch hardening: targeted `pnpm -F web test -- Designer` 通过;`pnpm -F web build` 通过;`pnpm -F web lint` 通过。
 - 2026-05-25 S3 Owner history refresh fix: targeted `pnpm -F web test -- Dashboard` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

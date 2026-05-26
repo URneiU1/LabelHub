@@ -126,6 +126,14 @@ func (h AIPromptHandler) DryRun(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if err := enforceDryRunGuard(h.db, task.ID, 1); err != nil {
+		if errors.Is(err, errDryRunQuotaExceeded) || errors.Is(err, errDryRunCircuitOpen) {
+			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
 
 	var prompt model.AIPromptConfig
 	if err := h.db.Where("id = ? AND task_id = ?", promptID, task.ID).First(&prompt).Error; err != nil {

@@ -215,6 +215,83 @@ describe('TemplateDesigner', () => {
     expect(JSON.stringify(body)).not.toContain('_draftId')
   })
 
+  it('creates group and tabs fields with nested export fields', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      if (path === '/templates/14') {
+        return templateDetail(14, {
+          ...baseSchema,
+          fields: [
+            baseSchema.fields[0],
+            {
+              name: 'group_1',
+              widget: 'Group',
+              label: '字段组',
+              required: false,
+              fields: [{ name: 'group_1_input', widget: 'Input', label: '单行输入', required: false }],
+            },
+            {
+              name: 'tabs_1',
+              widget: 'Tabs',
+              label: '分页组',
+              required: false,
+              tabs: [
+                { label: 'Tab 1', fields: [{ name: 'tabs_1_tab1_input', widget: 'Input', label: '单行输入', required: false }] },
+                { label: 'Tab 2', fields: [{ name: 'tabs_1_tab2_text', widget: 'TextArea', label: '多行文本', required: false }] },
+              ],
+            },
+          ],
+        }, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      id: 14,
+      taskId: 1,
+      version: 5,
+      schemaJson: '',
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    await screen.findByRole('button', { name: /select summary/ })
+    await user.click(screen.getByRole('button', { name: 'Add Group' }))
+    await user.click(screen.getByRole('button', { name: 'Add Tabs' }))
+    expect(screen.getByRole('button', { name: /select group_1/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /select tabs_1/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        export_fields: ['summary', 'group_1_input', 'tabs_1_tab1_input', 'tabs_1_tab2_text'],
+      }))
+    })
+    const [, body] = mockApiPost.mock.calls[0]
+    expect(body).toMatchObject({
+      fields: [
+        { name: 'summary', widget: 'Input', label: 'Summary', required: true },
+        {
+          name: 'group_1',
+          widget: 'Group',
+          fields: [{ name: 'group_1_input', widget: 'Input', label: '单行输入', required: false }],
+        },
+        {
+          name: 'tabs_1',
+          widget: 'Tabs',
+          tabs: [
+            { label: 'Tab 1', fields: [{ name: 'tabs_1_tab1_input', widget: 'Input', label: '单行输入', required: false }] },
+            { label: 'Tab 2', fields: [{ name: 'tabs_1_tab2_text', widget: 'TextArea', label: '多行文本', required: false }] },
+          ],
+        },
+      ],
+    })
+    expect(JSON.stringify(body)).not.toContain('_draftId')
+  })
+
   it('shows field-level validation and blocks saving invalid fields', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {

@@ -35,6 +35,8 @@ type DraftValidationError = {
 
 const widgetLabels: Record<WidgetType, string> = {
   ShowItem: '展示素材',
+  Group: '字段组',
+  Tabs: '分页组',
   Input: '单行输入',
   TextArea: '多行文本',
   Radio: '单选',
@@ -47,6 +49,8 @@ const widgetLabels: Record<WidgetType, string> = {
 
 const widgetPrefixes: Record<WidgetType, string> = {
   ShowItem: 'show_item',
+  Group: 'group',
+  Tabs: 'tabs',
   Input: 'input',
   TextArea: 'text_area',
   Radio: 'radio',
@@ -580,6 +584,8 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
           </label>
         ) : null}
         {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
+        {field.widget === 'Group' ? <GroupControls key={field._draftId} field={field} disabled={disabled} onChange={onChange} /> : null}
+        {field.widget === 'Tabs' ? <TabsControls key={field._draftId} field={field} disabled={disabled} onChange={onChange} /> : null}
         {field.widget === 'FileUpload' ? (
           <label style={fieldStyle}>
             maxFiles
@@ -656,6 +662,74 @@ function ShowItemControls({ field, disabled, onChange }: {
   )
 }
 
+function GroupControls({ field, disabled, onChange }: {
+  field: DraftField
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  return (
+    <StructuredJSONTextarea
+      label="group_fields"
+      disabled={disabled}
+      value={field.fields ?? []}
+      parse={(value) => parseStructuredFields(value)}
+      onChange={(fields) => onChange({ fields })}
+    />
+  )
+}
+
+function TabsControls({ field, disabled, onChange }: {
+  field: DraftField
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  return (
+    <StructuredJSONTextarea
+      label="tabs"
+      disabled={disabled}
+      value={field.tabs ?? []}
+      parse={(value) => parseStructuredTabs(value)}
+      onChange={(tabs) => onChange({ tabs })}
+    />
+  )
+}
+
+function StructuredJSONTextarea<T>({ label, value, disabled, parse, onChange }: {
+  label: string
+  value: T
+  disabled: boolean
+  parse: (value: string) => { ok: true, value: T } | { ok: false, message: string }
+  onChange: (value: T) => void
+}) {
+  const [draft, setDraft] = useState(() => JSON.stringify(value, null, 2))
+  const [error, setError] = useState('')
+
+  function commit() {
+    const parsed = parse(draft)
+    if (!parsed.ok) {
+      setError(parsed.message)
+      return
+    }
+    setError('')
+    onChange(parsed.value)
+  }
+
+  return (
+    <label style={fieldStyle}>
+      {label}
+      <textarea
+        aria-label={label}
+        disabled={disabled}
+        value={draft}
+        onBlur={commit}
+        onChange={(event) => setDraft(event.target.value)}
+        style={textareaStyle}
+      />
+      {error ? <span role="alert" style={errorTextStyle}>{error}</span> : null}
+    </label>
+  )
+}
+
 function LLMTriggerControls({ field, fields, disabled, onChange }: {
   field: DraftField
   fields: DraftField[]
@@ -686,11 +760,27 @@ function createDefaultField(widget: WidgetType, current: DraftField[]): DraftFie
     widget,
     label: widgetLabels[widget],
     required: false,
+    ...(widget === 'Group' ? { fields: [createNestedDefaultField(`${name}_input`, 'Input')] } : {}),
+    ...(widget === 'Tabs' ? { tabs: [
+      { label: 'Tab 1', fields: [createNestedDefaultField(`${name}_tab1_input`, 'Input')] },
+      { label: 'Tab 2', fields: [createNestedDefaultField(`${name}_tab2_text`, 'TextArea')] },
+    ] } : {}),
     ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
     ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
   })
+}
+
+function createNestedDefaultField(name: string, widget: WidgetType): FieldSchema {
+  return {
+    name,
+    widget,
+    label: widgetLabels[widget],
+    required: false,
+    ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
+    ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
+  }
 }
 
 function nextFieldName(widget: WidgetType, current: DraftField[]) {
@@ -761,6 +851,12 @@ function normalizeDraftField(field: DraftField): DraftField {
     delete next.path
     delete next.mode
   }
+  if (next.widget !== 'Group') {
+    delete next.fields
+  }
+  if (next.widget !== 'Tabs') {
+    delete next.tabs
+  }
   if (next.widget !== 'FileUpload') {
     delete next.maxFiles
   }
@@ -776,7 +872,7 @@ function buildTemplatePayload(title: string, fields: DraftField[], schema: Templ
     title: title.trim() || schema?.title || 'untitled_template',
     layout: 'single_page',
     fields: fields.map(stripDraftField),
-    export_fields: fields.map((field) => field.name),
+    export_fields: exportFieldNames(fields),
   }
   if (schema) {
     for (const [key, value] of Object.entries(schema)) {
@@ -804,6 +900,13 @@ function stripDraftField(field: DraftField): FieldSchema {
   if (field.maxFiles !== undefined) result.maxFiles = field.maxFiles
   if (field.prompt !== undefined) result.prompt = field.prompt
   if (field.target_field !== undefined) result.target_field = field.target_field
+  if (field.fields !== undefined) result.fields = field.fields.map(stripFieldSchema)
+  if (field.tabs !== undefined) {
+    result.tabs = field.tabs.map((tab) => ({
+      label: tab.label,
+      fields: tab.fields.map(stripFieldSchema),
+    }))
+  }
   for (const [key, value] of Object.entries(field)) {
     if (key.startsWith('x-')) {
       result[key as `x-${string}`] = value
@@ -812,34 +915,98 @@ function stripDraftField(field: DraftField): FieldSchema {
   return result
 }
 
+function stripFieldSchema(field: FieldSchema): FieldSchema {
+  return stripDraftField(field as DraftField)
+}
+
+function exportFieldNames(fields: FieldSchema[]): string[] {
+  const names: string[] = []
+  for (const field of fields) {
+    if (field.widget === 'Group') {
+      names.push(...exportFieldNames(field.fields ?? []))
+      continue
+    }
+    if (field.widget === 'Tabs') {
+      for (const tab of field.tabs ?? []) {
+        names.push(...exportFieldNames(tab.fields))
+      }
+      continue
+    }
+    names.push(field.name)
+  }
+  return names
+}
+
 function validateDraftFields(fields: DraftField[]): DraftValidationError[] {
   const errors: DraftValidationError[] = []
   const names = new Set<string>()
+  visitFieldsForValidation(fields, 'fields', names, errors)
+  validateLLMTriggerTargets(fields, 'fields', names, errors)
+  return errors
+}
+
+function visitFieldsForValidation(fields: FieldSchema[], pathPrefix: string, names: Set<string>, errors: DraftValidationError[], parentDraftId?: string) {
   for (const [index, field] of fields.entries()) {
-    const path = `fields[${index}]`
+    const path = `${pathPrefix}[${index}]`
+    const draftId = '_draftId' in field && typeof field._draftId === 'string' ? field._draftId : parentDraftId
     const name = field.name.trim()
     if (!name) {
-      errors.push({ draftId: field._draftId, field: `${path}.name`, message: 'name is required' })
+      errors.push({ draftId, field: `${path}.name`, message: 'name is required' })
     } else if (names.has(name)) {
-      errors.push({ draftId: field._draftId, field: `${path}.name`, message: `duplicate name ${name}` })
+      errors.push({ draftId, field: `${path}.name`, message: `duplicate name ${name}` })
     } else {
       names.add(name)
     }
     if ((field.widget === 'Radio' || field.widget === 'Tags') && (!field.options || field.options.length === 0)) {
-      errors.push({ draftId: field._draftId, field: `${path}.options`, message: 'options must be non-empty' })
+      errors.push({ draftId, field: `${path}.options`, message: 'options must be non-empty' })
     }
     if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {
-      errors.push({ draftId: field._draftId, field: `${path}.maxLength`, message: 'minLength cannot exceed maxLength' })
+      errors.push({ draftId, field: `${path}.maxLength`, message: 'minLength cannot exceed maxLength' })
+    }
+    if (field.widget === 'Group') {
+      if (!field.fields || field.fields.length === 0) {
+        errors.push({ draftId, field: `${path}.fields`, message: 'fields must be non-empty' })
+      } else {
+        visitFieldsForValidation(field.fields, `${path}.fields`, names, errors, draftId)
+      }
+    }
+    if (field.widget === 'Tabs') {
+      if (!field.tabs || field.tabs.length === 0) {
+        errors.push({ draftId, field: `${path}.tabs`, message: 'tabs must be non-empty' })
+      }
+      for (const [tabIndex, tab] of (field.tabs ?? []).entries()) {
+        if (!tab.label.trim()) {
+          errors.push({ draftId, field: `${path}.tabs[${tabIndex}].label`, message: 'label is required' })
+        }
+        if (tab.fields.length === 0) {
+          errors.push({ draftId, field: `${path}.tabs[${tabIndex}].fields`, message: 'fields must be non-empty' })
+        } else {
+          visitFieldsForValidation(tab.fields, `${path}.tabs[${tabIndex}].fields`, names, errors, draftId)
+        }
+      }
     }
   }
+}
+
+function validateLLMTriggerTargets(fields: FieldSchema[], pathPrefix: string, names: Set<string>, errors: DraftValidationError[], parentDraftId?: string) {
   for (const [index, field] of fields.entries()) {
-    if (field.widget !== 'LLMTrigger') continue
-    const allowExternal = field['x-allow-external-target'] === true
-    if (!allowExternal && (!field.target_field || !names.has(field.target_field.trim()))) {
-      errors.push({ draftId: field._draftId, field: `fields[${index}].target_field`, message: 'target_field must reference an existing field' })
+    const path = `${pathPrefix}[${index}]`
+    const draftId = '_draftId' in field && typeof field._draftId === 'string' ? field._draftId : parentDraftId
+    if (field.widget === 'LLMTrigger') {
+      const allowExternal = field['x-allow-external-target'] === true
+      if (!allowExternal && (!field.target_field || !names.has(field.target_field.trim()))) {
+        errors.push({ draftId, field: `${path}.target_field`, message: 'target_field must reference an existing field' })
+      }
+    }
+    if (field.fields) {
+      validateLLMTriggerTargets(field.fields, `${path}.fields`, names, errors, draftId)
+    }
+    if (field.tabs) {
+      for (const [tabIndex, tab] of field.tabs.entries()) {
+        validateLLMTriggerTargets(tab.fields, `${path}.tabs[${tabIndex}].fields`, names, errors, draftId)
+      }
     }
   }
-  return errors
 }
 
 function groupValidationErrorsByDraftId(errors: DraftValidationError[]) {
@@ -884,6 +1051,35 @@ function parsePreviewPayload(item: PreviewItem | null): { payload: RenderPayload
 
 function isRecordValue(value: unknown): value is RenderPayload {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseStructuredFields(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    const result = parseTemplateSchema({ title: 'group', fields: parsed })
+    if (!result.ok) {
+      return { ok: false as const, message: `${result.error.field}: ${result.error.message}` }
+    }
+    return { ok: true as const, value: result.value.fields }
+  } catch (error) {
+    return { ok: false as const, message: error instanceof Error ? error.message : 'invalid JSON' }
+  }
+}
+
+function parseStructuredTabs(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    const result = parseTemplateSchema({
+      title: 'tabs',
+      fields: [{ name: '__tabs__', widget: 'Tabs', label: 'Tabs', tabs: parsed }],
+    })
+    if (!result.ok) {
+      return { ok: false as const, message: `${result.error.field}: ${result.error.message}` }
+    }
+    return { ok: true as const, value: result.value.fields[0].tabs ?? [] }
+  } catch (error) {
+    return { ok: false as const, message: error instanceof Error ? error.message : 'invalid JSON' }
+  }
 }
 
 const pageStyle: CSSProperties = {

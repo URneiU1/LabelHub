@@ -87,6 +87,64 @@ describe('SchemaRenderer', () => {
     expect(answer.corrected_answer).toEqual({ corrected_answer: '叶绿体' })
   })
 
+  it('renders group and tabs fields with flat answer updates', async () => {
+    const user = userEvent.setup()
+    const result = parseTemplateSchema({
+      title: 'structured',
+      fields: [
+        {
+          name: 'quality_group',
+          widget: 'Group',
+          label: '质量判断',
+          fields: [
+            { name: 'summary', widget: 'Input', label: '一句话总评' },
+          ],
+        },
+        {
+          name: 'review_tabs',
+          widget: 'Tabs',
+          label: '分步审核',
+          tabs: [
+            { label: '基础', fields: [{ name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] }] },
+            { label: '备注', fields: [{ name: 'comment', widget: 'TextArea', label: '备注' }] },
+          ],
+        },
+      ],
+    })
+    if (!result.ok) {
+      throw new Error(result.error.message)
+    }
+
+    function StructuredRenderer() {
+      const [answer, setAnswer] = useState<AnswerValue>({})
+      return (
+        <>
+          <SchemaRenderer schema={result.value} value={answer} onChange={setAnswer} />
+          <output aria-label="structured-answer-json">{JSON.stringify(answer)}</output>
+        </>
+      )
+    }
+
+    render(<StructuredRenderer />)
+
+    await user.type(screen.getByLabelText('一句话总评'), '可以通过')
+    await user.click(within(screen.getByRole('radiogroup', { name: '结论' })).getByLabelText('pass'))
+    const commentInput = screen.getAllByLabelText('备注').find((element) => element.tagName === 'TEXTAREA')
+    if (!commentInput) {
+      throw new Error('comment textarea not found')
+    }
+    await user.type(commentInput, '结构完整')
+
+    const answer = JSON.parse(screen.getByLabelText('structured-answer-json').textContent || '{}') as AnswerValue
+    expect(answer).toMatchObject({
+      summary: '可以通过',
+      decision: 'pass',
+      comment: '结构完整',
+    })
+    expect(document.querySelectorAll('[data-widget="Group"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-widget="Tabs"]')).toHaveLength(1)
+  })
+
   it('renders ShowItem media modes from path', () => {
     const result = parseTemplateSchema({
       title: 'media',

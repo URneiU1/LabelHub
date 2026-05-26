@@ -570,6 +570,64 @@ func TestGoldenSampleBatchDryRunRejectsTooManySamples(t *testing.T) {
 	}
 }
 
+func TestGoldenSampleBatchDryRunReturns429WhenQuotaWouldBeExceeded(t *testing.T) {
+	t.Setenv(dryRunQuotaMaxRunsEnv, "2")
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .ai_dry_runs. WHERE task_id = .+ AND created_at >= .+`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/dry-runs", map[string]any{
+		"sample_ids": []uint64{11, 12},
+	}))
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "RATE_LIMITED") {
+		t.Fatalf("expected RATE_LIMITED body, got %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestGoldenSampleDryRunReturns429WhenCircuitBreakerOpen(t *testing.T) {
+	t.Setenv(dryRunCircuitMaxFailuresEnv, "2")
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "draft"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .ai_dry_runs. WHERE task_id = .+ AND status = .+ AND created_at >= .+`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/11/dry-run", map[string]any{}))
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dry-run circuit breaker is open") {
+		t.Fatalf("expected circuit breaker body, got %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestGoldenSampleBatchDryRunRejectsNonOwner(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()

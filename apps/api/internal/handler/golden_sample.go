@@ -388,6 +388,14 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
 		return
 	}
+	if err := enforceDryRunGuard(h.db, task.ID, 1); err != nil {
+		if errors.Is(err, errDryRunQuotaExceeded) || errors.Is(err, errDryRunCircuitOpen) {
+			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
 
 	var sample model.GoldenSample
 	if err := h.db.Where("id = ? AND task_id = ?", sampleID, task.ID).First(&sample).Error; err != nil {
@@ -488,6 +496,14 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 	}
 	sampleIDs, ok := normalizeGoldenSampleBatchIDs(c, req.SampleIDs)
 	if !ok {
+		return
+	}
+	if err := enforceDryRunGuard(h.db, task.ID, len(sampleIDs)); err != nil {
+		if errors.Is(err, errDryRunQuotaExceeded) || errors.Is(err, errDryRunCircuitOpen) {
+			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 
