@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
@@ -58,9 +58,29 @@ export default function TemplateDesigner() {
   const [error, setError] = useState('')
   const [schemaError, setSchemaError] = useState<{ field: string, message: string } | null>(null)
   const [taskMismatch, setTaskMismatch] = useState(false)
+  const loadSeq = useRef(0)
+  const routeRef = useRef({ taskId: numericTaskId, templateId: numericTemplateId })
+
+  useEffect(() => {
+    routeRef.current = { taskId: numericTaskId, templateId: numericTemplateId }
+  }, [numericTaskId, numericTemplateId])
 
   const loadTemplate = useCallback(async () => {
-    if (!Number.isFinite(numericTemplateId) || numericTemplateId <= 0) {
+    const requestSeq = loadSeq.current + 1
+    loadSeq.current = requestSeq
+    const routeTaskId = numericTaskId
+    const routeTemplateId = numericTemplateId
+    const isCurrentLoad = () => loadSeq.current === requestSeq
+
+    if (!Number.isFinite(routeTemplateId) || routeTemplateId <= 0) {
+      setTemplate(null)
+      setSchema(null)
+      setTitle('')
+      setFields([])
+      setSelectedId(null)
+      setLatestTemplateId(null)
+      setSchemaError(null)
+      setTaskMismatch(true)
       setError('template id 无效')
       setLoading(false)
       return
@@ -70,12 +90,14 @@ export default function TemplateDesigner() {
     setSchemaError(null)
     setTaskMismatch(false)
     try {
-      const data = await apiGet<TemplateDetailResponse>(`/templates/${numericTemplateId}`)
+      const data = await apiGet<TemplateDetailResponse>(`/templates/${routeTemplateId}`)
+      if (!isCurrentLoad()) return
       setTemplate(data.template)
       setIsLatest(data.isLatest)
       setLatestTemplateId(data.latestTemplateId)
-      if (Number(data.template.taskId) !== numericTaskId) {
+      if (Number(data.template.taskId) !== routeTaskId) {
         setSchema(null)
+        setTitle('')
         setFields([])
         setSelectedId(null)
         setTaskMismatch(true)
@@ -86,6 +108,7 @@ export default function TemplateDesigner() {
       const parsed = parseTemplateSchema(data.template.schemaJson)
       if (!parsed.ok) {
         setSchema(null)
+        setTitle('')
         setFields([])
         setSelectedId(null)
         setSchemaError(parsed.error)
@@ -100,9 +123,20 @@ export default function TemplateDesigner() {
       setFields(draftFields)
       setSelectedId(draftFields[0]?._draftId ?? null)
     } catch (error) {
+      if (!isCurrentLoad()) return
+      setTemplate(null)
+      setSchema(null)
+      setTitle('')
+      setFields([])
+      setSelectedId(null)
+      setLatestTemplateId(null)
+      setSchemaError(null)
+      setTaskMismatch(true)
       setError(error instanceof Error ? error.message : '加载模板失败')
     } finally {
-      setLoading(false)
+      if (isCurrentLoad()) {
+        setLoading(false)
+      }
     }
   }, [numericTaskId, numericTemplateId])
 
@@ -155,16 +189,24 @@ export default function TemplateDesigner() {
     setError('')
   }
 
+  function isCurrentRoute(routeTaskId: number, routeTemplateId: number) {
+    return routeRef.current.taskId === routeTaskId && routeRef.current.templateId === routeTemplateId
+  }
+
   async function saveTemplate() {
     if (!numericTaskId || saveDisabled || taskMismatch) return
+    const routeTaskId = numericTaskId
+    const routeTemplateId = numericTemplateId
     setSaving(true)
     setError('')
     try {
       const body = buildTemplatePayload(title, fields, schema)
-      const created = await apiPost<TaskTemplate>(`/tasks/${numericTaskId}/templates`, body)
+      const created = await apiPost<TaskTemplate>(`/tasks/${routeTaskId}/templates`, body)
+      if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
       Toast.success(`模板 v${created.version ?? ''} 已保存`)
-      navigate(`/owner/tasks/${numericTaskId}/templates/${created.id}`)
+      navigate(`/owner/tasks/${routeTaskId}/templates/${created.id}`)
     } catch (error) {
+      if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
       setError(error instanceof Error ? error.message : '保存模板失败')
     } finally {
       setSaving(false)
@@ -173,13 +215,17 @@ export default function TemplateDesigner() {
 
   async function forkTemplate() {
     if (!numericTaskId || !schema || fields.length === 0 || taskMismatch) return
+    const routeTaskId = numericTaskId
+    const routeTemplateId = numericTemplateId
     setSaving(true)
     setError('')
     try {
-      const created = await apiPost<TaskTemplate>(`/tasks/${numericTaskId}/templates`, buildTemplatePayload(title, fields, schema))
+      const created = await apiPost<TaskTemplate>(`/tasks/${routeTaskId}/templates`, buildTemplatePayload(title, fields, schema))
+      if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
       Toast.success(`已 Fork 为 v${created.version ?? ''}`)
-      navigate(`/owner/tasks/${numericTaskId}/templates/${created.id}`)
+      navigate(`/owner/tasks/${routeTaskId}/templates/${created.id}`)
     } catch (error) {
+      if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
       setError(error instanceof Error ? error.message : 'Fork 模板失败')
     } finally {
       setSaving(false)
