@@ -161,9 +161,11 @@ export default function OwnerDashboard() {
   const loadTasks = useCallback(async () => {
     try {
       const data = await apiGet<TaskListResponse>('/tasks')
+      const requestedTaskId = requestedNumberParam('taskId')
+      const initialTask = data.find((item) => item.id === requestedTaskId) ?? data[0] ?? null
       setTasks(data)
-      setSelected(data[0] ?? null)
-      selectedTaskIdRef.current = data[0]?.id ?? null
+      setSelected(initialTask)
+      selectedTaskIdRef.current = initialTask?.id ?? null
       resetGoldenSampleFormToDefaults()
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载任务失败')
@@ -210,9 +212,10 @@ export default function OwnerDashboard() {
       setPromptError('')
       setPromptLoading(false)
       setPromptLoadFailed(false)
-      const latest = data.prompts[0]
-      if (latest) {
-        fillPromptForm(latest)
+      const requestedPromptId = requestedNumberParam('taskId') === taskId ? requestedNumberParam('aiPromptId') : null
+      const promptForForm = data.prompts.find((prompt) => prompt.id === requestedPromptId) ?? data.prompts[0]
+      if (promptForForm) {
+        fillPromptForm(promptForForm)
       } else {
         resetPromptFormToDefaults()
       }
@@ -672,7 +675,7 @@ export default function OwnerDashboard() {
                 </div>
               </div>
 
-              <section style={aiPromptSectionStyle}>
+              <section id="ai-prompts" style={aiPromptSectionStyle}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
                   <h3 style={subHeadingStyle}>AI 自动预审配置</h3>
                   <div style={{ padding: '2px 8px', borderRadius: 10, background: aiReviewEnabled ? '#e1f5fe' : '#f5f5f5', color: aiReviewEnabled ? '#0288d1' : '#9e9e9e', fontSize: 11, fontWeight: 'bold' }}>
@@ -1112,6 +1115,15 @@ function summarizeDryRunHistory(runs: AIDryRunHistoryItem[]) {
     }
     return summary
   }, { total: 0, matched: 0, mismatch: 0, failed: 0 })
+}
+
+function requestedNumberParam(key: string) {
+  const raw = new URLSearchParams(window.location.search).get(key)
+  if (!raw) {
+    return null
+  }
+  const value = Number(raw)
+  return Number.isInteger(value) && value > 0 ? value : null
 }
 
 const panelStyle: React.CSSProperties = {

@@ -37,6 +37,7 @@ func NewReviewerHandler(db *gorm.DB) ReviewerHandler {
 func (h ReviewerHandler) Register(api gin.IRouter) {
 	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerQueue)
 	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerDetail)
+	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerAIPrompts)
 	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "owner", "admin"), h.RetryAIReview)
 	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
 }
@@ -76,6 +77,12 @@ type reviewerAIReviewResponse struct {
 	CreatedAt      time.Time                 `json:"createdAt"`
 	FinishedAt     model.NullTime            `json:"finishedAt"`
 	Prompt         *reviewerAIPromptResponse `json:"prompt"`
+}
+
+type reviewerAIPromptListResponse struct {
+	Prompts         []reviewerAIPromptResponse `json:"prompts"`
+	ActivePromptID  *uint64                    `json:"activePromptId"`
+	AIReviewEnabled bool                       `json:"aiReviewEnabled"`
 }
 
 type reviewerAuditLogResponse struct {
@@ -145,6 +152,48 @@ func (h ReviewerHandler) ReviewerDetail(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, bundle)
+}
+
+func (h ReviewerHandler) ReviewerAIPrompts(c *gin.Context) {
+	taskID, ok := parseIDParam(c, "taskId")
+	if !ok {
+		return
+	}
+	claims, _ := middleware.Claims(c)
+	var task model.Task
+	if err := h.db.First(&task, taskID).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+		return
+	}
+	allowed, err := canReviewTask(h.db, claims, task)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check review access")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+		return
+	}
+
+	var prompts []model.AIPromptConfig
+	if err := h.db.Where("task_id = ?", task.ID).Order("version DESC").Find(&prompts).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list ai prompts")
+		return
+	}
+	responses := make([]reviewerAIPromptResponse, 0, len(prompts))
+	for _, prompt := range prompts {
+		response, err := reviewerAIPromptResponseFromModel(prompt)
+		if err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load ai prompt")
+			return
+		}
+		responses = append(responses, response)
+	}
+	httpx.OK(c, reviewerAIPromptListResponse{
+		Prompts:         responses,
+		ActivePromptID:  task.AIPromptID,
+		AIReviewEnabled: task.AIReviewEnabled,
+	})
 }
 
 func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
@@ -484,19 +533,11 @@ func reviewerAIReviewResponseFromModel(review model.AIReview, prompt *model.AIPr
 	}
 	var promptResponse *reviewerAIPromptResponse
 	if prompt != nil {
-		promptDimensions, err := requiredStoredJSON(prompt.Dimensions)
+		response, err := reviewerAIPromptResponseFromModel(*prompt)
 		if err != nil {
 			return reviewerAIReviewResponse{}, err
 		}
-		promptResponse = &reviewerAIPromptResponse{
-			ID:             prompt.ID,
-			Version:        prompt.Version,
-			Model:          prompt.Model,
-			PromptTemplate: prompt.PromptTemplate,
-			Dimensions:     promptDimensions,
-			PassThreshold:  prompt.PassThreshold,
-			UncertainMin:   prompt.UncertainMin,
-		}
+		promptResponse = &response
 	}
 	return reviewerAIReviewResponse{
 		ID:             review.ID,
@@ -518,6 +559,22 @@ func reviewerAIReviewResponseFromModel(review model.AIReview, prompt *model.AIPr
 		CreatedAt:      review.CreatedAt,
 		FinishedAt:     review.FinishedAt,
 		Prompt:         promptResponse,
+	}, nil
+}
+
+func reviewerAIPromptResponseFromModel(prompt model.AIPromptConfig) (reviewerAIPromptResponse, error) {
+	dimensions, err := requiredStoredJSON(prompt.Dimensions)
+	if err != nil {
+		return reviewerAIPromptResponse{}, err
+	}
+	return reviewerAIPromptResponse{
+		ID:             prompt.ID,
+		Version:        prompt.Version,
+		Model:          prompt.Model,
+		PromptTemplate: prompt.PromptTemplate,
+		Dimensions:     dimensions,
+		PassThreshold:  prompt.PassThreshold,
+		UncertainMin:   prompt.UncertainMin,
 	}, nil
 }
 

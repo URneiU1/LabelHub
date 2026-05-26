@@ -1,9 +1,9 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema } from '../../renderer/types'
-import { apiGet, apiPost, type AIReviewDetail, type AuditLog, type Submission, type TaskBundle } from '../../shared/api/client'
+import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type Submission, type TaskBundle } from '../../shared/api/client'
 import { parsePayload } from '../../shared/components/payload'
 
 type ReviewResponse = {
@@ -15,6 +15,12 @@ type RetryAIReviewResponse = {
   submissionId: number
   status: string
   aiReview: AIReviewDetail
+}
+
+type ReviewerRuleConfigResponse = {
+  prompts: AIPromptSummary[]
+  activePromptId: number | null
+  aiReviewEnabled: boolean
 }
 
 type ParsedSchema =
@@ -85,6 +91,25 @@ const demoItems: DemoReviewItem[] = [
   },
 ]
 
+const demoRuleConfigs: AIPromptSummary[] = [{
+  id: 2041,
+  version: 2,
+  model: 'doubao-pro-32k',
+  promptTemplate: `请基于以下维度给提交内容打分（0-100）：
+[相关性] 标注结果与原始数据是否对齐
+[准确性] 类目 / 关键词与商品事实是否一致
+[格式合规] 是否满足模板字段与正则规则
+[安全性] 是否包含敏感 / 违规词`,
+  dimensions: [
+    { name: '相关性', weight: 0.35 },
+    { name: '准确性', weight: 0.35 },
+    { name: '格式合规', weight: 0.2 },
+    { name: '安全性', weight: 0.1 },
+  ],
+  passThreshold: 80,
+  uncertainMin: 60,
+}]
+
 export default function ReviewerQueue() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [selected, setSelected] = useState<Submission | null>(null)
@@ -93,14 +118,24 @@ export default function ReviewerQueue() {
   const [reason, setReason] = useState('本轮修改已覆盖第 1 轮打回意见，关键词丰富度与类目准确性均达标。')
   const [loading, setLoading] = useState(false)
   const [retryingAI, setRetryingAI] = useState(false)
+  const [rulePanelOpen, setRulePanelOpen] = useState(false)
+  const [ruleConfigs, setRuleConfigs] = useState<AIPromptSummary[]>([])
+  const [selectedRuleId, setSelectedRuleId] = useState<number | null>(null)
+  const [ruleActivePromptId, setRuleActivePromptId] = useState<number | null>(null)
+  const [ruleAIReviewEnabled, setRuleAIReviewEnabled] = useState(false)
+  const [ruleLoading, setRuleLoading] = useState(false)
+  const [ruleError, setRuleError] = useState('')
+  const ruleLoadSeq = useRef(0)
 
   const loadQueue = useCallback(async () => {
     try {
       const data = await apiGet<Submission[]>('/reviewer/submissions')
       setSubmissions(data)
       if (data.length === 0) {
+        ruleLoadSeq.current += 1
         setSelected(null)
         setDetail(null)
+        setRulePanelOpen(false)
       }
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载审核队列失败')
@@ -125,8 +160,17 @@ export default function ReviewerQueue() {
   const answer = useMemo<AnswerValue>(() => parseAnswer(detail?.revision?.answer), [detail?.revision?.answer])
   const showingDemo = submissions.length === 0 && !selected && !detail
   const retryDisabled = !showingDemo && (!selected || !canRetryAIReview(detail?.aiReview))
+  const selectedRule = useMemo(() => {
+    if (ruleConfigs.length > 0) {
+      return ruleConfigs.find((item) => item.id === selectedRuleId) ?? ruleConfigs[0]
+    }
+    return detail?.aiReview?.prompt ?? null
+  }, [detail?.aiReview?.prompt, ruleConfigs, selectedRuleId])
 
   async function openQueueItem(item: QueueItem) {
+    ruleLoadSeq.current += 1
+    setRulePanelOpen(false)
+    setRuleLoading(false)
     if (item.kind === 'demo') {
       setSelected(null)
       setDetail(null)
@@ -159,8 +203,10 @@ export default function ReviewerQueue() {
       const data = await apiPost<ReviewResponse>(`/submissions/${selected.id}/review`, { verdict, reason })
       Toast.success(`审核完成，状态 ${data.status}`)
       await loadQueue()
+      ruleLoadSeq.current += 1
       setSelected(null)
       setDetail(null)
+      setRulePanelOpen(false)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '审核失败')
     } finally {
@@ -178,8 +224,10 @@ export default function ReviewerQueue() {
       const data = await apiPost<RetryAIReviewResponse>(`/reviewer/submissions/${selected.id}/ai-review/retry`, {})
       Toast.success(`AI 重跑已入队，状态 ${data.status}`)
       await loadQueue()
+      ruleLoadSeq.current += 1
       setSelected(null)
       setDetail(null)
+      setRulePanelOpen(false)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : 'AI 重跑失败')
     } finally {
@@ -187,16 +235,48 @@ export default function ReviewerQueue() {
     }
   }
 
-  function openRuleConfig() {
-    if (detail?.aiReview?.prompt) {
-      Toast.success(`当前规则 v${detail.aiReview.prompt.version} · ${detail.aiReview.prompt.model} 已在详情中展示`)
-      return
-    }
+  async function openRuleConfig() {
+    const requestSeq = ruleLoadSeq.current + 1
+    ruleLoadSeq.current = requestSeq
     if (showingDemo) {
-      Toast.success('演示样例：规则模板已在详情中展示')
+      setRuleConfigs(demoRuleConfigs)
+      setSelectedRuleId(demoRuleConfigs[0]?.id ?? null)
+      setRuleActivePromptId(demoRuleConfigs[0]?.id ?? null)
+      setRuleAIReviewEnabled(true)
+      setRuleError('')
+      setRulePanelOpen(true)
       return
     }
-    Toast.error('当前提交没有可展示的 AI 规则配置')
+    if (!detail?.task?.id) {
+      Toast.error('请先选择一条真实提交')
+      return
+    }
+    const taskId = detail.task.id
+    const currentPrompt = detail.aiReview?.prompt ?? null
+    setRulePanelOpen(true)
+    setRuleLoading(true)
+    setRuleError('')
+    setRuleConfigs(currentPrompt ? [currentPrompt] : [])
+    setSelectedRuleId(currentPrompt?.id ?? null)
+    setRuleActivePromptId(null)
+    setRuleAIReviewEnabled(false)
+    try {
+      const data = await apiGet<ReviewerRuleConfigResponse>(`/reviewer/tasks/${taskId}/ai-prompts`)
+      if (ruleLoadSeq.current !== requestSeq) return
+      const prompts = data.prompts.length === 0 && currentPrompt ? [currentPrompt] : data.prompts
+      setRuleConfigs(prompts)
+      setRuleActivePromptId(data.activePromptId)
+      setRuleAIReviewEnabled(data.aiReviewEnabled)
+      setSelectedRuleId(currentPrompt?.id ?? data.activePromptId ?? prompts[0]?.id ?? null)
+    } catch (error) {
+      if (ruleLoadSeq.current !== requestSeq) return
+      setRuleConfigs(currentPrompt ? [currentPrompt] : [])
+      setRuleError(error instanceof Error ? error.message : '加载规则配置失败')
+    } finally {
+      if (ruleLoadSeq.current === requestSeq) {
+        setRuleLoading(false)
+      }
+    }
   }
 
   return (
@@ -209,7 +289,7 @@ export default function ReviewerQueue() {
         </div>
         <div style={headerActionsStyle}>
           <span style={modelPillStyle}>Agent v2.3 · 模型 doubao-pro-32k</span>
-          <Button onClick={openRuleConfig} theme="light">规则配置</Button>
+          <Button loading={ruleLoading} onClick={() => void openRuleConfig()} theme="light">规则配置</Button>
           <Button disabled={retryDisabled} loading={retryingAI} onClick={() => void retryAIReview()} theme="light">失败重跑</Button>
         </div>
       </header>
@@ -285,6 +365,25 @@ export default function ReviewerQueue() {
 
         <aside style={rightPanelStyle}>
           <MetricGrid />
+          {rulePanelOpen ? (
+            <RuleConfigPanel
+              taskId={showingDemo ? null : detail?.task.id}
+              prompts={ruleConfigs}
+              selectedRule={selectedRule}
+              selectedRuleId={selectedRuleId}
+              activePromptId={ruleActivePromptId}
+              aiReviewEnabled={ruleAIReviewEnabled}
+              currentPromptId={detail?.aiReview?.prompt?.id ?? null}
+              loading={ruleLoading}
+              error={ruleError}
+              onSelectRule={setSelectedRuleId}
+              onClose={() => {
+                ruleLoadSeq.current += 1
+                setRulePanelOpen(false)
+                setRuleLoading(false)
+              }}
+            />
+          ) : null}
           <Timeline auditLogs={showingDemo ? undefined : detail?.auditLogs} submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id} />
         </aside>
       </div>
@@ -659,6 +758,82 @@ function Timeline({ auditLogs, submissionId }: { auditLogs?: AuditLog[], submiss
   )
 }
 
+function RuleConfigPanel({
+  taskId,
+  prompts,
+  selectedRule,
+  selectedRuleId,
+  activePromptId,
+  aiReviewEnabled,
+  currentPromptId,
+  loading,
+  error,
+  onSelectRule,
+  onClose,
+}: {
+  taskId?: number | null
+  prompts: AIPromptSummary[]
+  selectedRule: AIPromptSummary | null
+  selectedRuleId: number | null
+  activePromptId: number | null
+  aiReviewEnabled: boolean
+  currentPromptId: number | null
+  loading: boolean
+  error: string
+  onSelectRule: (id: number | null) => void
+  onClose: () => void
+}) {
+  const editHref = taskId
+    ? `/owner?taskId=${taskId}${selectedRule ? `&aiPromptId=${selectedRule.id}` : ''}#ai-prompts`
+    : '/owner#ai-prompts'
+  return (
+    <section style={rulePanelStyle}>
+      <div style={sectionTitleRowStyle}>
+        <h3 style={sectionTitleStyle}>规则配置</h3>
+        <button type="button" onClick={onClose} style={iconButtonStyle} aria-label="关闭规则配置">×</button>
+      </div>
+      {error ? <div role="alert" style={ruleErrorStyle}>{error}</div> : null}
+      {loading ? <p style={mutedTextStyle}>加载规则版本...</p> : null}
+      <div style={ruleMetaStyle}>
+        <span style={aiReviewEnabled ? successPillStyle : neutralPillStyle}>AI review {aiReviewEnabled ? 'ON' : 'OFF'}</span>
+        {activePromptId ? <span style={neutralPillStyle}>active #{activePromptId}</span> : <span style={neutralPillStyle}>no active rule</span>}
+      </div>
+      <label style={fieldSelectStyle}>
+        <span>规则版本</span>
+        <select
+          aria-label="reviewer_rule_select"
+          disabled={loading || prompts.length === 0}
+          value={selectedRuleId ?? ''}
+          onChange={(event) => onSelectRule(event.target.value ? Number(event.target.value) : null)}
+          style={selectInputStyle}
+        >
+          {prompts.length === 0 ? <option value="">暂无可选规则</option> : null}
+          {prompts.map((prompt) => (
+            <option key={prompt.id} value={prompt.id}>
+              v{prompt.version} · {prompt.model}{prompt.id === activePromptId ? ' · active' : ''}{prompt.id === currentPromptId ? ' · current' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selectedRule ? (
+        <>
+          <div style={ruleSummaryGridStyle}>
+            <span>v{selectedRule.version}</span>
+            <span>{selectedRule.model}</span>
+            <span>pass {selectedRule.passThreshold}</span>
+            <span>min {selectedRule.uncertainMin}</span>
+          </div>
+          <pre style={ruleCodeBlockStyle}>{selectedRule.promptTemplate}</pre>
+          <pre style={ruleCodeBlockStyle}>{formatRuleDimensions(selectedRule.dimensions)}</pre>
+          <a href={editHref} style={editRuleLinkStyle}>跳转 Owner 编辑</a>
+        </>
+      ) : (
+        <p style={mutedTextStyle}>当前任务还没有 AI Prompt 规则。</p>
+      )}
+    </section>
+  )
+}
+
 function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
   if (!bundle?.template?.schemaJson) {
     return { ok: false, message: '当前提交缺少模板快照' }
@@ -729,6 +904,17 @@ function formatTime(raw: string | undefined) {
     return raw
   }
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+}
+
+function formatRuleDimensions(raw: unknown) {
+  if (typeof raw === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2)
+    } catch {
+      return raw
+    }
+  }
+  return JSON.stringify(raw ?? [], null, 2)
 }
 
 function auditStateText(log: AuditLog) {
@@ -919,6 +1105,12 @@ const neutralPillStyle: CSSProperties = {
   padding: '2px 8px',
   fontSize: 'var(--text-sm)',
   fontWeight: 600,
+}
+
+const successPillStyle: CSSProperties = {
+  ...neutralPillStyle,
+  color: 'var(--color-success)',
+  background: 'var(--color-success-soft)',
 }
 
 const orangePillStyle: CSSProperties = {
@@ -1196,6 +1388,85 @@ const metricStyle: CSSProperties = {
   padding: 'var(--space-md)',
   fontSize: 'var(--text-sm)',
   color: 'var(--color-text-muted)',
+}
+
+const rulePanelStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-accent-soft)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-info-bg)',
+}
+
+const iconButtonStyle: CSSProperties = {
+  width: 24,
+  height: 24,
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text-secondary)',
+  cursor: 'pointer',
+}
+
+const ruleErrorStyle: CSSProperties = {
+  padding: 'var(--space-sm)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-danger-soft)',
+  color: 'var(--color-danger)',
+  fontSize: 'var(--text-sm)',
+}
+
+const ruleMetaStyle: CSSProperties = {
+  display: 'flex',
+  gap: 'var(--space-xs)',
+  flexWrap: 'wrap',
+}
+
+const fieldSelectStyle: CSSProperties = {
+  display: 'grid',
+  gap: 6,
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+}
+
+const selectInputStyle: CSSProperties = {
+  width: '100%',
+  minHeight: 36,
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text)',
+  padding: '0 var(--space-sm)',
+}
+
+const ruleSummaryGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: 'var(--space-xs)',
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
+}
+
+const ruleCodeBlockStyle: CSSProperties = {
+  ...codeBlockStyle,
+  maxHeight: 180,
+  overflow: 'auto',
+  background: 'var(--color-surface)',
+}
+
+const editRuleLinkStyle: CSSProperties = {
+  display: 'inline-flex',
+  justifyContent: 'center',
+  alignItems: 'center',
+  minHeight: 32,
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-accent)',
+  color: '#fff',
+  textDecoration: 'none',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 700,
 }
 
 const timelineStyle: CSSProperties = {

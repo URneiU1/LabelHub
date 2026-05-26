@@ -300,6 +300,71 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	}
 }
 
+func TestReviewerAIPromptsScopedToAssignedReviewer(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	promptID := uint64(41)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_review_enabled", "ai_prompt_id"}).
+			AddRow(1, 99, "商品标题清洗", "published", true, promptID))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model"}).
+			AddRow(promptID, 1, 2, "score this", `[{"name":"相关性","weight":1}]`, 80, 60, "mock-model"))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/tasks/1/ai-prompts", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if data["activePromptId"] != float64(promptID) {
+		t.Fatalf("activePromptId = %v", data["activePromptId"])
+	}
+	prompts := data["prompts"].([]any)
+	prompt := prompts[0].(map[string]any)
+	if prompt["promptTemplate"] != "score this" {
+		t.Fatalf("promptTemplate = %v", prompt["promptTemplate"])
+	}
+	dimensions := prompt["dimensions"].([]any)
+	if dimensions[0].(map[string]any)["name"] != "相关性" {
+		t.Fatalf("dimensions = %v", dimensions)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestReviewerAIPromptsRejectsUnassignedReviewer(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "ai_review_enabled", "ai_prompt_id"}).
+			AddRow(1, 99, "商品标题清洗", "published", true, uint64(41)))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/tasks/1/ai-prompts", nil))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()

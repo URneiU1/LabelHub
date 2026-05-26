@@ -48,6 +48,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     mockApiPost.mockReset()
     mockApiPostRawJSON.mockReset()
     mockApiDelete.mockReset()
+    window.history.pushState({}, '', '/')
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]
@@ -67,6 +68,56 @@ describe('OwnerDashboard AI prompt flow', () => {
 
       throw new Error(`unexpected GET ${path}`)
     })
+  })
+
+  it('opens the task and prompt version from a reviewer edit deep link', async () => {
+    window.history.pushState({}, '', '/owner?taskId=2&aiPromptId=44#ai-prompts')
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [
+          task,
+          { ...task, id: 2, title: '复核规则任务', aiPromptId: 44, aiReviewEnabled: true },
+        ]
+      }
+      if (path === '/tasks/2/ai-prompts') {
+        return {
+          prompts: [
+            {
+              id: 45,
+              version: 5,
+              promptTemplate: '最新规则',
+              dimensions: '[{"name":"相关性","weight":1}]',
+              passThreshold: 85,
+              uncertainMin: 65,
+              model: 'doubao-pro-32k',
+            },
+            {
+              id: 44,
+              version: 4,
+              promptTemplate: 'Reviewer 跳转规则',
+              dimensions: '[{"name":"准确性","weight":1}]',
+              passThreshold: 80,
+              uncertainMin: 60,
+              model: 'mock-model',
+            },
+          ],
+          activePromptId: 44,
+          aiReviewEnabled: true,
+        }
+      }
+      if (path === '/tasks/2/golden-samples') {
+        return { samples: [] }
+      }
+      if (path.startsWith('/tasks/2/ai-dry-runs')) {
+        return { dryRuns: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByDisplayValue('Reviewer 跳转规则')).toBeInTheDocument()
+    expect(mockApiGet).toHaveBeenCalledWith('/tasks/2/ai-prompts')
   })
 
   it('saves an AI prompt config for the selected owner task', async () => {
