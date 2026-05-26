@@ -61,6 +61,8 @@ const widgetPrefixes: Record<WidgetType, string> = {
   LLMTrigger: 'llm_trigger',
 }
 
+const nestedWidgetTypes = widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs')
+
 export default function TemplateDesigner() {
   const { taskId, templateId } = useParams()
   const navigate = useNavigate()
@@ -584,8 +586,8 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
           </label>
         ) : null}
         {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'Group' ? <GroupControls key={field._draftId} field={field} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'Tabs' ? <TabsControls key={field._draftId} field={field} disabled={disabled} onChange={onChange} /> : null}
+        {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
+        {field.widget === 'Tabs' ? <TabsControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
         {field.widget === 'FileUpload' ? (
           <label style={fieldStyle}>
             maxFiles
@@ -662,71 +664,189 @@ function ShowItemControls({ field, disabled, onChange }: {
   )
 }
 
-function GroupControls({ field, disabled, onChange }: {
+function GroupControls({ field, fields, disabled, onChange }: {
   field: DraftField
+  fields: DraftField[]
   disabled: boolean
   onChange: (patch: Partial<FieldSchema>) => void
 }) {
+  const childFields = field.fields ?? []
   return (
-    <StructuredJSONTextarea
+    <NestedFieldsEditor
       label="group_fields"
       disabled={disabled}
-      value={field.fields ?? []}
-      parse={(value) => parseStructuredFields(value)}
+      fields={childFields}
+      allFields={fields}
+      parentName={field.name}
       onChange={(fields) => onChange({ fields })}
     />
   )
 }
 
-function TabsControls({ field, disabled, onChange }: {
+function TabsControls({ field, fields, disabled, onChange }: {
   field: DraftField
+  fields: DraftField[]
   disabled: boolean
   onChange: (patch: Partial<FieldSchema>) => void
 }) {
+  const tabs = field.tabs ?? []
+  function updateTab(index: number, patch: Partial<{ label: string, fields: FieldSchema[] }>) {
+    onChange({
+      tabs: tabs.map((tab, currentIndex) => (
+        currentIndex === index ? { ...tab, ...patch } : tab
+      )),
+    })
+  }
+  function addTab() {
+    const nextIndex = tabs.length + 1
+    onChange({
+      tabs: [...tabs, {
+        label: `Tab ${nextIndex}`,
+        fields: [createNestedDefaultField(nextNestedFieldName(fields, `${field.name}_tab${nextIndex}`, 'Input'), 'Input')],
+      }],
+    })
+  }
+  function deleteTab(index: number) {
+    onChange({ tabs: tabs.filter((_, currentIndex) => currentIndex !== index) })
+  }
   return (
-    <StructuredJSONTextarea
-      label="tabs"
-      disabled={disabled}
-      value={field.tabs ?? []}
-      parse={(value) => parseStructuredTabs(value)}
-      onChange={(tabs) => onChange({ tabs })}
-    />
+    <div style={nestedEditorStyle}>
+      <span style={nestedEditorLabelStyle}>tabs</span>
+      {tabs.map((tab, index) => (
+        <div key={`${field.name}-tab-${index}`} style={nestedPanelStyle}>
+          <label style={fieldStyle}>
+            tab_label
+            <input
+              aria-label={`tab_label_${index + 1}`}
+              disabled={disabled}
+              value={tab.label}
+              onChange={(event) => updateTab(index, { label: event.target.value })}
+              style={inputStyle}
+            />
+          </label>
+          <NestedFieldsEditor
+            label={`tab_${index + 1}_fields`}
+            disabled={disabled}
+            fields={tab.fields}
+            allFields={fields}
+            parentName={`${field.name}_tab${index + 1}`}
+            onChange={(nextFields) => updateTab(index, { fields: nextFields })}
+          />
+          <Button disabled={disabled || tabs.length <= 1} onClick={() => deleteTab(index)} aria-label={`delete tab ${index + 1}`}>Delete tab</Button>
+        </div>
+      ))}
+      <Button disabled={disabled} onClick={addTab} aria-label="add tab">Add tab</Button>
+    </div>
   )
 }
 
-function StructuredJSONTextarea<T>({ label, value, disabled, parse, onChange }: {
+function NestedFieldsEditor({ label, fields, allFields, parentName, disabled, onChange }: {
   label: string
-  value: T
+  fields: FieldSchema[]
+  allFields: FieldSchema[]
+  parentName: string
   disabled: boolean
-  parse: (value: string) => { ok: true, value: T } | { ok: false, message: string }
-  onChange: (value: T) => void
+  onChange: (value: FieldSchema[]) => void
 }) {
-  const [draft, setDraft] = useState(() => JSON.stringify(value, null, 2))
-  const [error, setError] = useState('')
-
-  function commit() {
-    const parsed = parse(draft)
-    if (!parsed.ok) {
-      setError(parsed.message)
-      return
-    }
-    setError('')
-    onChange(parsed.value)
+  function updateChild(index: number, patch: Partial<FieldSchema>) {
+    onChange(fields.map((child, currentIndex) => (
+      currentIndex === index ? normalizeFieldSchema({ ...child, ...patch }) : child
+    )))
+  }
+  function changeChildWidget(index: number, widget: WidgetType) {
+    onChange(fields.map((child, currentIndex) => (
+      currentIndex === index ? createNestedFieldForWidget(child.name, widget, child.label) : child
+    )))
+  }
+  function addChild(widget: WidgetType) {
+    onChange([...fields, createNestedDefaultField(nextNestedFieldName(allFields, parentName, widget), widget)])
+  }
+  function deleteChild(index: number) {
+    onChange(fields.filter((_, currentIndex) => currentIndex !== index))
+  }
+  function moveChild(index: number, direction: -1 | 1) {
+    const nextIndex = index + direction
+    if (nextIndex < 0 || nextIndex >= fields.length) return
+    const next = [...fields]
+    const [field] = next.splice(index, 1)
+    next.splice(nextIndex, 0, field)
+    onChange(next)
   }
 
   return (
-    <label style={fieldStyle}>
-      {label}
-      <textarea
-        aria-label={label}
-        disabled={disabled}
-        value={draft}
-        onBlur={commit}
-        onChange={(event) => setDraft(event.target.value)}
-        style={textareaStyle}
-      />
-      {error ? <span role="alert" style={errorTextStyle}>{error}</span> : null}
-    </label>
+    <div style={nestedEditorStyle}>
+      <span style={nestedEditorLabelStyle}>{label}</span>
+      {fields.map((child, index) => (
+        <div key={`${label}-child-${index}`} style={nestedFieldRowStyle}>
+          <div style={twoColumnStyle}>
+            <label style={fieldStyle}>
+              child_name
+              <input
+                aria-label={`${label}_child_name_${index + 1}`}
+                disabled={disabled}
+                value={child.name}
+                onChange={(event) => updateChild(index, { name: event.target.value })}
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              child_widget
+              <select
+                aria-label={`${label}_child_widget_${index + 1}`}
+                disabled={disabled}
+                value={child.widget}
+                onChange={(event) => changeChildWidget(index, event.target.value as WidgetType)}
+                style={inputStyle}
+              >
+                {nestedWidgetTypes.map((widget) => <option key={widget} value={widget}>{widget}</option>)}
+              </select>
+            </label>
+          </div>
+          <label style={fieldStyle}>
+            child_label
+            <input
+              aria-label={`${label}_child_label_${index + 1}`}
+              disabled={disabled}
+              value={child.label}
+              onChange={(event) => updateChild(index, { label: event.target.value })}
+              style={inputStyle}
+            />
+          </label>
+          <label style={checkboxRowStyle}>
+            <input
+              aria-label={`${label}_child_required_${index + 1}`}
+              type="checkbox"
+              disabled={disabled}
+              checked={child.required === true}
+              onChange={(event) => updateChild(index, { required: event.target.checked })}
+            />
+            required
+          </label>
+          {(child.widget === 'Radio' || child.widget === 'Tags') ? (
+            <label style={fieldStyle}>
+              child_options
+              <textarea
+                aria-label={`${label}_child_options_${index + 1}`}
+                disabled={disabled}
+                value={(child.options ?? []).join('\n')}
+                onChange={(event) => updateChild(index, { options: parseOptionsInput(event.target.value) })}
+                style={textareaStyle}
+              />
+            </label>
+          ) : null}
+          <div style={fieldActionsStyle}>
+            <Button disabled={disabled || index === 0} onClick={() => moveChild(index, -1)} aria-label={`move up ${label} child ${index + 1}`}>Up</Button>
+            <Button disabled={disabled || index === fields.length - 1} onClick={() => moveChild(index, 1)} aria-label={`move down ${label} child ${index + 1}`}>Down</Button>
+            <Button disabled={disabled || fields.length <= 1} onClick={() => deleteChild(index)} aria-label={`delete ${label} child ${index + 1}`}>Delete</Button>
+          </div>
+        </div>
+      ))}
+      <div style={fieldActionsStyle}>
+        {nestedWidgetTypes.map((widget) => (
+          <Button key={widget} disabled={disabled} onClick={() => addChild(widget)} aria-label={`add ${label} ${widget}`}>Add {widget}</Button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -773,14 +893,20 @@ function createDefaultField(widget: WidgetType, current: DraftField[]): DraftFie
 }
 
 function createNestedDefaultField(name: string, widget: WidgetType): FieldSchema {
-  return {
+  return createNestedFieldForWidget(name, widget, widgetLabels[widget])
+}
+
+function createNestedFieldForWidget(name: string, widget: WidgetType, label: string): FieldSchema {
+  return normalizeFieldSchema({
     name,
     widget,
-    label: widgetLabels[widget],
+    label,
     required: false,
     ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
-  }
+    ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
+    ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
+  })
 }
 
 function nextFieldName(widget: WidgetType, current: DraftField[]) {
@@ -838,6 +964,10 @@ function createDraftId() {
 }
 
 function normalizeDraftField(field: DraftField): DraftField {
+  return normalizeFieldSchema(field) as DraftField
+}
+
+function normalizeFieldSchema(field: FieldSchema): FieldSchema {
   const next = { ...field }
   next.name = next.name.trim()
   if (next.widget !== 'Radio' && next.widget !== 'Tags') {
@@ -933,6 +1063,32 @@ function exportFieldNames(fields: FieldSchema[]): string[] {
       continue
     }
     names.push(field.name)
+  }
+  return names
+}
+
+function nextNestedFieldName(fields: FieldSchema[], parentName: string, widget: WidgetType) {
+  const names = new Set(collectFieldNames(fields))
+  const prefix = `${parentName}_${widgetPrefixes[widget]}`
+  let index = 1
+  while (names.has(`${prefix}_${index}`)) {
+    index += 1
+  }
+  return `${prefix}_${index}`
+}
+
+function collectFieldNames(fields: FieldSchema[]): string[] {
+  const names: string[] = []
+  for (const field of fields) {
+    names.push(field.name)
+    if (field.fields) {
+      names.push(...collectFieldNames(field.fields))
+    }
+    if (field.tabs) {
+      for (const tab of field.tabs) {
+        names.push(...collectFieldNames(tab.fields))
+      }
+    }
   }
   return names
 }
@@ -1051,35 +1207,6 @@ function parsePreviewPayload(item: PreviewItem | null): { payload: RenderPayload
 
 function isRecordValue(value: unknown): value is RenderPayload {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function parseStructuredFields(value: string) {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    const result = parseTemplateSchema({ title: 'group', fields: parsed })
-    if (!result.ok) {
-      return { ok: false as const, message: `${result.error.field}: ${result.error.message}` }
-    }
-    return { ok: true as const, value: result.value.fields }
-  } catch (error) {
-    return { ok: false as const, message: error instanceof Error ? error.message : 'invalid JSON' }
-  }
-}
-
-function parseStructuredTabs(value: string) {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    const result = parseTemplateSchema({
-      title: 'tabs',
-      fields: [{ name: '__tabs__', widget: 'Tabs', label: 'Tabs', tabs: parsed }],
-    })
-    if (!result.ok) {
-      return { ok: false as const, message: `${result.error.field}: ${result.error.message}` }
-    }
-    return { ok: true as const, value: result.value.fields[0].tabs ?? [] }
-  } catch (error) {
-    return { ok: false as const, message: error instanceof Error ? error.message : 'invalid JSON' }
-  }
 }
 
 const pageStyle: CSSProperties = {
@@ -1239,6 +1366,35 @@ const textareaStyle: CSSProperties = {
 const propertyStackStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-sm)',
+}
+
+const nestedEditorStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  background: 'var(--color-bg)',
+}
+
+const nestedEditorLabelStyle: CSSProperties = {
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
+}
+
+const nestedPanelStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  background: 'var(--color-surface)',
+}
+
+const nestedFieldRowStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  background: 'var(--color-surface)',
 }
 
 const twoColumnStyle: CSSProperties = {

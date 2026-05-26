@@ -259,7 +259,20 @@ describe('TemplateDesigner', () => {
 
     await screen.findByRole('button', { name: /select summary/ })
     await user.click(screen.getByRole('button', { name: 'Add Group' }))
+    await user.clear(screen.getByLabelText('group_fields_child_name_1'))
+    await user.type(screen.getByLabelText('group_fields_child_name_1'), 'group_summary')
+    await user.clear(screen.getByLabelText('group_fields_child_label_1'))
+    await user.type(screen.getByLabelText('group_fields_child_label_1'), '组内摘要')
+    await user.click(screen.getByRole('button', { name: 'add group_fields Radio' }))
+    await user.clear(screen.getByLabelText('group_fields_child_name_2'))
+    await user.type(screen.getByLabelText('group_fields_child_name_2'), 'group_decision')
     await user.click(screen.getByRole('button', { name: 'Add Tabs' }))
+    await user.click(screen.getByRole('button', { name: /select tabs_1/ }))
+    await user.clear(screen.getByLabelText('tab_label_1'))
+    await user.type(screen.getByLabelText('tab_label_1'), '基础')
+    await user.click(screen.getByRole('button', { name: 'add tab_1_fields Radio' }))
+    await user.clear(screen.getByLabelText('tab_1_fields_child_name_2'))
+    await user.type(screen.getByLabelText('tab_1_fields_child_name_2'), 'tabs_1_decision')
     expect(screen.getByRole('button', { name: /select group_1/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /select tabs_1/ })).toBeInTheDocument()
 
@@ -267,7 +280,7 @@ describe('TemplateDesigner', () => {
 
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
-        export_fields: ['summary', 'group_1_input', 'tabs_1_tab1_input', 'tabs_1_tab2_text'],
+        export_fields: ['summary', 'group_summary', 'group_decision', 'tabs_1_tab1_input', 'tabs_1_decision', 'tabs_1_tab2_text'],
       }))
     })
     const [, body] = mockApiPost.mock.calls[0]
@@ -277,13 +290,19 @@ describe('TemplateDesigner', () => {
         {
           name: 'group_1',
           widget: 'Group',
-          fields: [{ name: 'group_1_input', widget: 'Input', label: '单行输入', required: false }],
+          fields: [
+            { name: 'group_summary', widget: 'Input', label: '组内摘要', required: false },
+            { name: 'group_decision', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
+          ],
         },
         {
           name: 'tabs_1',
           widget: 'Tabs',
           tabs: [
-            { label: 'Tab 1', fields: [{ name: 'tabs_1_tab1_input', widget: 'Input', label: '单行输入', required: false }] },
+            { label: '基础', fields: [
+              { name: 'tabs_1_tab1_input', widget: 'Input', label: '单行输入', required: false },
+              { name: 'tabs_1_decision', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
+            ] },
             { label: 'Tab 2', fields: [{ name: 'tabs_1_tab2_text', widget: 'TextArea', label: '多行文本', required: false }] },
           ],
         },
