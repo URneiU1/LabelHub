@@ -295,19 +295,22 @@ func TestGoldenSampleDeleteCrossTaskReturns404(t *testing.T) {
 	}
 }
 
-func TestGoldenSampleDryRunRecordsMatchedExpected(t *testing.T) {
+func TestGoldenSampleDryRunQueuesAsyncRun(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		expected      string
-		wantMatched   bool
-		expectedScore float64
+		name     string
+		expected string
+		promptID uint64
 	}{
-		{name: "match", expected: "uncertain", wantMatched: true, expectedScore: 75},
-		{name: "mismatch", expected: "pass", wantMatched: false, expectedScore: 75},
+		{name: "sample prompt", expected: "uncertain", promptID: 34},
+		{name: "active prompt fallback", expected: "pass", promptID: 33},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("LLM_PROVIDER", "mock")
 			t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
+			originalEnqueue := enqueueGoldenSampleDryRun
+			enqueueGoldenSampleDryRun = func(_ GoldenSampleHandler, _ goldenSampleDryRunJob) {}
+			defer func() {
+				enqueueGoldenSampleDryRun = originalEnqueue
+			}()
 			db, mock, sqlDB := newMockDB(t)
 			defer sqlDB.Close()
 
@@ -316,13 +319,13 @@ func TestGoldenSampleDryRunRecordsMatchedExpected(t *testing.T) {
 					AddRow(1, 7, "Task", "draft", 33, "baseline"))
 			mock.ExpectQuery(`(?is)^SELECT.+FROM .golden_samples.`).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "ai_prompt_id", "payload", "payload_hash", "expected_answer", "expected_verdict", "created_by"}).
-					AddRow(11, 1, 34, `{"text":"a"}`, "hash", `{"label":"ok"}`, tc.expected, 7))
+					AddRow(11, 1, nullableUint64(tc.promptID, tc.name == "sample prompt"), `{"text":"a"}`, "hash", `{"label":"ok"}`, tc.expected, 7))
 			mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model", "created_by"}).
-					AddRow(34, 1, 3, "review {{answer.label}}", `[{"name":"相关性"}]`, 80, 60, "mock-model", 7))
+					AddRow(tc.promptID, 1, 3, "review {{answer.label}}", `[{"name":"相关性"}]`, 80, 60, "mock-model", 7))
 			mock.ExpectBegin()
 			mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
-				WithArgs(1, uint64(34), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, tc.expected, "uncertain", tc.wantMatched, "succeeded", sqlmock.AnyArg(), nil, 7, sqlmock.AnyArg(), sqlmock.AnyArg()).
+				WithArgs(1, tc.promptID, uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, tc.expected, nil, nil, "queued", nil, nil, 7, sqlmock.AnyArg(), nil).
 				WillReturnResult(sqlmock.NewResult(44, 1))
 			mock.ExpectCommit()
 
@@ -339,18 +342,24 @@ func TestGoldenSampleDryRunRecordsMatchedExpected(t *testing.T) {
 			if data["dryRunId"] != float64(44) {
 				t.Fatalf("dryRunId = %v, want 44", data["dryRunId"])
 			}
-			if data["matchedExpected"] != tc.wantMatched {
-				t.Fatalf("matchedExpected = %v, want %v", data["matchedExpected"], tc.wantMatched)
+			if data["status"] != "queued" {
+				t.Fatalf("status = %v, want queued", data["status"])
 			}
-			result := data["result"].(map[string]any)
-			if result["overall_score"] != tc.expectedScore {
-				t.Fatalf("overall_score = %v, want %v", result["overall_score"], tc.expectedScore)
+			if _, exists := data["result"]; exists {
+				t.Fatalf("async queue response must not include provider result: %v", data)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatalf("expectations not met: %v", err)
 			}
 		})
 	}
+}
+
+func nullableUint64(value uint64, valid bool) any {
+	if !valid {
+		return nil
+	}
+	return value
 }
 
 func TestGoldenSampleDryRunRejectsCrossTaskSample(t *testing.T) {
@@ -411,6 +420,11 @@ func TestGoldenSampleDryRunRecordsSanitizedProviderFailure(t *testing.T) {
 	t.Setenv("LLM_PROVIDER", "openai")
 	t.Setenv("LLM_API_KEY", secret)
 	t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
+	originalEnqueue := enqueueGoldenSampleDryRun
+	enqueueGoldenSampleDryRun = func(_ GoldenSampleHandler, _ goldenSampleDryRunJob) {}
+	defer func() {
+		enqueueGoldenSampleDryRun = originalEnqueue
+	}()
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
 
@@ -425,7 +439,7 @@ func TestGoldenSampleDryRunRecordsSanitizedProviderFailure(t *testing.T) {
 			AddRow(33, 1, 3, "review {{answer.label}}", `[{"name":"相关性"}]`, 80, 60, "mock-model", 7))
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
-		WithArgs(1, uint64(33), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, "pass", nil, nil, "failed", nil, "LLM_BASE_URL, LLM_API_KEY, and LLM_MODEL are required for real LLM providers", 7, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(1, uint64(33), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, "pass", nil, nil, "queued", nil, nil, 7, sqlmock.AnyArg(), nil).
 		WillReturnResult(sqlmock.NewResult(44, 1))
 	mock.ExpectCommit()
 
@@ -435,11 +449,15 @@ func TestGoldenSampleDryRunRecordsSanitizedProviderFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/golden-samples/11/dry-run", map[string]any{}))
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), secret) {
 		t.Fatalf("provider secret leaked in response: %s", rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if data["dryRunId"] != float64(44) || data["status"] != "queued" {
+		t.Fatalf("unexpected async dry-run response: %v", data)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

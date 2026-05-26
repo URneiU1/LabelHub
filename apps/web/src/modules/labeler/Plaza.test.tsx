@@ -47,7 +47,15 @@ describe('LabelerPlaza schema runtime flow', () => {
   beforeEach(() => {
     mockApiGet.mockReset()
     mockApiPost.mockReset()
-    mockApiGet.mockResolvedValue([task])
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        return []
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
   })
 
   it('claims a task bundle, renders schema fields, and submits collected answer', async () => {
@@ -111,5 +119,57 @@ describe('LabelerPlaza schema runtime flow', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('fields[0].options')
     expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '提交审核' })).toBeDisabled()
+  })
+
+  it('opens a revising submission with the previous reject reason and resubmits it', async () => {
+    const user = userEvent.setup()
+    const schema = {
+      title: 'qa_revision',
+      layout: 'single_page',
+      fields: [
+        { name: 'summary', widget: 'Input', label: '一句话总评', required: true },
+      ],
+    }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        return [{ id: 42, taskId: 1, itemId: 11, status: 'revising', currentRevisionId: 901 }]
+      }
+      if (path === '/tasks/1/items/11') {
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'revising', currentRevisionId: 901 },
+          revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+          latestHumanReview: {
+            verdict: 'revise',
+            reason: '上一轮原因：关键词缺失',
+          },
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/items/11/submit') {
+        return { id: 42, taskId: 1, itemId: 11, status: 'human_reviewing' }
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza />)
+
+    await user.click(await screen.findByRole('button', { name: '修改 Submission #42' }))
+
+    expect(await screen.findByText('上一轮原因：关键词缺失')).toBeInTheDocument()
+    await user.clear(screen.getByLabelText('一句话总评'))
+    await user.type(screen.getByLabelText('一句话总评'), '补充关键词后的答案')
+    await user.click(screen.getByRole('button', { name: '提交审核' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/items/11/submit', { answer: { summary: '补充关键词后的答案' } })
+    })
   })
 })

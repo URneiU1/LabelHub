@@ -13,6 +13,7 @@ type ParsedSchema =
 
 export default function LabelerPlaza() {
   const [tasks, setTasks] = useState<Task[]>([])
+  const [mySubmissions, setMySubmissions] = useState<Submission[]>([])
   const [bundle, setBundle] = useState<TaskBundle | null>(null)
   const [answer, setAnswer] = useState<AnswerValue>({})
   const [errors, setErrors] = useState<ValidationError[]>([])
@@ -27,10 +28,20 @@ export default function LabelerPlaza() {
     }
   }, [])
 
+  const loadMySubmissions = useCallback(async () => {
+    try {
+      const data = await apiGet<Submission[]>('/me/submissions')
+      setMySubmissions(data)
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载我的提交失败')
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
-  }, [loadTasks])
+    void loadMySubmissions()
+  }, [loadMySubmissions, loadTasks])
 
   const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
@@ -45,6 +56,20 @@ export default function LabelerPlaza() {
       Toast.success('已领取题目')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '领取失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function openSubmission(submission: Submission) {
+    setLoading(true)
+    try {
+      const data = await apiGet<TaskBundle>(`/tasks/${submission.taskId}/items/${submission.itemId}`)
+      setBundle(data)
+      setAnswer(parseAnswer(data.revision?.answer))
+      setErrors([])
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载待修改任务失败')
     } finally {
       setLoading(false)
     }
@@ -81,6 +106,7 @@ export default function LabelerPlaza() {
     try {
       const data = await apiPost<Submission>(`/tasks/${bundle.task.id}/items/${bundle.item.id}/submit`, { answer })
       setBundle({ ...bundle, submission: data })
+      void loadMySubmissions()
       Toast.success(`已提交，状态 ${data.status}`)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '提交失败')
@@ -121,6 +147,22 @@ export default function LabelerPlaza() {
               </div>
             ) : null}
           </div>
+          {mySubmissions.some((submission) => submission.status === 'revising') ? (
+            <div style={revisionListStyle}>
+              <h3 style={revisionHeadingStyle}>待修改</h3>
+              {mySubmissions.filter((submission) => submission.status === 'revising').map((submission) => (
+                <button
+                  key={submission.id}
+                  aria-label={`修改 Submission #${submission.id}`}
+                  onClick={() => void openSubmission(submission)}
+                  style={revisionButtonStyle}
+                >
+                  <strong>Submission #{submission.id}</strong>
+                  <span>Task #{submission.taskId} · Item #{submission.itemId}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <main style={{ display: 'grid', gap: 'var(--space-lg)', alignContent: 'start' }}>
@@ -142,6 +184,12 @@ export default function LabelerPlaza() {
               </div>
 
               <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-xl)', marginTop: 'var(--space-md)' }}>
+                {bundle.latestHumanReview?.reason ? (
+                  <div style={revisionReasonStyle}>
+                    <strong>上一轮打回意见</strong>
+                    <div>{bundle.latestHumanReview.reason}</div>
+                  </div>
+                ) : null}
                 {schema.ok ? (
                   <SchemaRenderer
                     schema={schema.schema}
@@ -246,6 +294,43 @@ const taskCardStyle: CSSProperties = {
   borderRadius: 'var(--radius-md)',
   transition: 'transform var(--duration-fast)',
   borderLeft: '3px solid var(--color-rail)',
+}
+
+const revisionListStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  marginTop: 'var(--space-xl)',
+  paddingTop: 'var(--space-lg)',
+  borderTop: '1px solid var(--color-border-light)',
+}
+
+const revisionHeadingStyle: CSSProperties = {
+  ...headingStyle,
+  fontSize: 'var(--text-base)',
+}
+
+const revisionButtonStyle: CSSProperties = {
+  display: 'grid',
+  gap: 4,
+  width: '100%',
+  padding: 'var(--space-md)',
+  textAlign: 'left',
+  border: '1px solid var(--color-warning-soft)',
+  borderRadius: 'var(--radius-md)',
+  background: '#fff8e1',
+  color: 'var(--color-text)',
+  cursor: 'pointer',
+}
+
+const revisionReasonStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-xs)',
+  marginBottom: 'var(--space-lg)',
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-warning-soft)',
+  borderRadius: 'var(--radius-md)',
+  background: '#fff8e1',
+  color: 'var(--color-text)',
 }
 
 const progressTrackStyle: CSSProperties = {

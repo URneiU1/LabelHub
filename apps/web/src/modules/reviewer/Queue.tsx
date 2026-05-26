@@ -17,6 +17,11 @@ type RetryAIReviewResponse = {
   aiReview: AIReviewDetail
 }
 
+type BatchReviewResponse = {
+  results: Array<{ submissionId: number, status?: string, error?: string }>
+  summary: { total: number, succeeded: number, failed: number }
+}
+
 type ReviewerRuleConfigResponse = {
   prompts: AIPromptSummary[]
   activePromptId: number | null
@@ -113,6 +118,7 @@ const demoRuleConfigs: AIPromptSummary[] = [{
 export default function ReviewerQueue() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [selected, setSelected] = useState<Submission | null>(null)
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<number[]>([])
   const [selectedDemoId, setSelectedDemoId] = useState('SUB-00607')
   const [detail, setDetail] = useState<TaskBundle | null>(null)
   const [reason, setReason] = useState('本轮修改已覆盖第 1 轮打回意见，关键词丰富度与类目准确性均达标。')
@@ -131,6 +137,7 @@ export default function ReviewerQueue() {
     try {
       const data = await apiGet<Submission[]>('/reviewer/submissions')
       setSubmissions(data)
+      setSelectedSubmissionIds((current) => current.filter((id) => data.some((submission) => submission.id === id)))
       if (data.length === 0) {
         ruleLoadSeq.current += 1
         setSelected(null)
@@ -209,6 +216,33 @@ export default function ReviewerQueue() {
       setRulePanelOpen(false)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '审核失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function batchReview(verdict: 'approve' | 'revise') {
+    if (showingDemo) {
+      Toast.success('演示样例：已模拟批量审核')
+      return
+    }
+    if (selectedSubmissionIds.length === 0) {
+      Toast.error('请先选择要批量处理的提交')
+      return
+    }
+    const batchReason = verdict === 'approve' ? '' : (reason.trim() || '批量打回：请根据上一轮意见补充修改。')
+    setLoading(true)
+    try {
+      const data = await apiPost<BatchReviewResponse>('/reviews/batch', {
+        submission_ids: selectedSubmissionIds,
+        verdict,
+        reason: batchReason,
+      })
+      Toast.success(`批量完成 ${data.summary.succeeded}/${data.summary.total}`)
+      await loadQueue()
+      setSelectedSubmissionIds([])
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '批量审核失败')
     } finally {
       setLoading(false)
     }
@@ -302,10 +336,15 @@ export default function ReviewerQueue() {
             <button style={tabStyle}>转人工 <strong>9</strong></button>
           </div>
           <div style={bulkBarStyle}>
-            <input type="checkbox" checked readOnly />
-            <span>已选 3 条</span>
-            <button style={miniButtonStyle}>批量通过</button>
-            <button style={miniButtonStyle}>批量打回</button>
+            <input
+              aria-label="选择全部审核项"
+              type="checkbox"
+              checked={!showingDemo && submissions.length > 0 && selectedSubmissionIds.length === submissions.length}
+              onChange={(event) => setSelectedSubmissionIds(event.target.checked ? submissions.map((submission) => submission.id) : [])}
+            />
+            <span>已选 {showingDemo ? 3 : selectedSubmissionIds.length} 条</span>
+            <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('approve')} style={miniButtonStyle}>批量通过</button>
+            <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('revise')} style={miniButtonStyle}>批量打回</button>
           </div>
           <div style={slaCardStyle}>
             <strong>38</strong>
@@ -318,6 +357,13 @@ export default function ReviewerQueue() {
                 key={item.kind === 'real' ? item.submission.id : item.item.id}
                 item={item}
                 active={isQueueItemActive(item, selected, selectedDemoId)}
+                selected={item.kind === 'real' ? selectedSubmissionIds.includes(item.submission.id) : false}
+                onToggleSelected={(checked) => {
+                  if (item.kind !== 'real') return
+                  setSelectedSubmissionIds((current) => checked
+                    ? Array.from(new Set([...current, item.submission.id]))
+                    : current.filter((id) => id !== item.submission.id))
+                }}
                 onClick={() => void openQueueItem(item)}
               />
             ))}
@@ -391,19 +437,42 @@ export default function ReviewerQueue() {
   )
 }
 
-function QueueCard({ item, active, onClick }: { item: QueueItem, active: boolean, onClick: () => void }) {
+function QueueCard({
+  item,
+  active,
+  selected,
+  onToggleSelected,
+  onClick,
+}: {
+  item: QueueItem
+  active: boolean
+  selected: boolean
+  onToggleSelected: (checked: boolean) => void
+  onClick: () => void
+}) {
   if (item.kind === 'real') {
     const submission = item.submission
     return (
-      <button onClick={onClick} style={active ? activeQueueCardStyle : queueCardStyle}>
-        <div style={cardMetaStyle}>Task #{submission.taskId} · Item #{submission.itemId}</div>
-        <strong>Submission #{submission.id}</strong>
-        <div style={cardMetaStyle}>状态 {submission.status}</div>
-        <div style={pillRowStyle}>
-          <span style={aiPillStyle}>预审 {formatAIReviewSummary(submission)}</span>
-          <span style={neutralPillStyle}>{submission.status}</span>
-        </div>
-      </button>
+      <div style={active ? activeQueueCardStyle : queueCardStyle}>
+        <label style={queueSelectStyle}>
+          <input
+            aria-label={`选择 Submission #${submission.id}`}
+            checked={selected}
+            onChange={(event) => onToggleSelected(event.target.checked)}
+            type="checkbox"
+          />
+          <span>选择</span>
+        </label>
+        <button onClick={onClick} style={queueCardButtonStyle}>
+          <div style={cardMetaStyle}>Task #{submission.taskId} · Item #{submission.itemId}</div>
+          <strong>Submission #{submission.id}</strong>
+          <div style={cardMetaStyle}>状态 {submission.status}</div>
+          <div style={pillRowStyle}>
+            <span style={aiPillStyle}>预审 {formatAIReviewSummary(submission)}</span>
+            <span style={neutralPillStyle}>{submission.status}</span>
+          </div>
+        </button>
+      </div>
     )
   }
   return (
@@ -586,6 +655,12 @@ function RealReviewDetail({
       <section style={aiResultStyle}>
         <RealAIReviewSummary aiReview={detail.aiReview} submission={detail.submission} />
       </section>
+      {detail.latestHumanReview?.reason ? (
+        <section style={previousReviewStyle}>
+          <h3 style={sectionTitleStyle}>上一轮意见</h3>
+          <p style={resultReasonStyle}>{detail.latestHumanReview.reason}</p>
+        </section>
+      ) : null}
       <label style={labelStyle}>审核意见</label>
       <textarea value={reason} onChange={(event) => setReason(event.target.value)} style={textareaStyle} placeholder="输入审核意见..." />
       <RealAIDiagnostics answer={detail.revision?.answer} aiReview={detail.aiReview} auditLogs={detail.auditLogs ?? []} />
@@ -1078,6 +1153,26 @@ const activeQueueCardStyle: CSSProperties = {
   borderLeft: '3px solid var(--color-accent)',
 }
 
+const queueSelectStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-xs)',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
+}
+
+const queueCardButtonStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-xs)',
+  width: '100%',
+  padding: 0,
+  border: 0,
+  background: 'transparent',
+  textAlign: 'left',
+  color: 'inherit',
+  cursor: 'pointer',
+}
+
 const cardMetaStyle: CSSProperties = {
   color: 'var(--color-text-muted)',
   fontSize: 'var(--text-sm)',
@@ -1199,6 +1294,15 @@ const aiResultStyle: CSSProperties = {
   border: '1px solid #c084fc',
   borderRadius: 'var(--radius-md)',
   background: '#fbf7ff',
+  padding: 'var(--space-md)',
+}
+
+const previousReviewStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-xs)',
+  border: '1px solid var(--color-warning-soft)',
+  borderRadius: 'var(--radius-md)',
+  background: '#fff8e1',
   padding: 'var(--space-md)',
 }
 

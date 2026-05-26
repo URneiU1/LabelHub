@@ -52,12 +52,14 @@ After every code-writing turn:
 - Reviewer rule configuration entry is in place: reviewer/owner/admin can call `GET /reviewer/tasks/:taskId/ai-prompts` within the same review access boundary to list task prompt versions and active AI review state; Reviewer Queue can select a rule version for inspection and deep-link to Owner prompt editing at `/owner?taskId=...&aiPromptId=...#ai-prompts`; Owner Dashboard honors that deep link by selecting the task and prompt version on load.
 - OpenAI-compatible provider retry/backoff controls are in place: `LLM_RETRY_MAX_ATTEMPTS`, `LLM_RETRY_BACKOFF_MS`, and `LLM_RETRY_MAX_BACKOFF_MS` bound short retries to network errors, HTTP 429, and 5xx while keeping 400/401/schema/threshold failures fail-fast and sanitized.
 - Server-side dry-run cost guard is in place behind env switches: `LLM_DRY_RUN_QUOTA_MAX_RUNS`, `LLM_DRY_RUN_CIRCUIT_MAX_FAILURES`, and `LLM_DRY_RUN_GUARD_WINDOW_MINUTES` enforce task-scoped recent-run quota/failure circuit breaker across ad-hoc prompt dry-run, single golden sample dry-run, and batch golden sample dry-run before provider calls.
+- S3 demo productization closure is in place: Owner can edit baseline inline; AI Prompt dimensions/thresholds have form controls instead of JSON-only input; single golden sample dry-run queues an `ai_dry_runs` record and is polled from the frontend while the API process completes it in the background; AI worker can auto-approve `pass` results when human review is disabled; Labeler has a revising queue with previous reject reason; Reviewer has batch approve/revise and previous-opinion display.
 
 ## Next Work
 
 - Continue Designer implementation with canvas-level nested dragging and richer layout editing for Tabs/Group if contest polish requires it.
 - Decide whether Reviewer should only inspect and jump to Owner editing, or also request an active rule switch from the Reviewer surface.
 - Add richer Owner dry-run trend/history analysis after the minimal summary table proves useful.
+- Upgrade single golden sample dry-run from API goroutine to durable Asynq execution if demo/runtime reliability becomes more important than keeping the slice minimal.
 - Surface dry-run quota/circuit breaker state in Owner UI if real provider usage needs operator feedback.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.

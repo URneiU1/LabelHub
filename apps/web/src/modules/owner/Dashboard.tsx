@@ -37,6 +37,11 @@ type AIDryRunResult = {
     model?: string
   }
 }
+type AIDryRunHistoryResult = AIDryRunResult['result'] & { provider?: string }
+type QueuedDryRunResponse = {
+  dryRunId: number
+  status: 'queued' | 'running'
+}
 type GoldenSample = {
   id: number
   taskId: number
@@ -80,6 +85,7 @@ type AIDryRunHistoryItem = {
   actualVerdict: string | null
   matchedExpected: boolean | null
   status: string
+  result: AIDryRunHistoryResult | null
   errorMsg: string | null
   createdAt: string
   finishedAt: string | null
@@ -100,6 +106,12 @@ type GoldenSampleRunRow = {
   dryRunId?: number
   error?: string
 }
+type DimensionRow = {
+  id: string
+  name: string
+  description: string
+  weight: string
+}
 
 export default function OwnerDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -108,8 +120,10 @@ export default function OwnerDashboard() {
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
   const [aiReviewEnabled, setAIReviewEnabled] = useState(false)
+  const [baselineDraft, setBaselineDraft] = useState('')
+  const [savingBaseline, setSavingBaseline] = useState(false)
   const [promptTemplate, setPromptTemplate] = useState(defaultPromptTemplate)
-  const [dimensionsText, setDimensionsText] = useState(defaultDimensionsJSON)
+  const [dimensionRows, setDimensionRows] = useState<DimensionRow[]>(defaultDimensionRows())
   const [passThreshold, setPassThreshold] = useState(defaultPassThreshold)
   const [uncertainMin, setUncertainMin] = useState(defaultUncertainMin)
   const [model, setModel] = useState(defaultModel)
@@ -165,6 +179,7 @@ export default function OwnerDashboard() {
       const initialTask = data.find((item) => item.id === requestedTaskId) ?? data[0] ?? null
       setTasks(data)
       setSelected(initialTask)
+      setBaselineDraft(initialTask?.baselineDescription ?? '')
       selectedTaskIdRef.current = initialTask?.id ?? null
       resetGoldenSampleFormToDefaults()
     } catch (error) {
@@ -174,7 +189,7 @@ export default function OwnerDashboard() {
 
   const fillPromptForm = useCallback((prompt: AIPromptConfig) => {
     setPromptTemplate(prompt.promptTemplate)
-    setDimensionsText(formatDimensionsJSON(prompt.dimensions))
+    setDimensionRows(dimensionRowsFromRaw(prompt.dimensions))
     setPassThreshold(String(prompt.passThreshold))
     setUncertainMin(String(prompt.uncertainMin))
     setModel(prompt.model)
@@ -182,7 +197,7 @@ export default function OwnerDashboard() {
 
   const resetPromptFormToDefaults = useCallback(() => {
     setPromptTemplate(defaultPromptTemplate)
-    setDimensionsText(defaultDimensionsJSON)
+    setDimensionRows(defaultDimensionRows())
     setPassThreshold(defaultPassThreshold)
     setUncertainMin(defaultUncertainMin)
     setModel(defaultModel)
@@ -336,6 +351,7 @@ export default function OwnerDashboard() {
     setDryRunHistoryError('')
     setDryRunHistoryLoading(true)
     resetGoldenSampleFormToDefaults()
+    setBaselineDraft(task.baselineDescription ?? '')
     setSelected(task)
   }
 
@@ -355,7 +371,7 @@ export default function OwnerDashboard() {
     setSavingPrompt(true)
     setPromptError('')
     try {
-      const dimensions = parseDimensionsInput(dimensionsText)
+      const dimensions = parseDimensionsRows(dimensionRows)
       const data = await apiPost<{ prompt: AIPromptConfig, activePromptId: number }>(`/tasks/${selected.id}/ai-prompts`, {
         prompt_template: promptTemplate,
         dimensions,
@@ -377,6 +393,23 @@ export default function OwnerDashboard() {
       if (isCurrentTaskAction(guard, savePromptSeq)) {
         setSavingPrompt(false)
       }
+    }
+  }
+
+  async function saveBaseline() {
+    if (!selected) return
+    const taskId = selected.id
+    setSavingBaseline(true)
+    try {
+      const data = await apiPost<{ task: Task }>(`/tasks/${taskId}/baseline`, { baselineDescription: baselineDraft })
+      setSelected(data.task)
+      setBaselineDraft(data.task.baselineDescription ?? '')
+      setTasks((current) => current.map((task) => task.id === taskId ? data.task : task))
+      Toast.success('Baseline 已保存')
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '保存 baseline 失败')
+    } finally {
+      setSavingBaseline(false)
     }
   }
 
@@ -561,24 +594,28 @@ export default function OwnerDashboard() {
       },
     }))
     try {
-      const data = await apiPost<AIDryRunResult>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, {})
+      const data = await apiPost<QueuedDryRunResponse & Partial<AIDryRunResult>>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, {})
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      if (data.result) {
+        setDryRun(data as AIDryRunResult)
+        setGoldenRunRows((current) => ({
+          ...current,
+          [sample.id]: goldenSampleResultToRunRow(sample, data as AIDryRunResult),
+        }))
+        void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
+        return
+      }
       setGoldenRunRows((current) => ({
         ...current,
         [sample.id]: {
           sampleId: sample.id,
           expectedVerdict: sample.expectedVerdict,
-          status: 'succeeded',
-          actualVerdict: data.result.verdict,
-          matchedExpected: data.matchedExpected,
-          score: data.result.overall_score,
-          provider: data.provider,
-          model: data.result.model,
-          reason: data.result.reason,
+          status: 'running',
+          reason: data.status,
           dryRunId: data.dryRunId,
         },
       }))
-      void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
+      void pollGoldenSampleRun(taskId, sample, data.dryRunId, guard, 0)
     } catch (error) {
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       const message = error instanceof Error ? error.message : 'golden sample dry-run 失败'
@@ -594,6 +631,59 @@ export default function OwnerDashboard() {
       setGoldenSampleError(message)
       void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
     }
+  }
+
+  async function pollGoldenSampleRun(taskId: number, sample: GoldenSample, dryRunId: number, guard: { taskId: number, generation: number, seq: number }, attempt: number) {
+    if (attempt > 20 || !isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+    try {
+      const data = await apiGet<AIDryRunHistoryResponse>(`/tasks/${taskId}/ai-dry-runs?golden_sample_id=${sample.id}&limit=10`)
+      if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      const run = data.dryRuns.find((item) => item.id === dryRunId)
+      if (run?.status === 'succeeded') {
+        if (run.result) {
+          setDryRun({
+            provider: run.result.provider || 'ai-worker',
+            dryRunId,
+            matchedExpected: run.matchedExpected ?? undefined,
+            result: run.result,
+          })
+        }
+        setGoldenRunRows((current) => ({
+          ...current,
+          [sample.id]: {
+            sampleId: sample.id,
+            expectedVerdict: sample.expectedVerdict,
+            status: 'succeeded',
+            actualVerdict: run.actualVerdict ?? undefined,
+            matchedExpected: run.matchedExpected ?? undefined,
+            score: run.result?.overall_score,
+            provider: run.result?.provider || (run.result ? 'ai-worker' : undefined),
+            model: run.result?.model,
+            dryRunId,
+            reason: run.result?.reason ?? run.errorMsg ?? undefined,
+          },
+        }))
+        setDryRunHistory(data.dryRuns)
+        return
+      }
+      if (run?.status === 'failed') {
+        setGoldenRunRows((current) => ({
+          ...current,
+          [sample.id]: {
+            sampleId: sample.id,
+            expectedVerdict: sample.expectedVerdict,
+            status: 'failed',
+            dryRunId,
+            error: run.errorMsg ?? 'golden sample dry-run 失败',
+          },
+        }))
+        setDryRunHistory(data.dryRuns)
+        return
+      }
+    } catch {
+      // 下一轮继续轮询,最终由 history 刷新兜底。
+    }
+    window.setTimeout(() => void pollGoldenSampleRun(taskId, sample, dryRunId, guard, attempt + 1), 1000)
   }
 
   function resolveGoldenPromptId() {
@@ -669,10 +759,17 @@ export default function OwnerDashboard() {
               </div>
 
               <div style={{ background: 'var(--color-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--color-border-light)' }}>
-                <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-xs)', textTransform: 'uppercase' }}>Baseline 说明</div>
-                <div style={{ fontSize: 'var(--text-base)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                  {selected.baselineDescription || '暂无 baseline'}
+                <div style={aiSettingsRowStyle}>
+                  <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Baseline 说明</div>
+                  <Button aria-label="保存 baseline" disabled={savingBaseline} loading={savingBaseline} onClick={() => void saveBaseline()} theme="light">保存 baseline</Button>
                 </div>
+                <textarea
+                  aria-label="baseline_description"
+                  value={baselineDraft}
+                  onChange={(event) => setBaselineDraft(event.target.value)}
+                  style={{ ...textareaStyle, minHeight: 96, marginTop: 'var(--space-sm)' }}
+                  placeholder="写清楚 AI 判断质量的基线、必须保留的信息和常见打回标准。"
+                />
               </div>
 
               <section id="ai-prompts" style={aiPromptSectionStyle}>
@@ -708,20 +805,19 @@ export default function OwnerDashboard() {
                       <span style={{ fontWeight: 600 }}>Prompt 模板 (Handlebars)</span>
                       <textarea aria-label="prompt_template" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} style={{ ...textareaStyle, height: 200 }} placeholder="输入审阅 Prompt..." />
                     </label>
-                    <label style={fieldStyle}>
-                      <span style={{ fontWeight: 600 }}>评分维度 (JSON)</span>
-                      <textarea aria-label="dimensions" value={dimensionsText} onChange={(event) => setDimensionsText(event.target.value)} style={{ ...textareaStyle, height: 200, fontFamily: 'var(--font-mono)' }} />
-                    </label>
+                    <DimensionEditor rows={dimensionRows} onChange={setDimensionRows} />
                   </div>
 
                   <div style={formGridStyle}>
                     <label style={fieldStyle}>
                       <span style={{ fontWeight: 600 }}>通过阈值 (Pass)</span>
-                      <input aria-label="pass_threshold" type="number" value={passThreshold} onChange={(event) => setPassThreshold(event.target.value)} style={inputStyle} />
+                      <input aria-label="pass_threshold" type="number" min={0} max={100} value={passThreshold} onChange={(event) => setPassThreshold(event.target.value)} style={inputStyle} />
+                      <input aria-label="pass_threshold_slider" type="range" min={0} max={100} value={passThreshold} onChange={(event) => setPassThreshold(event.target.value)} />
                     </label>
                     <label style={fieldStyle}>
                       <span style={{ fontWeight: 600 }}>待定区间 (Min)</span>
-                      <input aria-label="uncertain_min" type="number" value={uncertainMin} onChange={(event) => setUncertainMin(event.target.value)} style={inputStyle} />
+                      <input aria-label="uncertain_min" type="number" min={0} max={100} value={uncertainMin} onChange={(event) => setUncertainMin(event.target.value)} style={inputStyle} />
+                      <input aria-label="uncertain_min_slider" type="range" min={0} max={100} value={uncertainMin} onChange={(event) => setUncertainMin(event.target.value)} />
                     </label>
                     <label style={fieldStyle}>
                       <span style={{ fontWeight: 600 }}>模型选择</span>
@@ -986,6 +1082,46 @@ function MetricCell({ label, value, detail, tone = 'muted' }: { label: string, v
   )
 }
 
+function DimensionEditor({ rows, onChange }: { rows: DimensionRow[], onChange: (rows: DimensionRow[]) => void }) {
+  function updateRow(index: number, patch: Partial<DimensionRow>) {
+    onChange(rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row))
+  }
+  function removeRow(index: number) {
+    if (rows.length <= 1) return
+    onChange(rows.filter((_, rowIndex) => rowIndex !== index))
+  }
+  function addRow() {
+    onChange([...rows, { id: `new-${Date.now()}`, name: '', description: '', weight: '1' }])
+  }
+  return (
+    <section style={dimensionPanelStyle}>
+      <div style={aiSettingsRowStyle}>
+        <span style={{ fontWeight: 600 }}>评分维度</span>
+        <Button aria-label="新增维度" onClick={addRow} theme="light">新增维度</Button>
+      </div>
+      <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
+        {rows.map((row, index) => (
+          <div key={row.id} style={dimensionRowStyle}>
+            <label style={compactFieldStyle}>
+              <span>名称</span>
+              <input aria-label={`dimension_name_${index}`} value={row.name} onChange={(event) => updateRow(index, { name: event.target.value })} style={inputStyle} />
+            </label>
+            <label style={compactFieldStyle}>
+              <span>说明</span>
+              <input aria-label={`dimension_description_${index}`} value={row.description} onChange={(event) => updateRow(index, { description: event.target.value })} style={inputStyle} />
+            </label>
+            <label style={compactFieldStyle}>
+              <span>权重</span>
+              <input aria-label={`dimension_weight_${index}`} type="number" min={0} max={1} step="0.05" value={row.weight} onChange={(event) => updateRow(index, { weight: event.target.value })} style={inputStyle} />
+            </label>
+            <Button aria-label={`删除维度 ${index + 1}`} disabled={rows.length <= 1} onClick={() => removeRow(index)} theme="light" type="danger">删除</Button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 const defaultPromptTemplate = '请根据 payload 和 answer 完成结构化预审。'
 const defaultPassThreshold = '80'
 const defaultUncertainMin = '60'
@@ -1000,21 +1136,47 @@ const defaultDimensionsJSON = JSON.stringify([
   { name: '格式合规', description: '是否符合格式', weight: 1 },
 ], null, 2)
 
-function formatDimensionsJSON(raw: string) {
+function defaultDimensionRows() {
+  return dimensionRowsFromRaw(defaultDimensionsJSON)
+}
+
+function dimensionRowsFromRaw(raw: string): DimensionRow[] {
   try {
-    return JSON.stringify(JSON.parse(raw) as unknown, null, 2)
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    const rows = parsed.flatMap((dimension, index) => {
+      if (typeof dimension !== 'object' || dimension === null) return []
+      const record = dimension as Record<string, unknown>
+      return [{
+        id: `dimension-${index}`,
+        name: typeof record.name === 'string' ? record.name : '',
+        description: typeof record.description === 'string' ? record.description : '',
+        weight: record.weight === undefined || record.weight === null ? '1' : String(record.weight),
+      }]
+    })
+    return rows.length > 0 ? rows : [{ id: 'dimension-0', name: '', description: '', weight: '1' }]
   } catch {
-    return raw
+    return [{ id: 'dimension-0', name: '', description: '', weight: '1' }]
   }
 }
 
-function parseDimensionsInput(raw: string): Array<Record<string, unknown>> {
-  const parsed = JSON.parse(raw) as unknown
-  if (!Array.isArray(parsed)) {
-    throw new Error('dimensions must be a JSON array')
-  }
-  return parsed.filter((dimension): dimension is Record<string, unknown> => {
-    return typeof dimension === 'object' && dimension !== null
+function parseDimensionsRows(rows: DimensionRow[]): Array<Record<string, unknown>> {
+  return rows.map((row) => {
+    const name = row.name.trim()
+    if (!name) {
+      throw new Error('dimension name is required')
+    }
+    const weight = Number(row.weight)
+    if (!Number.isFinite(weight)) {
+      throw new Error('dimension weight is required')
+    }
+    return {
+      name,
+      description: row.description.trim(),
+      weight,
+    }
   })
 }
 
@@ -1040,6 +1202,21 @@ function buildAIDryRunBody(payloadInput: string, answerInput: string) {
   const payload = normalizeJSONInput(payloadInput, 'payload')
   const answer = normalizeJSONInput(answerInput, 'answer')
   return `{"payload":${payload},"answer":${answer}}`
+}
+
+function goldenSampleResultToRunRow(sample: GoldenSample, result: AIDryRunResult): GoldenSampleRunRow {
+  return {
+    sampleId: sample.id,
+    expectedVerdict: sample.expectedVerdict,
+    status: 'succeeded',
+    actualVerdict: result.result.verdict,
+    matchedExpected: result.matchedExpected,
+    score: result.result.overall_score,
+    provider: result.provider,
+    model: result.result.model,
+    reason: result.result.reason,
+    dryRunId: result.dryRunId,
+  }
 }
 
 function goldenSampleBatchResultToRunRow(sample: GoldenSample, result: GoldenSampleBatchDryRunResult | undefined): GoldenSampleRunRow {
@@ -1224,6 +1401,27 @@ const fieldStyle: React.CSSProperties = {
   gap: 8,
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
+}
+
+const compactFieldStyle: React.CSSProperties = {
+  ...fieldStyle,
+  gap: 4,
+}
+
+const dimensionPanelStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-md)',
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-bg)',
+}
+
+const dimensionRowStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(120px, 0.9fr) minmax(160px, 1.5fr) minmax(90px, 0.5fr) auto',
+  gap: 'var(--space-sm)',
+  alignItems: 'end',
 }
 
 const inputStyle: React.CSSProperties = {

@@ -120,6 +120,26 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(mockApiGet).toHaveBeenCalledWith('/tasks/2/ai-prompts')
   })
 
+  it('saves editable baseline description for the selected task', async () => {
+    const user = userEvent.setup()
+    mockApiPost.mockResolvedValue({
+      task: { ...task, baselineDescription: '新的获奖 demo baseline' },
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.clear(await screen.findByLabelText('baseline_description'))
+    await user.type(screen.getByLabelText('baseline_description'), '新的获奖 demo baseline')
+    await user.click(screen.getByRole('button', { name: '保存 baseline' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/baseline', {
+        baselineDescription: '新的获奖 demo baseline',
+      })
+    })
+    expect(await screen.findByDisplayValue('新的获奖 demo baseline')).toBeInTheDocument()
+  })
+
   it('saves an AI prompt config for the selected owner task', async () => {
     const user = userEvent.setup()
     mockApiPost.mockResolvedValue({
@@ -145,6 +165,44 @@ describe('OwnerDashboard AI prompt flow', () => {
       expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-prompts', expect.objectContaining({
         prompt_template: '请预审',
         model: '',
+      }))
+    })
+  })
+
+  it('edits AI dimensions through structured rows and slider-backed thresholds', async () => {
+    const user = userEvent.setup()
+    mockApiPost.mockResolvedValue({
+      prompt: {
+        id: 33,
+        version: 1,
+        promptTemplate: '请预审',
+        dimensions: '[{"name":"相关性","description":"是否相关","weight":0.8},{"name":"安全性","description":"是否安全","weight":0.2}]',
+        passThreshold: 90,
+        uncertainMin: 55,
+        model: 'mock-model',
+      },
+      activePromptId: 33,
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.clear(await screen.findByLabelText('prompt_template'))
+    await user.type(screen.getByLabelText('prompt_template'), '请预审')
+    await user.clear(screen.getByLabelText('dimension_name_0'))
+    await user.type(screen.getByLabelText('dimension_name_0'), '安全性')
+    await user.clear(screen.getByLabelText('dimension_description_0'))
+    await user.type(screen.getByLabelText('dimension_description_0'), '是否安全')
+    await user.clear(screen.getByLabelText('dimension_weight_0'))
+    await user.type(screen.getByLabelText('dimension_weight_0'), '0.2')
+    fireEvent.change(screen.getByLabelText('pass_threshold'), { target: { value: '90' } })
+    fireEvent.change(screen.getByLabelText('uncertain_min'), { target: { value: '55' } })
+    await user.click(screen.getByRole('button', { name: '保存 AI Prompt' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/ai-prompts', expect.objectContaining({
+        dimensions: expect.arrayContaining([{ name: '安全性', description: '是否安全', weight: 0.2 }]),
+        pass_threshold: 90,
+        uncertain_min: 55,
       }))
     })
   })
@@ -1139,7 +1197,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', {})
     expect(await screen.findByText('mismatch')).toBeInTheDocument()
-    expect(screen.getByText('not enough evidence')).toBeInTheDocument()
+    expect(screen.getAllByText('not enough evidence').length).toBeGreaterThan(0)
     expect(screen.getByText('44')).toBeInTheDocument()
   })
 
@@ -1505,7 +1563,7 @@ describe('OwnerDashboard AI prompt flow', () => {
       await runResult.promise
     })
 
-    expect(await screen.findByText('same task golden run')).toBeInTheDocument()
+    expect((await screen.findAllByText('same task golden run')).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Run golden sample 11' })).not.toBeDisabled()
   })
 

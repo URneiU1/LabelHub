@@ -10,13 +10,13 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: Template Designer now has route-race fail-closed hardening, copy/order controls, drag ordering, Tabs/Group structure widgets, nested child-field property editing, per-field validation display, and real item payload preview; S3 dry-run endpoints now have env-gated task-scoped quota/circuit breaker; Reviewer Detail now returns and renders latest AI review details, prompt metadata, audit logs, and failed/dead AI retry; Reviewer rule configuration now lists real task prompt versions and deep-links to Owner prompt editing.
-- Current focus: continue S2 Designer buildout and the remaining S3 product surface.
-- Next priority: decide whether Reviewer should only inspect/jump to Owner editing or also request active rule switching, or continue canvas-level nested dragging/layout polish for Tabs/Group.
+- Latest completed work: S3 demo productization closure is in place on top of the prior Designer/Reviewer AI slices: Owner can edit baseline inline, AI Prompt dimensions/thresholds use form controls, single golden sample dry-run is queued/polled with background execution, AI worker can auto-approve pass results when human review is disabled, Labeler has a revising queue with previous reject reason, and Reviewer has batch approve/revise plus previous-opinion display.
+- Current focus: stabilize and demo-test the S3 AI-assisted annotation loop end to end.
+- Next priority: run a local seeded browser smoke for the Owner -> Labeler -> AI -> Reviewer -> revision path, then decide whether single golden dry-run needs durable Asynq execution before the contest demo.
 
 ## Known Follow-Ups
 
-- AI queue/failover/provider, prompt enable controls, Owner golden sample management, task-scoped dry-run history listing, Owner history/trend table, Owner batch run wiring, backend batch semantics, basic batch pacing, Reviewer AI verdict/detail/audit/retry display, Reviewer rule selection plus Owner edit deep-link, provider retry/backoff controls, and env-gated dry-run quota/circuit breaker are closed for the first S3 slices, but S3 is not product-complete until direct Reviewer-side rule switching is explicitly accepted or deferred, richer trend/history analysis, and operator-facing guard state are added.
+- AI queue/failover/provider, prompt enable controls, Owner baseline/prompt product controls, Owner golden sample management, task-scoped dry-run history listing, queued single dry-run polling, Owner history/trend table, Owner batch run wiring, backend batch semantics, basic batch pacing, AI auto-approve, Labeler revision UX, Reviewer batch operations, Reviewer AI verdict/detail/audit/retry display, Reviewer rule selection plus Owner edit deep-link, provider retry/backoff controls, and env-gated dry-run quota/circuit breaker are closed for the first S3 slices, but S3 is not product-complete until durable dry-run execution, direct Reviewer-side rule switching, richer trend/history analysis, and operator-facing guard state are explicitly accepted or deferred.
 - S2 Designer v1 still lacks canvas-level nested dragging inside Tabs/Group and fuller layout editing.
 - Add FileUpload download/preview authorization and orphan temp-file cleanup.
 - Add Owner API/UI for assigning `task_reviewers`; current demo assignment is seeded for `reviewer1`.

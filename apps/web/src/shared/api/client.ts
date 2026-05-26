@@ -219,6 +219,12 @@ export type AuditLog = {
   createdAt: string
 }
 
+export type HumanReviewSummary = {
+  verdict: string
+  reason?: string | null
+  createdAt?: string
+}
+
 export type TaskBundle = {
   task: Task
   item?: TaskItem
@@ -226,5 +232,6 @@ export type TaskBundle = {
   submission?: Submission
   revision?: SubmissionRevision | null
   aiReview?: AIReviewDetail | null
+  latestHumanReview?: HumanReviewSummary | null
   auditLogs?: AuditLog[]
 }

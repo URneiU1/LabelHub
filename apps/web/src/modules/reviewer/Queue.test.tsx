@@ -60,6 +60,38 @@ describe('ReviewerQueue schema runtime flow', () => {
     mockApiPost.mockResolvedValue({ submission_id: 501, status: 'approved' })
   })
 
+  it('batch approves selected submissions through the real batch endpoint', async () => {
+    const user = userEvent.setup()
+    const secondSubmission = { ...submission, id: 502, itemId: 12, currentRevisionId: 902 }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission, secondSubmission]
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      results: [
+        { submissionId: 501, status: 'approved' },
+        { submissionId: 502, status: 'approved' },
+      ],
+      summary: { total: 2, succeeded: 2, failed: 0 },
+    })
+
+    render(<ReviewerQueue />)
+
+    await user.click(await screen.findByLabelText('选择 Submission #501'))
+    await user.click(screen.getByLabelText('选择 Submission #502'))
+    await user.click(screen.getByRole('button', { name: '批量通过' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/reviews/batch', {
+        submission_ids: [501, 502],
+        verdict: 'approve',
+        reason: '',
+      })
+    })
+  })
+
   it('opens submission detail and renders historical template as read-only', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {

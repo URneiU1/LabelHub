@@ -83,7 +83,7 @@ func TestClaimItem_ResumeWorksOnPausedTask(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
 			AddRow(501, 1, 11, 1, 7, "draft", nil))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 1, `{}`))
 
@@ -121,7 +121,7 @@ func TestRespondItem_ExistingSubmissionUsesTemplateVersion(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status", "current_revision_id"}).
 			AddRow(501, 1, 11, 1, 7, "draft", nil))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 1, `{"title":"v1","fields":[{"name":"old","widget":"Input"}]}`))
 
@@ -268,6 +268,9 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .audit_logs.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "entity_type", "entity_id", "from_state", "to_state", "actor_type", "event", "payload", "created_at"}).
 			AddRow(71, "submission", 501, "ai_reviewing", "human_reviewing", "ai_worker", "ai_done", `{"score":92.5}`, now))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "reviewer_id", "stage", "verdict", "reason", "created_at"}).
+			AddRow(81, 501, revisionID, 7, "first", "revise", "上一轮意见", now))
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)
@@ -294,6 +297,10 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	auditLogs := data["auditLogs"].([]any)
 	if auditLogs[0].(map[string]any)["event"] != "ai_done" {
 		t.Fatalf("auditLogs = %v", auditLogs)
+	}
+	latestHumanReview := data["latestHumanReview"].(map[string]any)
+	if latestHumanReview["reason"] != "上一轮意见" {
+		t.Fatalf("latestHumanReview = %v", latestHumanReview)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -443,6 +450,62 @@ func TestReviewSubmissionOwnerCannotReviewOtherTask(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestBatchReviewAppliesApproveForSelectedSubmissions(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	revisionID := uint64(901)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, "human_reviewing", revisionID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 99))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, "human_reviewing", revisionID))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
+		WillReturnResult(sqlmock.NewResult(71, 1))
+	mock.ExpectExec(`(?is)^UPDATE .submissions.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .finished_items.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(81, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/reviews/batch", map[string]any{
+		"submission_ids": []uint64{501},
+		"verdict":        "approve",
+		"reason":         "looks good",
+	}))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	summary := data["summary"].(map[string]any)
+	if summary["succeeded"] != float64(1) || summary["failed"] != float64(0) {
+		t.Fatalf("unexpected summary: %v", summary)
+	}
+	results := data["results"].([]any)
+	first := results[0].(map[string]any)
+	if first["submissionId"] != float64(501) || first["status"] != "approved" {
+		t.Fatalf("unexpected first result: %v", first)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

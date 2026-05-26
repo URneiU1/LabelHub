@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -16,6 +17,12 @@ import (
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/policy"
 )
+
+type humanReviewSummaryResponse struct {
+	Verdict   string           `json:"verdict"`
+	Reason    model.NullString `json:"reason"`
+	CreatedAt time.Time        `json:"createdAt"`
+}
 
 func loadTask(db *gorm.DB, c *gin.Context) (model.Task, bool) {
 	taskID, ok := parseIDParam(c, "taskId")
@@ -74,7 +81,7 @@ func currentTemplate(db *gorm.DB, taskID uint64) (model.TaskTemplate, error) {
 
 func templateForBundle(db *gorm.DB, task model.Task, submission model.Submission) (model.TaskTemplate, error) {
 	var template model.TaskTemplate
-	if submission.ID != 0 {
+	if submission.ID != 0 && submission.Status == "revising" {
 		err := db.Where("task_id = ? AND version = ?", task.ID, submission.TemplateVersion).First(&template).Error
 		return template, err
 	}
@@ -115,6 +122,19 @@ func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskIt
 	}
 
 	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision}
+	if submission.ID != 0 && submission.Status == "revising" {
+		var human model.HumanReview
+		if err := db.Where("submission_id = ?", submission.ID).Order("created_at DESC, id DESC").First(&human).Error; err == nil {
+			payload["latestHumanReview"] = humanReviewSummaryResponse{
+				Verdict:   human.Verdict,
+				Reason:    human.Reason,
+				CreatedAt: human.CreatedAt,
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load latest human review")
+			return
+		}
+	}
 	// 已发布的 task 缺模板属于配置缺失,显式 warning 让前端能渲染 setup-incomplete 状态。
 	if errors.Is(templateErr, gorm.ErrRecordNotFound) {
 		payload["warnings"] = []string{"template_missing"}

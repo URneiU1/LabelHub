@@ -40,11 +40,30 @@ func (h ReviewerHandler) Register(api gin.IRouter) {
 	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerAIPrompts)
 	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "owner", "admin"), h.RetryAIReview)
 	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
+	api.POST("/reviews/batch", middleware.RequireRoles("reviewer", "owner", "admin"), h.BatchReview)
 }
 
 type reviewRequest struct {
 	Verdict string `json:"verdict" binding:"required"`
 	Reason  string `json:"reason"`
+}
+
+type batchReviewRequest struct {
+	SubmissionIDs []uint64 `json:"submission_ids"`
+	Verdict       string   `json:"verdict" binding:"required"`
+	Reason        string   `json:"reason"`
+}
+
+type batchReviewResult struct {
+	SubmissionID uint64  `json:"submissionId"`
+	Status       string  `json:"status,omitempty"`
+	Error        *string `json:"error,omitempty"`
+}
+
+type batchReviewSummary struct {
+	Total     int `json:"total"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
 }
 
 type reviewerAIPromptResponse struct {
@@ -240,6 +259,86 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 	}
 
 	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status})
+}
+
+func (h ReviewerHandler) BatchReview(c *gin.Context) {
+	var req batchReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "submission_ids and verdict are required")
+		return
+	}
+	submissionIDs, ok := normalizeBatchReviewIDs(c, req.SubmissionIDs)
+	if !ok {
+		return
+	}
+	if (req.Verdict == "reject" || req.Verdict == "revise") && len(strings.TrimSpace(req.Reason)) < 5 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "reject/revise 必填详细理由(至少 5 个字符)")
+		return
+	}
+	claims, _ := middleware.Claims(c)
+	results := make([]batchReviewResult, 0, len(submissionIDs))
+	summary := batchReviewSummary{Total: len(submissionIDs)}
+	for _, submissionID := range submissionIDs {
+		result, err := review.Apply(h.db, review.ApplyInput{
+			SubmissionID: submissionID,
+			Verdict:      req.Verdict,
+			Reason:       req.Reason,
+			ReviewerID:   claims.UserID,
+			Roles:        claims.Roles,
+		})
+		if err != nil {
+			message := batchReviewErrorMessage(err)
+			results = append(results, batchReviewResult{SubmissionID: submissionID, Error: &message})
+			summary.Failed++
+			continue
+		}
+		results = append(results, batchReviewResult{SubmissionID: result.SubmissionID, Status: result.Status})
+		summary.Succeeded++
+	}
+	httpx.OK(c, gin.H{"results": results, "summary": summary})
+}
+
+func normalizeBatchReviewIDs(c *gin.Context, submissionIDs []uint64) ([]uint64, bool) {
+	if len(submissionIDs) == 0 {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "submission_ids are required")
+		return nil, false
+	}
+	if len(submissionIDs) > 50 {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "submission_ids must contain at most 50 items")
+		return nil, false
+	}
+	seen := map[uint64]struct{}{}
+	for _, submissionID := range submissionIDs {
+		if submissionID == 0 {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "submission_ids must be positive integers")
+			return nil, false
+		}
+		if _, exists := seen[submissionID]; exists {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "submission_ids must be unique")
+			return nil, false
+		}
+		seen[submissionID] = struct{}{}
+	}
+	return submissionIDs, true
+}
+
+func batchReviewErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, review.ErrInvalidVerdict):
+		return "verdict must be approve, reject, or revise"
+	case errors.Is(err, review.ErrSubmissionNotFound):
+		return "submission not found"
+	case errors.Is(err, review.ErrInvalidTransition):
+		return "submission is not human_reviewing"
+	case errors.Is(err, review.ErrNoRevision):
+		return "submission has no revision"
+	case errors.Is(err, review.ErrForbidden):
+		return "reviewer is not assigned to this task"
+	case errors.Is(err, review.ErrConcurrentWrite):
+		return "submission changed during review, please reload"
+	default:
+		return "failed to review submission"
+	}
 }
 
 func (h ReviewerHandler) RetryAIReview(c *gin.Context) {
@@ -459,6 +558,11 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load audit logs")
 		return nil, false
 	}
+	latestHumanReview, hasHumanReview, err := h.loadLatestHumanReview(submission.ID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load latest human review")
+		return nil, false
+	}
 
 	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision, "auditLogs": auditLogs}
 	if ok {
@@ -466,10 +570,28 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 	} else {
 		payload["aiReview"] = nil
 	}
+	if hasHumanReview {
+		payload["latestHumanReview"] = latestHumanReview
+	}
 	if errors.Is(templateErr, gorm.ErrRecordNotFound) {
 		payload["warnings"] = []string{"template_missing"}
 	}
 	return payload, true
+}
+
+func (h ReviewerHandler) loadLatestHumanReview(submissionID uint64) (humanReviewSummaryResponse, bool, error) {
+	var human model.HumanReview
+	if err := h.db.Where("submission_id = ?", submissionID).Order("created_at DESC, id DESC").First(&human).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return humanReviewSummaryResponse{}, false, nil
+		}
+		return humanReviewSummaryResponse{}, false, err
+	}
+	return humanReviewSummaryResponse{
+		Verdict:   human.Verdict,
+		Reason:    human.Reason,
+		CreatedAt: human.CreatedAt,
+	}, true, nil
 }
 
 func (h ReviewerHandler) loadLatestAIReviewDetail(submission model.Submission, taskID uint64) (reviewerAIReviewResponse, bool, error) {
