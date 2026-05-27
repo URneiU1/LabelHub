@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Toast } from '@douyinfe/semi-ui'
 import ExportPanel from './ExportPanel'
 import { apiGet, apiPostRawJSON } from '../../shared/api/client'
 
@@ -91,6 +92,13 @@ describe('ExportPanel', () => {
       await vi.advanceTimersByTimeAsync(2000)
     })
     expect(screen.getByText('succeeded')).toBeInTheDocument()
+
+    // 全部 succeeded 后轮询必须停:再推进 2s 不应再发请求。
+    const callsAfterSettle = mockApiGet.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(mockApiGet.mock.calls.length).toBe(callsAfterSettle)
   })
 
   it('ignores stale history after switching task', async () => {
@@ -110,5 +118,26 @@ describe('ExportPanel', () => {
       resolveFirst({ exports: [{ ...succeededRecord, id: 11, format: 'csv' }] })
     })
     expect(screen.queryByText('#11')).not.toBeInTheDocument()
+  })
+
+  it('does not toast a stale error after switching task', async () => {
+    let rejectFirst: (e: unknown) => void = () => {}
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === '/tasks/1/exports') {
+        return new Promise((_, reject) => { rejectFirst = reject })
+      }
+      return Promise.resolve({ exports: [{ ...succeededRecord, id: 22, format: 'json' }] })
+    })
+
+    const { rerender } = render(<ExportPanel taskId={1} />)
+    rerender(<ExportPanel taskId={2} />)
+    await screen.findByText('#22') // task 2 loaded
+    vi.mocked(Toast.error).mockClear()
+
+    await act(async () => {
+      rejectFirst(new Error('stale boom'))
+    })
+    // task1 的失败晚到,不该弹到 task2 上下文。
+    expect(vi.mocked(Toast.error)).not.toHaveBeenCalled()
   })
 })

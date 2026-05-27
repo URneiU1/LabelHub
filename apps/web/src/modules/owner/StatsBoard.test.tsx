@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import StatsBoard from './StatsBoard'
 import { apiGet } from '../../shared/api/client'
@@ -50,5 +50,24 @@ describe('StatsBoard', () => {
     const values = dimSpec.data[0].values
     expect(values).toContainEqual({ name: '相关性', avg: 9 })
     expect(values).toContainEqual({ name: '完整性', avg: 6 })
+  })
+
+  it('shows an error with a retry button on fetch failure, then recovers', async () => {
+    mockApiGet.mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce(stats)
+    render(<StatsBoard taskId={1} />)
+
+    expect(await screen.findByText('boom')).toBeInTheDocument()
+    // 不该永久转圈
+    expect(screen.queryByText('加载中…')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('重试加载看板'))
+    expect(await screen.findByLabelText('进度')).toBeInTheDocument()
+    expect(mockApiGet).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders without crashing when dimensionAverages is empty', async () => {
+    mockApiGet.mockResolvedValue({ ...stats, dimensionAverages: [] })
+    render(<StatsBoard taskId={1} />)
+    expect(await screen.findByLabelText('维度均分')).toBeInTheDocument()
   })
 })

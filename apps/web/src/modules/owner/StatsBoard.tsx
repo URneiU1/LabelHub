@@ -1,7 +1,6 @@
 import type { CSSProperties } from 'react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { VChart } from '@visactor/react-vchart'
-import { Toast } from '@douyinfe/semi-ui'
 import { apiGet } from '../../shared/api/client'
 
 type TaskStats = {
@@ -18,22 +17,38 @@ interface StatsBoardProps {
 
 export default function StatsBoard({ taskId }: StatsBoardProps) {
   const [stats, setStats] = useState<TaskStats | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let active = true
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切任务时先清空旧看板数据
+    setError(null)
     setStats(null)
     apiGet<TaskStats>(`/tasks/${taskId}/stats`)
       .then((data) => {
         if (active) setStats(data)
       })
-      .catch((error) => {
-        if (active) Toast.error(error instanceof Error ? error.message : '加载看板失败')
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : '加载看板失败')
       })
     return () => {
       active = false
     }
   }, [taskId])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load() 内 setStats(null)/setError(null) 是切任务时清空旧看板,并返回 cleanup
+    return load()
+  }, [load])
+
+  if (error) {
+    return (
+      <section aria-label="数据看板" style={boardStyle}>
+        <h3 style={headingStyle}>数据看板</h3>
+        <p style={{ color: 'var(--color-danger)' }}>{error}</p>
+        <button type="button" aria-label="重试加载看板" onClick={() => load()} style={retryButtonStyle}>重试</button>
+      </section>
+    )
+  }
 
   if (!stats) {
     return (
@@ -46,7 +61,7 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
 
   const statusValues = Object.entries(stats.statusBreakdown).map(([name, value]) => ({ name, value }))
   const aiValues = [
-    { type: '一致', value: stats.aiVsHuman.compared - stats.aiVsHuman.disagree },
+    { type: '一致', value: Math.max(0, stats.aiVsHuman.compared - stats.aiVsHuman.disagree) },
     { type: '不一致', value: stats.aiVsHuman.disagree },
   ]
   const dimValues = stats.dimensionAverages.map((d) => ({ name: d.name, avg: d.avg }))
@@ -123,3 +138,4 @@ const bigNumberStyle: CSSProperties = { fontFamily: 'var(--font-heading)', fontS
 const chartBoxStyle: CSSProperties = { height: 220 }
 const progressTrackStyle: CSSProperties = { height: 6, background: 'var(--color-border-light)', borderRadius: 99, overflow: 'hidden' }
 const progressFillStyle: CSSProperties = { height: '100%', background: 'var(--color-accent)' }
+const retryButtonStyle: CSSProperties = { marginTop: 'var(--space-sm)', padding: '6px 16px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', cursor: 'pointer' }

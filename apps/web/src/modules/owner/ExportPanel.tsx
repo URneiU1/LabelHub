@@ -44,6 +44,8 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
       if (taskRef.current !== taskId) return
       setRecords(data.exports)
     } catch (error) {
+      // stale guard:切任务后晚到的失败不该弹到当前任务上下文。
+      if (taskRef.current !== taskId) return
       Toast.error(error instanceof Error ? error.message : '加载导出历史失败')
     }
   }, [taskId])
