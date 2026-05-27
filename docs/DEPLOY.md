@@ -60,10 +60,14 @@ Caddy reads `CADDY_SITE_ADDRESS` from `deploy/.env`. Use `:80` for local compose
 | `EXPORT_DOWNLOAD_SECRET` | yes | HMAC secret for signed export downloads |
 | `CADDY_SITE_ADDRESS` | yes | `:80` locally or production domain |
 | `API_CORS_ORIGINS` | yes | Browser origins allowed by API |
+| `ASYNQMON_USER` | yes | Basic-auth user for the `/asynqmon/*` admin UI behind Caddy |
+| `ASYNQMON_PASSWORD_HASH` | yes | bcrypt hash from `caddy hash-password`; the stack refuses to boot without it so asynqmon is never exposed unauthenticated |
 | `LLM_PROVIDER` | yes | `mock` for smoke; real provider for production AI |
-| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | real LLM only | Required for OpenAI-compatible providers |
+| `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | real LLM only | Required for OpenAI-compatible providers; with a real provider `LLM_API_KEY` must be set or AI calls go out unauthenticated |
 
 The compose file sets container-only runtime values for `DB_HOST`, `DB_PORT`, `REDIS_HOST`, `REDIS_PORT`, and absolute `EXPORT_DIR`.
+
+The asynqmon admin UI (queue inspection / job control) is reachable at `/asynqmon/` and is gated by Caddy basic auth. Generate the hash with `docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'` and put it in `deploy/.env`.
 
 ## Data And Backups
 

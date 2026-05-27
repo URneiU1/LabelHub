@@ -6,6 +6,8 @@
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "ownerUsername", "value": "owner1" },
+    { "key": "ownerPassword", "value": "" },
     { "key": "accessToken", "value": "" },
     { "key": "taskId", "value": "1" },
     { "key": "itemId", "value": "11" },
@@ -27,7 +29,7 @@
         "url": "{{baseUrl}}/auth/login",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"username\": \"owner1\",\n  \"password\": \"pass\"\n}"
+          "raw": "{\n  \"username\": \"{{ownerUsername}}\",\n  \"password\": \"{{ownerPassword}}\"\n}"
         }
       },
       "event": [{

@@ -135,6 +135,8 @@ services:
     restart: unless-stopped
     environment:
       CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?set CADDY_SITE_ADDRESS}
+      ASYNQMON_USER: ${ASYNQMON_USER:?set ASYNQMON_USER}
+      ASYNQMON_PASSWORD_HASH: ${ASYNQMON_PASSWORD_HASH:?set ASYNQMON_PASSWORD_HASH (docker run --rm caddy:2-alpine caddy hash-password --plaintext PASS)}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
