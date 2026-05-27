@@ -1,57 +1,71 @@
 /* ============================================================
-   LabelHub Schematic Enterprise Design Tokens
-   Schematic 风格: 图解化控制面板 + 细边框 + 网格 + 状态强调
+   LabelHub Editorial Console Design Tokens
+   Dense work surfaces, quiet typography, stable status colors.
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 :root {
-  /* — Color — */
-  --color-bg: #f4f5f7;
+  /* Color */
+  --color-bg: #f7f7f4;
   --color-surface: #ffffff;
-  --color-surface-hover: #f0f4f8;
-  --color-text: #161616;
-  --color-text-secondary: #525252;
-  --color-text-muted: #8d8d8d;
-  --color-accent: #0f62fe;
-  --color-accent-hover: #0353e9;
-  --color-border: #d2d2d7;
-  --color-border-light: #e0e0e0;
-  --color-success: #198038;
-  --color-warning: #f1c21b;
-  --color-danger: #da1e28;
+  --color-surface-subtle: #fbfaf7;
+  --color-surface-hover: #f1f1ec;
+  --color-text: #171713;
+  --color-text-secondary: #57564f;
+  --color-text-muted: #8a887f;
+  --color-accent: #1f5d99;
+  --color-accent-hover: #174977;
+  --color-border: #d8d6cd;
+  --color-border-light: #e7e4da;
+  --color-success: #20734b;
+  --color-warning: #9a6a10;
+  --color-danger: #b33a32;
 
-  /* — Diagram Specific Tokens — */
-  --color-canvas: #f8f9fb;
+  /* Work surface */
+  --color-canvas: #fbfaf6;
   --color-grid-line: rgba(0, 0, 0, 0.04);
   --color-node-bg: #ffffff;
-  --color-node-border: #c6cace;
-  --color-panel-header: #f4f4f4;
-  --color-info-bg: #edf5ff;
-  --color-accent-soft: #d0e2ff;
-  --color-rail: #8ab6ff;
-  --color-port: #78a9ff;
-  --color-code-bg: #f4f4f4;
+  --color-node-border: #d5d1c4;
+  --color-panel-header: #efede6;
+  --color-info-bg: #eef5fb;
+  --color-accent-soft: #dbeaf7;
+  --color-rail: #7da8ca;
+  --color-port: #6c9ac0;
+  --color-code-bg: #f0eee7;
 
-  /* — Status specific (克制使用) — */
-  --color-teal: #007d79;
-  --color-amber: #b46b00;
-  --color-violet: #8a3ffc;
-  --color-success-soft: #defbe6;
-  --color-warning-soft: #fcf4d6;
-  --color-danger-soft: #fff1f1;
+  /* Status */
+  --status-draft-bg: #eeeeea;
+  --status-draft-fg: #56564f;
+  --status-submitted-bg: #e6f0fa;
+  --status-submitted-fg: #1f5d99;
+  --status-ai-bg: #eee8fb;
+  --status-ai-fg: #6545a5;
+  --status-human-bg: #fff0dc;
+  --status-human-fg: #9a5a12;
+  --status-approved-bg: #e4f5eb;
+  --status-approved-fg: #20734b;
+  --status-rejected-bg: #fde9e7;
+  --status-rejected-fg: #a8342d;
+  --status-revising-bg: #fff8d8;
+  --status-revising-fg: #7d6511;
 
-  /* — Typography — */
-  --font-heading: 'Inter', -apple-system, sans-serif;
-  --font-body: 'Inter', -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --text-hero: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+  --color-teal: #24706c;
+  --color-amber: #9a6a10;
+  --color-violet: #6545a5;
+  --color-success-soft: #e4f5eb;
+  --color-warning-soft: #fff8d8;
+  --color-danger-soft: #fde9e7;
+
+  /* Typography */
+  --font-heading: Georgia, 'Times New Roman', serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --text-hero: 2rem;
   --text-h1: 1.25rem;
   --text-h2: 1.125rem;
   --text-base: 0.875rem;
   --text-sm: 0.75rem;
 
-  /* — Spacing — */
+  /* Spacing */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
@@ -60,19 +74,19 @@
   --space-2xl: 48px;
   --space-section: 40px;
 
-  /* — Border — */
+  /* Border */
   --radius-sm: 2px;
   --radius-md: 4px;
   --radius-lg: 8px;
   --border-width: 1px;
   --border-style: solid;
 
-  /* — Shadow — */
+  /* Shadow */
   --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.03);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-  --shadow-lg: 0 12px 24px rgba(0,0,0,0.12);
+  --shadow-md: 0 4px 12px rgba(23,23,19,0.08);
+  --shadow-lg: 0 12px 24px rgba(23,23,19,0.12);
 
-  /* — Duration — */
+  /* Motion */
   --duration-fast: 100ms;
   --duration-normal: 200ms;
   --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
@@ -89,8 +103,102 @@ body {
   font-family: var(--font-body);
   background: var(--color-bg);
   color: var(--color-text);
+  letter-spacing: 0;
 }
 
 * {
   box-sizing: border-box;
+}
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+.semi-button {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+.semi-table,
+.semi-table-thead > .semi-table-row > .semi-table-row-head,
+.semi-table-tbody > .semi-table-row > .semi-table-row-cell {
+  font-size: var(--text-sm);
+}
+
+.semi-table-thead > .semi-table-row > .semi-table-row-head {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}
+
+.semi-modal-content,
+.semi-card {
+  border-radius: var(--radius-lg);
+}
+
+.semi-tag {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+@keyframes lh-skeleton-pulse {
+  0% {
+    opacity: 0.52;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.52;
+  }
+}
+
+@keyframes lh-top-progress {
+  0% {
+    transform: translateX(-65%) scaleX(0.35);
+  }
+  55% {
+    transform: translateX(15%) scaleX(0.55);
+  }
+  100% {
+    transform: translateX(115%) scaleX(0.35);
+  }
+}
+
+.lh-skeleton-line {
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-border-light), var(--color-surface-hover), var(--color-border-light));
+  animation: lh-skeleton-pulse 1.2s var(--ease-out) infinite;
+}
+
+.lh-top-progress {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.lh-top-progress[data-active='true'] {
+  opacity: 1;
+}
+
+.lh-top-progress::before {
+  content: '';
+  display: block;
+  width: 65%;
+  height: 100%;
+  transform-origin: left center;
+  background: var(--color-accent);
+  animation: lh-top-progress 1.25s var(--ease-out) infinite;
 }

@@ -59,7 +59,7 @@ After every code-writing turn:
 
 ## Next Work
 
-- S6 implementation plan is now tracked in `docs/PLAN-S6-IMPL.md`. Start with Editorial tokens and shared status/loading/empty primitives before touching module layouts.
+- S6 implementation plan is tracked in `docs/PLAN-S6-IMPL.md`. Day1 Editorial primitives are in place: `tokens.css` now uses Editorial console tokens, stable status colors, Semi CSS overrides, global focus-visible, skeleton/top-progress keyframes, and shared `StatusBadge`/`EmptyState`/`LoadingBlock`/`TopProgress` components with tests. Next S6 work is Day2 module density/status replacement.
 - Continue Designer implementation with canvas-level nested dragging and richer layout editing for Tabs/Group if contest polish requires it.
 - Run a seeded browser smoke for the S3 path: Owner prompt/golden dry-run, Labeler submit/revise, AI worker, Reviewer batch review, and Reviewer rule activation.
 - Consider async batch dry-run and richer charts only if demo usage shows the current summary table is not enough.
