@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
 import ExportPanel from './ExportPanel'
-import StatsBoard from './StatsBoard'
+// StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
+const StatsBoard = lazy(() => import('./StatsBoard'))
 
 type TaskListResponse = Task[]
 type ExportResponse = {
@@ -800,7 +801,9 @@ export default function OwnerDashboard() {
                 <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
 
-              <StatsBoard taskId={selected.id} />
+              <Suspense fallback={<div style={{ padding: 'var(--space-md)', color: 'var(--color-text-muted)' }}>看板加载中…</div>}>
+                <StatsBoard taskId={selected.id} />
+              </Suspense>
               <ExportPanel taskId={selected.id} />
 
               <div style={{ background: 'var(--color-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--color-border-light)' }}>

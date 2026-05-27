@@ -32,6 +32,11 @@ export default defineConfig({
           if (id.includes('node_modules/@douyinfe')) {
             return 'vendor-semi'
           }
+          // @visactor(VChart)只被懒加载的 StatsBoard 引用:返回 undefined 让它跟随
+          // 异步 chunk,而不是被塞进 eager 的 catch-all vendor(否则首屏白白拉 600KB+)。
+          if (id.includes('node_modules/@visactor')) {
+            return undefined
+          }
           if (id.includes('node_modules')) {
             return 'vendor'
           }
