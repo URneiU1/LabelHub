@@ -35,7 +35,7 @@ describe('ExportPanel', () => {
     expect(screen.getByRole('button', { name: '格式 csv' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '格式 xlsx' })).toBeInTheDocument()
     expect(await screen.findByText('#5')).toBeInTheDocument()
-    expect(screen.getByText('succeeded')).toBeInTheDocument()
+    expect(screen.getByText('已完成')).toBeInTheDocument()
   })
 
   it('posts an export with the selected format and field map', async () => {
@@ -86,12 +86,12 @@ describe('ExportPanel', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
-    expect(screen.getByText('queued')).toBeInTheDocument()
+    expect(screen.getByText('排队中')).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000)
     })
-    expect(screen.getByText('succeeded')).toBeInTheDocument()
+    expect(screen.getByText('已完成')).toBeInTheDocument()
 
     // 全部 succeeded 后轮询必须停:再推进 2s 不应再发请求。
     const callsAfterSettle = mockApiGet.mock.calls.length

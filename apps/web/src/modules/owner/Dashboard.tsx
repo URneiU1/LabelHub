@@ -1,6 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
+import EmptyState from '../../shared/components/EmptyState'
+import LoadingBlock from '../../shared/components/LoadingBlock'
+import StatusBadge from '../../shared/components/StatusBadge'
 import ExportPanel from './ExportPanel'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
 const StatsBoard = lazy(() => import('./StatsBoard'))
@@ -770,10 +773,13 @@ export default function OwnerDashboard() {
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
                   <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>进度: {task.finishedItems}/{task.totalItems}</span>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 600 }}>{task.status.toUpperCase()}</span>
+                  <StatusBadge status={task.status} />
                 </div>
               </button>
             ))}
+            {tasks.length === 0 ? (
+              <EmptyState title="暂无任务" body="当前账号还没有可管理的任务。" variant="empty" />
+            ) : null}
           </div>
         </section>
 
@@ -801,7 +807,7 @@ export default function OwnerDashboard() {
                 <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
 
-              <Suspense fallback={<div style={{ padding: 'var(--space-md)', color: 'var(--color-text-muted)' }}>看板加载中…</div>}>
+              <Suspense fallback={<LoadingBlock title="看板加载中" rows={3} />}>
                 <StatsBoard taskId={selected.id} />
               </Suspense>
               <ExportPanel taskId={selected.id} />
@@ -823,9 +829,7 @@ export default function OwnerDashboard() {
               <section id="ai-prompts" style={aiPromptSectionStyle}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
                   <h3 style={subHeadingStyle}>AI 自动预审配置</h3>
-                  <div style={{ padding: '2px 8px', borderRadius: 10, background: aiReviewEnabled ? '#e1f5fe' : '#f5f5f5', color: aiReviewEnabled ? '#0288d1' : '#9e9e9e', fontSize: 11, fontWeight: 'bold' }}>
-                    AI review: {aiReviewEnabled ? '已启用' : '已关闭'}
-                  </div>
+                  <StatusBadge status={aiReviewEnabled ? 'running' : 'draft'} label={aiReviewEnabled ? 'AI review: 已启用' : 'AI review: 已关闭'} />
                 </div>
 
                 <div style={{ ...aiSettingsRowStyle, background: 'var(--color-surface)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-light)', marginBottom: 'var(--space-lg)' }}>
@@ -966,9 +970,9 @@ export default function OwnerDashboard() {
 
                   <div style={{ marginTop: 'var(--space-xl)' }}>
                     {goldenSampleLoading ? (
-                      <p style={mutedStyle}>加载 golden samples...</p>
+                      <LoadingBlock title="加载 golden samples" rows={2} />
                     ) : goldenSamples.length === 0 ? (
-                      <p style={mutedStyle}>暂无 golden samples</p>
+                      <EmptyState title="暂无 golden samples" body="添加已知答案样本后,可以用来回归评测 AI prompt。" variant="empty" />
                     ) : (
                       <div style={goldenSampleListStyle}>
                         {goldenSamples.map((sample) => {
@@ -978,7 +982,7 @@ export default function OwnerDashboard() {
                               <div style={goldenSampleHeaderStyle}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                                   <strong style={{ fontSize: 'var(--text-base)' }}>#{sample.id} · {sample.expectedVerdict}</strong>
-                                  <span style={{ padding: '2px 8px', borderRadius: 4, background: '#e8f5e9', color: '#2e7d32', fontSize: 11 }}>{sample.expectedVerdict.toUpperCase()}</span>
+                                  <StatusBadge status={verdictStatus(sample.expectedVerdict)} label={sample.expectedVerdict} />
                                 </div>
                                 <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{promptVersionLabel(sample.aiPromptId)}</span>
                                 <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{formatDateTime(sample.createdAt)}</span>
@@ -1020,7 +1024,7 @@ export default function OwnerDashboard() {
                             <tr key={row.sampleId}>
                               <td style={resultCellStyle}>#{row.sampleId}</td>
                               <td style={resultCellStyle}>{row.expectedVerdict}</td>
-                              <td style={resultCellStyle}>{row.actualVerdict || row.status}</td>
+                              <td style={resultCellStyle}>{row.actualVerdict ? <StatusBadge status={verdictStatus(row.actualVerdict)} label={row.actualVerdict} /> : <StatusBadge status={row.status} />}</td>
                               <td style={resultCellStyle}>{row.matchedExpected === undefined ? '-' : row.matchedExpected ? 'matched' : 'mismatch'}</td>
                               <td style={resultCellStyle}>{row.score ?? '-'}</td>
                               <td style={resultCellStyle}>{[row.provider, row.model].filter(Boolean).join(' / ') || '-'}</td>
@@ -1071,9 +1075,9 @@ export default function OwnerDashboard() {
                       </div>
                     ) : null}
                     {dryRunHistoryLoading ? (
-                      <p style={mutedStyle}>加载 dry-run history...</p>
+                      <LoadingBlock title="加载 dry-run history" rows={2} />
                     ) : dryRunHistory.length === 0 ? (
-                      <p style={{ ...mutedStyle, marginTop: 'var(--space-md)' }}>暂无 dry-run history</p>
+                      <EmptyState title="暂无 dry-run history" body="运行 golden sample 后会显示最近结果和匹配率。" variant="queue" />
                     ) : (
                       <div style={resultTableWrapStyle}>
                         <table style={resultTableStyle}>
@@ -1101,7 +1105,10 @@ export default function OwnerDashboard() {
                                     {formatMatched(run.matchedExpected)}
                                   </span>
                                 </td>
-                                <td style={resultCellStyle}>{[run.status, run.errorMsg].filter(Boolean).join(' · ')}</td>
+                                <td style={resultCellStyle}>
+                                  <StatusBadge status={run.status} />
+                                  {run.errorMsg ? <span style={errorTextStyle}> {run.errorMsg}</span> : null}
+                                </td>
                                 <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
                                 <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
                               </tr>
@@ -1312,6 +1319,12 @@ function formatMatched(value: boolean | null | undefined) {
   if (value === true) return 'matched'
   if (value === false) return 'mismatch'
   return '-'
+}
+
+function verdictStatus(verdict: string) {
+  if (verdict === 'pass') return 'approved'
+  if (verdict === 'reject') return 'rejected'
+  return 'revising'
 }
 
 function summarizeDryRunHistory(runs: AIDryRunHistoryItem[]) {

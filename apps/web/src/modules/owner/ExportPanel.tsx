@@ -2,6 +2,8 @@ import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPostRawJSON } from '../../shared/api/client'
+import EmptyState from '../../shared/components/EmptyState'
+import StatusBadge from '../../shared/components/StatusBadge'
 
 type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx'
 
@@ -166,7 +168,7 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
               <td style={tdStyle}>#{record.id}</td>
               <td style={tdStyle}>{record.format}</td>
               <td style={tdStyle}>
-                <span style={statusBadgeStyle(record.status)}>{record.status}</span>
+                <StatusBadge status={record.status} />
                 {record.status === 'failed' && record.errorMsg ? <span style={errorTextStyle}> {record.errorMsg}</span> : null}
               </td>
               <td style={tdStyle}>{record.rowCount ?? '—'}</td>
@@ -183,7 +185,9 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
           ))}
           {records.length === 0 ? (
             <tr>
-              <td style={tdStyle} colSpan={5}>暂无导出记录</td>
+              <td style={tdStyle} colSpan={5}>
+                <EmptyState title="暂无导出记录" body="创建导出后,历史记录会显示格式、状态、行数和下载入口。" variant="queue" />
+              </td>
             </tr>
           ) : null}
         </tbody>
@@ -211,13 +215,3 @@ const thStyle: CSSProperties = { textAlign: 'left', padding: '6px 8px', borderBo
 const tdStyle: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--color-border-light)' }
 const errorTextStyle: CSSProperties = { color: 'var(--color-danger)', fontSize: 'var(--text-xs)' }
 const linkButtonStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', textDecoration: 'underline', padding: 0 }
-
-function statusBadgeStyle(status: string): CSSProperties {
-  const palette: Record<string, string> = {
-    queued: '#8c6d1f',
-    running: '#1f5c8c',
-    succeeded: '#2e7d32',
-    failed: '#c62828',
-  }
-  return { padding: '2px 8px', borderRadius: 10, fontSize: 'var(--text-xs)', fontWeight: 700, color: palette[status] || 'var(--color-text)' }
-}

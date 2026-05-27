@@ -5,7 +5,9 @@ import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
 import { apiGet, apiPost, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
+import StatusBadge from '../../shared/components/StatusBadge'
 
 type ParsedSchema =
   | { ok: true, schema: TemplateSchema }
@@ -182,7 +184,7 @@ export default function LabelerPlaza() {
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 4 }}>
                   <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>完成: {task.finishedItems}/{task.totalItems}</span>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 600 }}>{task.status.toUpperCase()}</span>
+                  <StatusBadge status={task.status} />
                 </div>
                 <ProgressBar value={task.finishedItems} total={task.totalItems} />
                 <Button aria-label="领取题目" loading={loading} onClick={() => void claim(task.id)} theme="solid" style={{ marginTop: 'var(--space-md)' }}>
@@ -191,9 +193,7 @@ export default function LabelerPlaza() {
               </div>
             ))}
             {tasks.length === 0 ? (
-              <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-text-muted)', background: 'var(--color-bg)', borderRadius: 'var(--radius-md)' }}>
-                暂无可领取任务
-              </div>
+              <EmptyState title="暂无可领取任务" body="当前没有可领取的题目,稍后刷新任务广场。" variant="queue" />
             ) : null}
           </div>
           {mySubmissions.some((submission) => submission.status === 'revising') ? (
@@ -208,6 +208,7 @@ export default function LabelerPlaza() {
                 >
                   <strong>Submission #{submission.id}</strong>
                   <span>Task #{submission.taskId} · Item #{submission.itemId}</span>
+                  <StatusBadge status={submission.status} />
                 </button>
               ))}
             </div>
@@ -226,9 +227,7 @@ export default function LabelerPlaza() {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ padding: '4px 12px', borderRadius: 12, background: bundle.submission ? '#e8f5e9' : '#fff3e0', color: bundle.submission ? '#2e7d32' : '#ef6c00', fontSize: 12, fontWeight: 'bold' }}>
-                    {bundle.submission?.status.toUpperCase() || 'NEW'}
-                  </div>
+                  <StatusBadge status={bundle.submission?.status || 'draft'} label={bundle.submission ? undefined : '新题'} />
                 </div>
               </div>
 
@@ -270,9 +269,7 @@ export default function LabelerPlaza() {
             </section>
           ) : (
             <section style={{ ...panelStyle, border: '1px dashed var(--color-border-light)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
-              <SchematicEmptyState />
-              <h2 style={{ ...headingStyle, color: 'var(--color-text-muted)' }}>准备开始标注</h2>
-              <p style={{ ...mutedStyle, marginTop: 'var(--space-sm)' }}>请在左侧任务广场选择并领取一个任务开始工作。</p>
+              <EmptyState title="准备开始标注" body="请在左侧任务广场选择并领取一个任务开始工作。" variant="empty" />
             </section>
           )}
         </main>
@@ -286,16 +283,6 @@ function ProgressBar({ value, total }: { value: number, total: number }) {
   return (
     <div style={progressTrackStyle} aria-hidden="true">
       <div style={{ ...progressFillStyle, width: `${width}%` }} />
-    </div>
-  )
-}
-
-function SchematicEmptyState() {
-  return (
-    <div style={emptyDiagramStyle} aria-hidden="true">
-      <span style={emptyNodeStyle} />
-      <span style={emptyLineStyle} />
-      <span style={{ ...emptyNodeStyle, borderColor: 'var(--color-accent)' }} />
     </div>
   )
 }
@@ -349,11 +336,6 @@ const headingStyle: CSSProperties = {
   margin: 0,
   fontWeight: 600,
   color: 'var(--color-text)',
-}
-
-const mutedStyle: CSSProperties = {
-  color: 'var(--color-text-muted)',
-  fontSize: 'var(--text-base)',
 }
 
 const taskCardStyle: CSSProperties = {
@@ -443,27 +425,4 @@ const autoSaveTextStyle: CSSProperties = {
   marginRight: 'auto',
   color: 'var(--color-text-muted)',
   fontSize: 'var(--text-sm)',
-}
-
-const emptyDiagramStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '56px 44px 56px',
-  alignItems: 'center',
-  justifyItems: 'center',
-  marginBottom: 'var(--space-md)',
-}
-
-const emptyNodeStyle: CSSProperties = {
-  width: 52,
-  height: 32,
-  border: '1px solid var(--color-node-border)',
-  borderRadius: 'var(--radius-md)',
-  background: 'var(--color-node-bg)',
-  boxShadow: 'var(--shadow-sm)',
-}
-
-const emptyLineStyle: CSSProperties = {
-  width: 44,
-  height: 1,
-  background: 'var(--color-node-border)',
 }

@@ -14,6 +14,7 @@ export const statusMeta: Record<string, StatusMeta> = {
   rejected: { label: '已拒绝', tone: 'rejected' },
   revising: { label: '待修改', tone: 'revising' },
   queued: { label: '排队中', tone: 'submitted' },
+  pending: { label: '待处理', tone: 'submitted' },
   running: { label: '运行中', tone: 'ai' },
   succeeded: { label: '已完成', tone: 'approved' },
   failed: { label: '失败', tone: 'rejected' },

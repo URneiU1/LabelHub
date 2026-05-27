@@ -55,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s6-dense-status-surfaces`: S6 Day2 第一段完成:Owner Dashboard、ExportPanel、Labeler Plaza、Reviewer Queue 开始复用共享 `StatusBadge`/`EmptyState`/`LoadingBlock`,导出历史、任务列表、AI review 开关、golden sample、dry-run history、标注空态和审核空态不再直接裸显示 raw status/loading 文本;相关测试断言更新为新中文状态/可访问 loading 状态。
 - 2026-05-28 `s6-state-primitives`: S6 Day1 底座完成: `tokens.css` 从 Schematic/Inter/default-blue 收敛为 Editorial console tokens,移除 Google font 依赖,加入稳定 7 态 status 色、Semi 常用控件 CSS override、全局 focus-visible、skeleton/top-progress keyframes;新增共享 `StatusBadge`/`statusLabel`、`EmptyState`、`LoadingBlock`、`TopProgress` 和 `StatePrimitives` 测试,为后续 Owner/Labeler/Reviewer 页面统一状态、空态、加载态做准备。
 - 2026-05-28 `s6-plan`: 新增 `docs/PLAN-S6-IMPL.md`,把 Sprint 6 拆成 Editorial token/shared state components、Owner/Labeler/Reviewer 高密度界面、Designer 响应式布局、Tabs/Group 真实交互、友好错误/A11y、Browser smoke 和 `docs/S6_ACCEPTANCE.md` 验收文档。计划明确将 dark mode、Framer Motion、完整移动端、TanStack Query/Formily/dnd-kit 迁移列为可砍项。
 - 2026-05-28 `s5-deploy-docs`: S5 Day5 收尾完成:新增生产部署模板 `deploy/docker-compose.prod.yml`,覆盖 api/worker/web/mysql/redis/asynqmon/caddy;新增 api/worker 共用多阶段 Dockerfile、web 静态 Caddy 镜像和 SPA fallback;生产 compose 通过 env 显式注入密钥/LLM/JWT/导出配置,api/worker 共享绝对 `EXPORT_DIR` volume,api 上传目录单独持久化;新增 `deploy/Caddyfile`、`deploy/.env.example`、`.dockerignore`;`make dev` 现在可一键起基础设施、安装依赖、seed 并提示分别启动 api/worker/web;新增 `docs/ARCHITECTURE.md`、`docs/DEPLOY.md`、`docs/S5_ACCEPTANCE.md`。
@@ -115,7 +116,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 下一步
 
-- 按 `docs/PLAN-S6-IMPL.md` 推进 Day2:Owner/Labeler/Reviewer/Export/Stats 页面替换共享状态组件,把列表和历史记录改得更密集、更易扫描。
+- 按 `docs/PLAN-S6-IMPL.md` 推进 Day3:Designer 响应式布局,以及 Runtime Tabs 真实 tab 切换和 Group/Tabs 嵌套体验补强。
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
 - 推进 S3 验收:做一次本地 seeded browser smoke,覆盖 Owner 配规则/跑 golden dry-run、Labeler 提交/修订、AI worker、Reviewer 批量审核和规则查看。
 - 补 FileUpload 前端预览/下载入口的 seeded browser smoke。
@@ -123,6 +124,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S6 dense/status surfaces: `pnpm -F web test -- ExportPanel Plaza Queue Dashboard StatePrimitives` 通过;full `pnpm -F web test` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 state primitives: `pnpm -F web test -- StatePrimitives` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 plan: 文档-only 变更,未跑测试;前一提交的 S5 全量 Go/web/config 门禁已通过。
 - 2026-05-28 S5 deploy/docs: `docker compose --env-file deploy/.env.example -f deploy/docker-compose.prod.yml config` 通过;`make -n dev` 通过;`go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview -count=1` 通过;`pnpm -F web test` 通过(12 files,103 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web gen:api` 通过;`jq empty docs/LabelHub.postman_collection.json` 通过;`git diff --check` 通过。生产 compose 未在本机执行 `up --build`,避免占用 80/443 和拉取/构建全部镜像。

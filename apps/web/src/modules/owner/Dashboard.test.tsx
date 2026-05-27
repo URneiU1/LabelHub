@@ -1106,7 +1106,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     await user.click(screen.getByRole('button', { name: /Task B/ }))
 
     expect(screen.queryByText('task a sample')).not.toBeInTheDocument()
-    expect(screen.getByText('加载 golden samples...')).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: '加载 golden samples' })).toBeInTheDocument()
   })
 
   it('deletes a golden sample from the current task list', async () => {
@@ -1259,7 +1259,8 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
     expect(await screen.findByText('#55')).toBeInTheDocument()
-    expect(screen.getByText('failed · provider failed')).toBeInTheDocument()
+    expect(screen.getAllByText('失败').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('provider failed').length).toBeGreaterThanOrEqual(1)
     expect(historyCalls).toBe(2)
   })
 
@@ -1625,7 +1626,8 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByText('#44')).toBeInTheDocument()
     expect(screen.getByText('#45')).toBeInTheDocument()
-    expect(screen.getByText('failed · provider timeout')).toBeInTheDocument()
+    expect(screen.getAllByText('失败').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('provider timeout')).toBeInTheDocument()
     expect(screen.getAllByText('v3 #33')).toHaveLength(2)
     expect(screen.getAllByText('matched').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('circuit open')).toBeInTheDocument()

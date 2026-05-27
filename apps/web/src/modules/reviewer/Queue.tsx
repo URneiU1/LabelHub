@@ -4,7 +4,9 @@ import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema } from '../../renderer/types'
 import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type Submission, type TaskBundle } from '../../shared/api/client'
+import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
+import StatusBadge from '../../shared/components/StatusBadge'
 
 type ReviewResponse = {
   submission_id: number
@@ -466,10 +468,9 @@ function QueueCard({
         <button onClick={onClick} style={queueCardButtonStyle}>
           <div style={cardMetaStyle}>Task #{submission.taskId} · Item #{submission.itemId}</div>
           <strong>Submission #{submission.id}</strong>
-          <div style={cardMetaStyle}>状态 {submission.status}</div>
           <div style={pillRowStyle}>
             <span style={aiPillStyle}>预审 {formatAIReviewSummary(submission)}</span>
-            <span style={neutralPillStyle}>{submission.status}</span>
+            <StatusBadge status={submission.status} />
           </div>
         </button>
       </div>
@@ -624,8 +625,7 @@ function RealReviewDetail({
   if (!detail?.item) {
     return (
       <section style={{ ...detailShellStyle, border: '1px dashed var(--color-border-light)', minHeight: 420, alignContent: 'center', justifyItems: 'center' }}>
-        <h2 style={{ ...detailTitleStyle, color: 'var(--color-text-muted)' }}>等待审核</h2>
-        <p style={mutedTextStyle}>从左侧队列选择一条提交记录开始人工审核。</p>
+        <EmptyState title="等待审核" body="从左侧队列选择一条提交记录开始人工审核。" variant="queue" />
       </section>
     )
   }
@@ -637,7 +637,7 @@ function RealReviewDetail({
           <h2 style={detailTitleStyle}>{schema.ok ? schema.schema.title : '提交详情'}</h2>
           <p style={mutedTextStyle}>Submission #{detail.submission?.id} · Task #{detail.task.id} · Item #{detail.item.id}</p>
         </div>
-        <span style={orangePillStyle}>{selected?.status}</span>
+        <StatusBadge status={selected?.status} />
       </div>
       <div style={rendererShellStyle}>
         {schema.ok ? (
@@ -685,7 +685,7 @@ function RealAIReviewSummary({ aiReview, submission }: { aiReview?: AIReviewDeta
         {dimensions.length > 0 ? <ScoreBars rows={dimensions} /> : null}
         {aiReview.reason ? <p style={resultReasonStyle}>{aiReview.reason}</p> : null}
         <div style={scoreLineStyle}>
-          <span>status: {aiReview.status}</span>
+          <StatusBadge status={aiReview.status} />
           <span>tokens: {aiReview.tokensInput + aiReview.tokensOutput}</span>
           <span>latency: {aiReview.latencyMs}ms</span>
         </div>
