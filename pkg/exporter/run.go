@@ -6,10 +6,15 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// ErrTerminal 标记永久失败(编码/落盘错误):导出已被写成 failed,重投递重跑没有意义。
+// 瞬时错误(加载行 / 状态更新等 DB 错误)不裹这个,交给上层(worker)决定重试。
+var ErrTerminal = errors.New("exporter: terminal failure")
 
 // RunResult 是一次成功导出的产物元数据。
 type RunResult struct {
@@ -19,8 +24,9 @@ type RunResult struct {
 }
 
 // Run 是异步导出执行核心(worker 调用,裸 *sql.DB):
-// 幂等认领 queued→running → 加载行 → 编码原子落盘 → 标记 succeeded + 审计;
-// 任意步失败则标记 failed(error_msg 脱敏)并返回 err 交给 asynq 决定是否重试。
+// 幂等认领 queued→running → 加载行 → 编码原子落盘 → 标记 succeeded + 审计。
+// 编码/落盘失败 → 标记 failed(error_msg 脱敏)并返回裹了 ErrTerminal 的错误(永久失败,不应重试);
+// 加载/状态更新等瞬时 DB 错误 → 返回普通 error,由 worker 交给 asynq 重试。
 func Run(ctx context.Context, db *sql.DB, exportID uint64, baseDir string) error {
 	var (
 		format         string
@@ -53,7 +59,7 @@ func Run(ctx context.Context, db *sql.DB, exportID uint64, baseDir string) error
 	result, runErr := encodeToFile(ctx, db, taskID, format, nullStrPtr(fieldMap), includeReviews, baseDir)
 	if runErr != nil {
 		markExportFailed(ctx, db, exportID, runErr)
-		return runErr
+		return fmt.Errorf("%w: %w", ErrTerminal, runErr)
 	}
 
 	if _, err := db.ExecContext(ctx,

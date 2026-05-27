@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -25,6 +26,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "flush logger: %v\n", err)
 		}
 	}()
+	mustAbsExportDir()
 	database, err := openDB()
 	if err != nil {
 		logger.Fatal("connect database", zap.Error(err))
@@ -111,6 +113,19 @@ func redisAddr() string {
 	host := envOrDefault("REDIS_HOST", "localhost")
 	port := envOrDefault("REDIS_PORT", "6379")
 	return net.JoinHostPort(host, port)
+}
+
+// mustAbsExportDir 校验 EXPORT_DIR 为绝对路径。worker 与 api 从不同工作目录启动,
+// 相对路径会各自解析到不同目录,导致 worker 写入的文件 api 下载时找不到/校验失败。
+func mustAbsExportDir() string {
+	dir := os.Getenv("EXPORT_DIR")
+	if dir == "" {
+		log.Fatal("EXPORT_DIR must be set to an absolute path")
+	}
+	if !filepath.IsAbs(dir) {
+		log.Fatalf("EXPORT_DIR must be an absolute path (api and worker run from different working dirs), got %q", dir)
+	}
+	return dir
 }
 
 func envOrDefault(key string, fallback string) string {

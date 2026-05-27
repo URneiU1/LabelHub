@@ -37,6 +37,7 @@ func main() {
 		}
 	}()
 
+	mustAbsExportDir()
 	database := db.Init()
 	db.RunMigrations()
 	authService := auth.NewServiceFromEnv()
@@ -105,6 +106,20 @@ func serverPort() string {
 		return port
 	}
 	return ":" + port
+}
+
+// mustAbsExportDir 校验 EXPORT_DIR 为绝对路径并返回它。
+// api 与 worker 从不同工作目录启动(见 Makefile),相对路径会各自解析到不同目录,
+// 导致 worker 写入的文件 api 下载时 base 不匹配,safeExportPath 永远 403。
+func mustAbsExportDir() string {
+	dir := os.Getenv("EXPORT_DIR")
+	if dir == "" {
+		log.Fatal("EXPORT_DIR must be set to an absolute path")
+	}
+	if !filepath.IsAbs(dir) {
+		log.Fatalf("EXPORT_DIR must be an absolute path (api and worker run from different working dirs), got %q", dir)
+	}
+	return dir
 }
 
 func exportDownloadSecret() string { return os.Getenv("EXPORT_DOWNLOAD_SECRET") }

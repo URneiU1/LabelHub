@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,8 +93,13 @@ func TestRun_EncodeErrorMarksFailed(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), uint64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO audit_logs`).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := Run(context.Background(), db, 7, t.TempDir()); err != ErrUnsupportedFormat {
+	err := Run(context.Background(), db, 7, t.TempDir())
+	if !errors.Is(err, ErrUnsupportedFormat) {
 		t.Fatalf("expected ErrUnsupportedFormat, got %v", err)
+	}
+	// 编码失败是永久失败:必须裹 ErrTerminal,worker 据此 SkipRetry。
+	if !errors.Is(err, ErrTerminal) {
+		t.Fatalf("expected error wrapped with ErrTerminal, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
