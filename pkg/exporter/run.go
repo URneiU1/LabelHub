@@ -16,6 +16,8 @@ import (
 // 瞬时错误(加载行 / 状态更新等 DB 错误)不裹这个,交给上层(worker)决定重试。
 var ErrTerminal = errors.New("exporter: terminal failure")
 
+var errTransient = errors.New("exporter: transient failure")
+
 // RunResult 是一次成功导出的产物元数据。
 type RunResult struct {
 	FilePath string
@@ -58,6 +60,9 @@ func Run(ctx context.Context, db *sql.DB, exportID uint64, baseDir string) error
 
 	result, runErr := encodeToFile(ctx, db, taskID, format, nullStrPtr(fieldMap), includeReviews, baseDir)
 	if runErr != nil {
+		if errors.Is(runErr, errTransient) {
+			return runErr
+		}
 		markExportFailed(ctx, db, exportID, runErr)
 		return fmt.Errorf("%w: %w", ErrTerminal, runErr)
 	}
@@ -79,7 +84,7 @@ func encodeToFile(ctx context.Context, db *sql.DB, taskID uint64, format string,
 	}
 	rows, err := LoadApprovedRows(ctx, db, taskID, fm.IncludeReviews || includeReviews)
 	if err != nil {
-		return RunResult{}, err
+		return RunResult{}, fmt.Errorf("%w: load approved rows: %w", errTransient, err)
 	}
 	var sample Row
 	if len(rows) > 0 {

@@ -104,7 +104,7 @@ func (h StatsHandler) TaskStats(c *gin.Context) {
 	if err := h.db.Table("ai_reviews").
 		Select("ai_reviews.dimensions").
 		Joins("JOIN submissions ON submissions.id = ai_reviews.submission_id").
-		Where("submissions.task_id = ? AND submissions.status = 'approved' AND ai_reviews.status = 'succeeded' AND ai_reviews.dimensions IS NOT NULL", task.ID).
+		Where("submissions.task_id = ? AND submissions.status = 'approved' AND ai_reviews.revision_id = submissions.current_revision_id AND ai_reviews.status = 'succeeded' AND ai_reviews.dimensions IS NOT NULL", task.ID).
 		Scan(&dimRows).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load dimensions")
 		return

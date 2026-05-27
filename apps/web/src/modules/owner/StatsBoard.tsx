@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { VChart } from '@visactor/react-vchart'
 import { apiGet } from '../../shared/api/client'
 
@@ -18,20 +18,22 @@ interface StatsBoardProps {
 export default function StatsBoard({ taskId }: StatsBoardProps) {
   const [stats, setStats] = useState<TaskStats | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const requestSeq = useRef(0)
 
   const load = useCallback(() => {
-    let active = true
+    const seq = requestSeq.current + 1
+    requestSeq.current = seq
     setError(null)
     setStats(null)
     apiGet<TaskStats>(`/tasks/${taskId}/stats`)
       .then((data) => {
-        if (active) setStats(data)
+        if (requestSeq.current === seq) setStats(data)
       })
       .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : '加载看板失败')
+        if (requestSeq.current === seq) setError(err instanceof Error ? err.message : '加载看板失败')
       })
     return () => {
-      active = false
+      requestSeq.current += 1
     }
   }, [taskId])
 

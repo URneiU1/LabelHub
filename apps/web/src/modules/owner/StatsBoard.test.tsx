@@ -70,4 +70,31 @@ describe('StatsBoard', () => {
     render(<StatsBoard taskId={1} />)
     expect(await screen.findByLabelText('维度均分')).toBeInTheDocument()
   })
+
+  it('ignores stale retry response after switching task', async () => {
+    let rejectInitial: (error: unknown) => void = () => {}
+    let resolveRetry: (value: unknown) => void = () => {}
+    mockApiGet
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectInitial = reject }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve }))
+      .mockResolvedValueOnce({ ...stats, progress: { total: 2, finished: 2 } })
+
+    const { rerender } = render(<StatsBoard taskId={1} />)
+    await actAsync(() => rejectInitial(new Error('boom')))
+    expect(await screen.findByText('boom')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('重试加载看板'))
+    rerender(<StatsBoard taskId={2} />)
+    expect(await screen.findByText('2/2')).toBeInTheDocument()
+
+    await actAsync(() => resolveRetry({ ...stats, progress: { total: 99, finished: 1 } }))
+    expect(screen.queryByText('1/99')).not.toBeInTheDocument()
+  })
 })
+
+async function actAsync(fn: () => void) {
+  const { act } = await import('@testing-library/react')
+  await act(async () => {
+    fn()
+  })
+}

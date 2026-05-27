@@ -105,3 +105,24 @@ func TestRun_EncodeErrorMarksFailed(t *testing.T) {
 		t.Fatalf("expectations: %v", err)
 	}
 }
+
+func TestRun_LoadRowsErrorIsRetryableAndDoesNotMarkFailed(t *testing.T) {
+	db, mock := newMock(t)
+	mock.ExpectQuery(`SELECT format.+FROM exports WHERE id`).WithArgs(uint64(7)).
+		WillReturnRows(exportRow("json", "queued", 5))
+	mock.ExpectExec(`UPDATE exports SET status='running'`).WithArgs(uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT s.id.+FROM submissions`).WithArgs(uint64(5)).
+		WillReturnError(errors.New("db temporarily unavailable"))
+
+	err := Run(context.Background(), db, 7, t.TempDir())
+	if err == nil {
+		t.Fatal("expected load rows error")
+	}
+	if errors.Is(err, ErrTerminal) {
+		t.Fatalf("load rows DB error must stay retryable, got terminal error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}

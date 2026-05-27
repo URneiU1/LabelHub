@@ -59,7 +59,7 @@ func TestTaskStats_AggregatesCounts(t *testing.T) {
 		sqlmock.NewRows([]string{"status", "count"}).AddRow("approved", 3).AddRow("rejected", 1).AddRow("human_reviewing", 2))
 	mock.ExpectQuery(`(?is)^SELECT ai_verdict, human_verdict FROM .submissions.`).WillReturnRows(
 		sqlmock.NewRows([]string{"ai_verdict", "human_verdict"}).AddRow("pass", "approve").AddRow("reject", "approve").AddRow("pass", "approve"))
-	mock.ExpectQuery(`(?is)^SELECT ai_reviews.dimensions FROM .ai_reviews. JOIN`).WillReturnRows(
+	mock.ExpectQuery(`(?is)^SELECT ai_reviews.dimensions FROM .ai_reviews. JOIN.+ai_reviews.revision_id = submissions.current_revision_id`).WillReturnRows(
 		sqlmock.NewRows([]string{"dimensions"}).
 			AddRow(`[{"name":"相关性","score":8},{"name":"完整性","score":6}]`).
 			AddRow(`[{"name":"相关性","score":10}]`))
@@ -106,7 +106,7 @@ func TestTaskStats_ZeroDivisionSafe(t *testing.T) {
 		sqlmock.NewRows([]string{"status", "count"}))
 	mock.ExpectQuery(`(?is)^SELECT ai_verdict, human_verdict FROM .submissions.`).WillReturnRows(
 		sqlmock.NewRows([]string{"ai_verdict", "human_verdict"}))
-	mock.ExpectQuery(`(?is)^SELECT ai_reviews.dimensions FROM .ai_reviews. JOIN`).WillReturnRows(
+	mock.ExpectQuery(`(?is)^SELECT ai_reviews.dimensions FROM .ai_reviews. JOIN.+ai_reviews.revision_id = submissions.current_revision_id`).WillReturnRows(
 		sqlmock.NewRows([]string{"dimensions"}))
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
