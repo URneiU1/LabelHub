@@ -30,6 +30,7 @@ var (
 	ErrInvalidTransition = errors.New("submission: invalid state machine transition")
 	ErrItemNotClaimed    = errors.New("submission: item is not claimed by current user")
 	ErrInvalidAIPrompt   = errors.New("submission: active AI prompt is invalid")
+	ErrTaskTemplate      = errors.New("submission: task template is not available")
 )
 
 // SaveInput:Save 调用所需要的全部领域数据。
@@ -147,13 +148,15 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}); err != nil {
 				return err
 			}
+			// 派发(enqueue / skip_ai)是系统按任务配置自动决策,不是用户动作,
+			// 因此审计记为 system + 无 actor_id,避免审计轨迹误导。
 			if err := audit.Write(tx, audit.LogEntry{
 				EntityType: "submission",
 				EntityID:   sub.ID,
 				FromState:  statemachine.StateSubmitted,
 				ToState:    to,
-				ActorType:  "user",
-				ActorID:    &actorID,
+				ActorType:  "system",
+				ActorID:    nil,
 				Event:      dispatchEvent,
 			}); err != nil {
 				return err

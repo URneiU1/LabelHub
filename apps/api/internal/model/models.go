@@ -30,6 +30,18 @@ type UserRole struct {
 
 func (UserRole) TableName() string { return "user_roles" }
 
+// RefreshToken 持久化已签发的 refresh token(按 jti),支撑服务端撤销与轮换。
+type RefreshToken struct {
+	ID        uint64     `gorm:"primaryKey" json:"id"`
+	JTI       string     `gorm:"column:jti;uniqueIndex;size:36" json:"jti"`
+	UserID    uint64     `json:"userId"`
+	ExpiresAt time.Time  `json:"expiresAt"`
+	RevokedAt *time.Time `json:"revokedAt"`
+	CreatedAt time.Time  `json:"createdAt"`
+}
+
+func (RefreshToken) TableName() string { return "refresh_tokens" }
+
 // ============================================================
 // 3. tasks
 // ============================================================

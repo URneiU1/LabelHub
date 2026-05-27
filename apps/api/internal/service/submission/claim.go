@@ -96,7 +96,7 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 
 		version, err := templateVersionForTask(tx, task)
 		if err != nil {
-			version = 1
+			return err
 		}
 		sub := model.Submission{
 			TaskID:          task.ID,

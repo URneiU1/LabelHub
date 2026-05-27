@@ -42,7 +42,7 @@ func TestAttachUploadedFilesDedupesAndMarksAttached(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 2, `{"fields":[{"name":"evidence","widget":"FileUpload"}]}`))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+FOR UPDATE`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+task_id.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by"}).
 			AddRow(301, 1, key, "temp", 7))
 	mock.ExpectExec(`(?is)^UPDATE .uploaded_files. SET`).
@@ -86,7 +86,7 @@ func TestAttachUploadedFilesRejectsOtherOwnerAndCrossTask(t *testing.T) {
 			mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 					AddRow(101, 1, 2, `{"fields":[{"name":"evidence","widget":"FileUpload"}]}`))
-			mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+FOR UPDATE`).
+			mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+task_id.+FOR UPDATE`).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by"}).
 					AddRow(301, tc.fileTask, key, "temp", tc.createdBy))
 			mock.ExpectRollback()
@@ -120,7 +120,7 @@ func TestAttachUploadedFilesAllowsAttachedFileFromSameSubmissionHistory(t *testi
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 2, `{"fields":[{"name":"evidence","widget":"FileUpload"}]}`))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+FOR UPDATE`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+task_id.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by", "submission_revision_id"}).
 			AddRow(301, 1, key, "attached", 7, oldRevisionID))
 	mock.ExpectQuery(`(?is)^SELECT .id. FROM .submission_revisions.`).
@@ -154,7 +154,7 @@ func TestAttachUploadedFilesRejectsAttachedFileFromOtherSubmission(t *testing.T)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 2, `{"fields":[{"name":"evidence","widget":"FileUpload"}]}`))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+FOR UPDATE`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+task_id.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by", "submission_revision_id"}).
 			AddRow(301, 1, key, "attached", 7, oldRevisionID))
 	mock.ExpectQuery(`(?is)^SELECT .id. FROM .submission_revisions.`).

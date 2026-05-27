@@ -68,6 +68,8 @@ func (h LabelerHandler) ClaimItem(c *gin.Context) {
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "没有可领取的题目")
 	case errors.Is(err, submission.ErrClaimRaceLost):
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "claim race lost, please retry")
+	case errors.Is(err, submission.ErrTaskTemplate):
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "task template is not available; please contact the owner")
 	default:
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to claim item")
 	}
@@ -179,6 +181,8 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "answer contains invalid uploaded file reference")
 		case errors.Is(err, submission.ErrInvalidAIPrompt):
 			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "active AI prompt is invalid")
+		case errors.Is(err, submission.ErrTaskTemplate):
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "task template is not available; please contact the owner")
 		default:
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save answer")
 		}

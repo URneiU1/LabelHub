@@ -1263,8 +1263,23 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(historyCalls).toBe(2)
   })
 
-  it('runs all visible golden samples through the batch endpoint and maps partial results', async () => {
+  it('runs all visible golden samples via async batch and fills rows by polling', async () => {
     const user = userEvent.setup()
+    const succeededRun = (id: number, sampleId: number, reason: string) => ({
+      id,
+      taskId: 1,
+      aiPromptId: 33,
+      goldenSampleId: sampleId,
+      promptVersion: 3,
+      expectedVerdict: 'pass',
+      actualVerdict: 'pass',
+      matchedExpected: true,
+      status: 'succeeded',
+      result: { verdict: 'pass', overall_score: 88, dimensions: [], reason, model: 'mock-model', provider: 'ai-worker' },
+      errorMsg: null,
+      createdAt: '2026-05-23T12:01:00Z',
+      finishedAt: '2026-05-23T12:02:00Z',
+    })
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]
@@ -1275,36 +1290,27 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/1/golden-samples') {
         return {
           samples: [
-            { id: 11, taskId: 1, aiPromptId: null, payload: { text: 'a' }, payloadHash: 'hash-a', expectedAnswer: { label: 'a' }, expectedVerdict: 'pass', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
-            { id: 12, taskId: 1, aiPromptId: null, payload: { text: 'b' }, payloadHash: 'hash-b', expectedAnswer: { label: 'b' }, expectedVerdict: 'uncertain', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
+            { id: 11, taskId: 1, aiPromptId: 33, payload: { text: 'a' }, payloadHash: 'hash-a', expectedAnswer: { label: 'a' }, expectedVerdict: 'pass', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
+            { id: 12, taskId: 1, aiPromptId: 33, payload: { text: 'b' }, payloadHash: 'hash-b', expectedAnswer: { label: 'b' }, expectedVerdict: 'pass', notes: null, createdBy: 7, createdAt: '2026-05-23T12:00:00Z' },
           ],
         }
+      }
+      if (path === '/tasks/1/ai-dry-runs?golden_sample_id=11&limit=10') {
+        return { dryRuns: [succeededRun(44, 11, 'first sample done')] }
+      }
+      if (path === '/tasks/1/ai-dry-runs?golden_sample_id=12&limit=10') {
+        return { dryRuns: [succeededRun(45, 12, 'second sample done')] }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return { dryRuns: [] }
       }
       throw new Error(`unexpected GET ${path}`)
     })
     mockApiPost.mockResolvedValue({
-      summary: { total: 2, succeeded: 1, failed: 1 },
+      summary: { total: 2, queued: 2, failed: 0 },
       results: [
-        {
-          goldenSampleId: 11,
-          status: 'failed',
-          dryRunId: 44,
-          error: 'provider failed',
-        },
-        {
-          goldenSampleId: 12,
-          status: 'succeeded',
-          provider: 'mock',
-          dryRunId: 45,
-          matchedExpected: true,
-          result: {
-            verdict: 'uncertain',
-            overall_score: 75,
-            dimensions: [],
-            reason: 'second sample done',
-            model: 'mock-model',
-          },
-        },
+        { goldenSampleId: 11, status: 'queued', dryRunId: 44 },
+        { goldenSampleId: 12, status: 'queued', dryRunId: 45 },
       ],
     })
 
@@ -1316,11 +1322,12 @@ describe('OwnerDashboard AI prompt flow', () => {
       expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12] })
     })
     expect(mockApiPost).toHaveBeenCalledTimes(1)
-    expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
-    expect(screen.getByText('second sample done')).toBeInTheDocument()
-    expect(screen.getAllByText('matched')).toHaveLength(2)
-    expect(screen.getByText('44')).toBeInTheDocument()
-    expect(screen.getByText('45')).toBeInTheDocument()
+    // 入队后由轮询填充每个样本的结果行(reason 同时出现在结果行与详情面板,故用 findAllByText)。
+    expect((await screen.findAllByText('first sample done')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('second sample done')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('matched').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('44').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('45').length).toBeGreaterThan(0)
   })
 
   it('ignores stale batch golden sample run responses after switching tasks', async () => {
@@ -1406,7 +1413,7 @@ describe('OwnerDashboard AI prompt flow', () => {
           samples: [{
             id: 11,
             taskId: 1,
-            aiPromptId: null,
+            aiPromptId: 33,
             payload: { text: 'a' },
             payloadHash: 'hash',
             expectedAnswer: { label: 'ok' },
@@ -1416,6 +1423,28 @@ describe('OwnerDashboard AI prompt flow', () => {
             createdAt: '2026-05-23T12:00:00Z',
           }],
         }
+      }
+      if (path === '/tasks/1/ai-dry-runs?golden_sample_id=11&limit=10') {
+        return {
+          dryRuns: [{
+            id: 44,
+            taskId: 1,
+            aiPromptId: 33,
+            goldenSampleId: 11,
+            promptVersion: 3,
+            expectedVerdict: 'pass',
+            actualVerdict: 'pass',
+            matchedExpected: true,
+            status: 'succeeded',
+            result: { verdict: 'pass', overall_score: 90, dimensions: [], reason: 'same task batch golden run', model: 'mock-model', provider: 'ai-worker' },
+            errorMsg: null,
+            createdAt: '2026-05-23T12:01:00Z',
+            finishedAt: '2026-05-23T12:02:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return { dryRuns: [] }
       }
       throw new Error(`unexpected GET ${path}`)
     })
@@ -1428,25 +1457,14 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     await act(async () => {
       runResult.resolve({
-        summary: { total: 1, succeeded: 1, failed: 0 },
-        results: [{
-          goldenSampleId: 11,
-          status: 'succeeded',
-          provider: 'mock',
-          dryRunId: 44,
-          matchedExpected: true,
-          result: {
-            verdict: 'pass',
-            overall_score: 90,
-            dimensions: [],
-            reason: 'same task batch golden run',
-          },
-        }],
+        summary: { total: 1, queued: 1, failed: 0 },
+        results: [{ goldenSampleId: 11, status: 'queued', dryRunId: 44 }],
       })
       await runResult.promise
     })
 
-    expect(await screen.findByText('same task batch golden run')).toBeInTheDocument()
+    // 同任务再次点击不算切走,入队后轮询应正常填充该任务的结果(reason 出现在结果行与详情面板)。
+    expect((await screen.findAllByText('same task batch golden run')).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Run all visible samples' })).not.toBeDisabled()
   })
 

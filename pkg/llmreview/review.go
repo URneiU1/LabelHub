@@ -768,14 +768,6 @@ func parseRetryAfter(raw string) (time.Duration, bool) {
 	return delay, true
 }
 
-func truncateForError(raw []byte) string {
-	text := strings.TrimSpace(string(raw))
-	if len(text) > 512 {
-		return text[:512]
-	}
-	return text
-}
-
 func estimateTokens(text string) int {
 	if text == "" {
 		return 0

@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	mysqlerr "github.com/go-sql-driver/mysql"
@@ -493,8 +492,7 @@ func TestGoldenSampleDryRunReturns500WhenFailureRecordCannotPersist(t *testing.T
 	}
 }
 
-func TestGoldenSampleBatchDryRunReturnsPartialResults(t *testing.T) {
-	t.Setenv("LLM_PROVIDER", "mock")
+func TestGoldenSampleBatchDryRunQueuesPerSample(t *testing.T) {
 	t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
@@ -506,14 +504,18 @@ func TestGoldenSampleBatchDryRunReturnsPartialResults(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "ai_prompt_id", "payload", "payload_hash", "expected_answer", "expected_verdict", "created_by"}).
 			AddRow(11, 1, 34, `{"text":"a"}`, "hash-a", `{"label":"ok"}`, "uncertain", 7).
 			AddRow(12, 1, nil, `{"text":"b"}`, "hash-b", `{"label":"ok"}`, "pass", 7))
+	// 样本 11 可解析到 prompt 34 → 入队(同事务 INSERT ai_dry_runs(queued) + outbox_events)。
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_prompt_configs.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model", "created_by"}).
 			AddRow(34, 1, 3, "review {{answer.label}}", `[{"name":"相关性"}]`, 80, 60, "mock-model", 7))
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
-		WithArgs(1, uint64(34), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, "uncertain", "uncertain", true, "succeeded", sqlmock.AnyArg(), nil, 7, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(1, uint64(34), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, "uncertain", nil, nil, "queued", nil, nil, 7, sqlmock.AnyArg(), nil).
 		WillReturnResult(sqlmock.NewResult(44, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .outbox_events.`).
+		WillReturnResult(sqlmock.NewResult(81, 1))
 	mock.ExpectCommit()
+	// 样本 12 没有 prompt(自身与任务均无),解析失败,不触发任何 DB 写。
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)
@@ -528,16 +530,13 @@ func TestGoldenSampleBatchDryRunReturnsPartialResults(t *testing.T) {
 	}
 	data := responseData(t, rec)
 	summary := data["summary"].(map[string]any)
-	if summary["total"] != float64(2) || summary["succeeded"] != float64(1) || summary["failed"] != float64(1) {
+	if summary["total"] != float64(2) || summary["queued"] != float64(1) || summary["failed"] != float64(1) {
 		t.Fatalf("unexpected summary: %v", summary)
 	}
 	results := data["results"].([]any)
 	first := results[0].(map[string]any)
-	if first["goldenSampleId"] != float64(11) || first["status"] != "succeeded" || first["dryRunId"] != float64(44) {
+	if first["goldenSampleId"] != float64(11) || first["status"] != "queued" || first["dryRunId"] != float64(44) {
 		t.Fatalf("unexpected first result: %v", first)
-	}
-	if first["matchedExpected"] != true {
-		t.Fatalf("matchedExpected = %v, want true", first["matchedExpected"])
 	}
 	second := results[1].(map[string]any)
 	if second["goldenSampleId"] != float64(12) || second["status"] != "failed" {
@@ -688,22 +687,6 @@ func TestGoldenSampleBatchDryRunRejectsMissingSample(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
-	}
-}
-
-func TestGoldenSampleBatchDryRunDelayFromEnv(t *testing.T) {
-	t.Setenv(goldenSampleBatchDelayEnv, "125")
-	delay, err := goldenSampleBatchDryRunDelayFromEnv()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if delay != 125*time.Millisecond {
-		t.Fatalf("delay = %s, want 125ms", delay)
-	}
-
-	t.Setenv(goldenSampleBatchDelayEnv, "-1")
-	if _, err := goldenSampleBatchDryRunDelayFromEnv(); err == nil {
-		t.Fatal("expected invalid delay error")
 	}
 }
 

@@ -1,11 +1,48 @@
 package submission
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
+	"labelhub-api/internal/model"
 	"labelhub-api/internal/statemachine"
 )
+
+func TestTemplateVersionForTaskDefaultsOnlyWhenTaskHasNoTemplate(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	version, err := templateVersionForTask(db, model.Task{ID: 1})
+	if err != nil {
+		t.Fatalf("templateVersionForTask returned error: %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("version = %d, want default 1", version)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestTemplateVersionForTaskErrorsWhenReferencedTemplateMissing(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	templateID := uint64(101)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+id.+task_id`).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	_, err := templateVersionForTask(db, model.Task{ID: 1, TemplateID: &templateID})
+	if !errors.Is(err, ErrTaskTemplate) {
+		t.Fatalf("error = %v, want ErrTaskTemplate", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
 
 // NextRevisionFromMax:无历史 → 1;有历史 max=N → N+1。PLAN §2 append-only + UK(submission_id, revision_no) 契约。
 func TestNextRevisionFromMax(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,20 +67,19 @@ type goldenSampleResponse struct {
 	CreatedAt       time.Time        `json:"createdAt"`
 }
 
+// goldenSampleBatchDryRunResult:批量 dry-run 改为异步入队后,每个样本要么成功入队(queued + dryRunId),
+// 要么因 prompt 解析失败(failed + error)。实际评测结果由 worker 完成后,前端轮询 dry-run 历史获取。
 type goldenSampleBatchDryRunResult struct {
-	GoldenSampleID  uint64                      `json:"goldenSampleId"`
-	Status          string                      `json:"status"`
-	DryRunID        *uint64                     `json:"dryRunId,omitempty"`
-	Provider        string                      `json:"provider,omitempty"`
-	Result          *llmreview.EvaluationResult `json:"result,omitempty"`
-	MatchedExpected *bool                       `json:"matchedExpected,omitempty"`
-	Error           string                      `json:"error,omitempty"`
+	GoldenSampleID uint64  `json:"goldenSampleId"`
+	Status         string  `json:"status"`
+	DryRunID       *uint64 `json:"dryRunId,omitempty"`
+	Error          string  `json:"error,omitempty"`
 }
 
 type goldenSampleBatchDryRunSummary struct {
-	Total     int `json:"total"`
-	Succeeded int `json:"succeeded"`
-	Failed    int `json:"failed"`
+	Total  int `json:"total"`
+	Queued int `json:"queued"`
+	Failed int `json:"failed"`
 }
 
 type resolvedGoldenSamplePrompt struct {
@@ -90,7 +88,6 @@ type resolvedGoldenSamplePrompt struct {
 }
 
 const maxGoldenSampleBatchDryRunSamples = 20
-const goldenSampleBatchDelayEnv = "LLM_BATCH_DRY_RUN_DELAY_MS"
 const goldenSampleDryRunTopic = "ai:dry-run"
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
@@ -477,36 +474,27 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 		sampleByID[sample.ID] = sample
 	}
 
-	provider, _, providerErr := llmreview.NewProviderFromEnv(nil)
-	batchDelay, err := goldenSampleBatchDryRunDelayFromEnv()
-	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-		return
-	}
+	// 与单样本 DryRun 一致:逐样本入队 durable 的 ai:dry-run job(同事务写 AIDryRun + outbox),
+	// 立即返回 queued,不在请求线程里同步调用 LLM(原同步实现最坏会阻塞 ~600s 打满 worker 池)。
+	userID := currentUserID(c)
 	promptCache := map[uint64]resolvedGoldenSamplePrompt{}
 	results := make([]goldenSampleBatchDryRunResult, 0, len(sampleIDs))
 	summary := goldenSampleBatchDryRunSummary{Total: len(sampleIDs)}
-	for index, sampleID := range sampleIDs {
-		if index > 0 && batchDelay > 0 {
-			timer := time.NewTimer(batchDelay)
-			select {
-			case <-c.Request.Context().Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
+	for _, sampleID := range sampleIDs {
+		sample := sampleByID[sampleID]
+		resolved, message, ok := h.resolveGoldenSamplePrompt(task, sample, req.AIPromptID, promptCache)
+		if !ok {
+			results = append(results, goldenSampleBatchDryRunResult{GoldenSampleID: sample.ID, Status: "failed", Error: message})
+			summary.Failed++
+			continue
 		}
-		result, err := h.runGoldenSampleBatchDryRun(c, task, sampleByID[sampleID], req.AIPromptID, provider, providerErr, promptCache)
+		dryRunID, err := h.recordQueuedGoldenSampleDryRun(task.ID, resolved.prompt, sample, userID)
 		if err != nil {
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
 			return
 		}
-		if result.Status == "succeeded" {
-			summary.Succeeded++
-		} else {
-			summary.Failed++
-		}
-		results = append(results, result)
+		results = append(results, goldenSampleBatchDryRunResult{GoldenSampleID: sample.ID, Status: "queued", DryRunID: &dryRunID})
+		summary.Queued++
 	}
 	httpx.OK(c, gin.H{
 		"results": results,
@@ -536,87 +524,6 @@ func normalizeGoldenSampleBatchIDs(c *gin.Context, sampleIDs []uint64) ([]uint64
 		seen[sampleID] = struct{}{}
 	}
 	return sampleIDs, true
-}
-
-func goldenSampleBatchDryRunDelayFromEnv() (time.Duration, error) {
-	raw := strings.TrimSpace(os.Getenv(goldenSampleBatchDelayEnv))
-	if raw == "" {
-		return 0, nil
-	}
-	ms, err := strconv.Atoi(raw)
-	if err != nil || ms < 0 {
-		return 0, errors.New(goldenSampleBatchDelayEnv + " must be a non-negative integer")
-	}
-	return time.Duration(ms) * time.Millisecond, nil
-}
-
-func (h GoldenSampleHandler) runGoldenSampleBatchDryRun(c *gin.Context, task model.Task, sample model.GoldenSample, overridePromptID *uint64, provider llmreview.Provider, providerErr error, promptCache map[uint64]resolvedGoldenSamplePrompt) (goldenSampleBatchDryRunResult, error) {
-	resolved, message, ok := h.resolveGoldenSamplePrompt(task, sample, overridePromptID, promptCache)
-	if !ok {
-		return goldenSampleBatchDryRunResult{
-			GoldenSampleID: sample.ID,
-			Status:         "failed",
-			Error:          message,
-		}, nil
-	}
-	if providerErr != nil {
-		dryRunID, err := h.recordGoldenSampleDryRun(c, task.ID, resolved.prompt, sample, "failed", nil, providerErr)
-		if err != nil {
-			return goldenSampleBatchDryRunResult{}, err
-		}
-		return goldenSampleBatchDryRunResult{
-			GoldenSampleID: sample.ID,
-			Status:         "failed",
-			DryRunID:       &dryRunID,
-			Error:          llmreview.SafeErrorMessage(providerErr),
-		}, nil
-	}
-
-	result, err := provider.Evaluate(c.Request.Context(), llmreview.PromptConfig{
-		ID:             resolved.prompt.ID,
-		Version:        resolved.prompt.Version,
-		PromptTemplate: resolved.prompt.PromptTemplate,
-		Dimensions:     resolved.dimensions,
-		PassThreshold:  resolved.prompt.PassThreshold,
-		UncertainMin:   resolved.prompt.UncertainMin,
-		Model:          resolved.prompt.Model,
-	}, llmreview.EvaluationInput{
-		TaskID:              task.ID,
-		PromptConfigID:      resolved.prompt.ID,
-		PromptVersion:       resolved.prompt.Version,
-		PayloadJSON:         sample.Payload,
-		AnswerJSON:          sample.ExpectedAnswer,
-		BaselineDescription: task.BaselineDescription.String,
-	})
-	if err == nil {
-		err = llmreview.ValidateThresholdConsistency(result, llmreview.PromptConfig{PassThreshold: resolved.prompt.PassThreshold, UncertainMin: resolved.prompt.UncertainMin})
-	}
-	if err != nil {
-		dryRunID, recordErr := h.recordGoldenSampleDryRun(c, task.ID, resolved.prompt, sample, "failed", nil, err)
-		if recordErr != nil {
-			return goldenSampleBatchDryRunResult{}, recordErr
-		}
-		return goldenSampleBatchDryRunResult{
-			GoldenSampleID: sample.ID,
-			Status:         "failed",
-			DryRunID:       &dryRunID,
-			Error:          llmreview.SafeErrorMessage(err),
-		}, nil
-	}
-
-	dryRunID, err := h.recordGoldenSampleDryRun(c, task.ID, resolved.prompt, sample, "succeeded", &result, nil)
-	if err != nil {
-		return goldenSampleBatchDryRunResult{}, err
-	}
-	matchedExpected := result.Verdict == sample.ExpectedVerdict
-	return goldenSampleBatchDryRunResult{
-		GoldenSampleID:  sample.ID,
-		Status:          "succeeded",
-		DryRunID:        &dryRunID,
-		Provider:        result.Provider,
-		Result:          &result,
-		MatchedExpected: &matchedExpected,
-	}, nil
 }
 
 func (h GoldenSampleHandler) resolveGoldenSamplePrompt(task model.Task, sample model.GoldenSample, overridePromptID *uint64, promptCache map[uint64]resolvedGoldenSamplePrompt) (resolvedGoldenSamplePrompt, string, bool) {
@@ -657,47 +564,6 @@ func validGoldenSampleVerdict(verdict string) bool {
 	default:
 		return false
 	}
-}
-
-func (h GoldenSampleHandler) recordGoldenSampleDryRun(c *gin.Context, taskID uint64, prompt model.AIPromptConfig, sample model.GoldenSample, status string, result *llmreview.EvaluationResult, cause error) (uint64, error) {
-	var raw *string
-	var actualVerdict model.NullString
-	var matchedExpected *bool
-	if result != nil {
-		bytes, err := json.Marshal(result)
-		if err != nil {
-			return 0, err
-		}
-		text := string(bytes)
-		raw = &text
-		actualVerdict = model.StringFrom(result.Verdict)
-		matched := result.Verdict == sample.ExpectedVerdict
-		matchedExpected = &matched
-	}
-	payloadSnapshot := sample.Payload
-	expectedAnswerSnapshot := sample.ExpectedAnswer
-	run := model.AIDryRun{
-		TaskID:                 taskID,
-		AIPromptID:             prompt.ID,
-		GoldenSampleID:         &sample.ID,
-		PromptVersion:          prompt.Version,
-		PayloadSnapshot:        &payloadSnapshot,
-		ExpectedAnswerSnapshot: &expectedAnswerSnapshot,
-		ExpectedVerdict:        model.StringFrom(sample.ExpectedVerdict),
-		ActualVerdict:          actualVerdict,
-		MatchedExpected:        matchedExpected,
-		Status:                 status,
-		Result:                 raw,
-		CreatedBy:              currentUserID(c),
-		FinishedAt:             model.TimeFrom(time.Now().UTC()),
-	}
-	if cause != nil {
-		run.ErrorMsg = model.StringFrom(llmreview.SafeErrorMessage(cause))
-	}
-	if err := h.db.Create(&run).Error; err != nil {
-		return 0, err
-	}
-	return run.ID, nil
 }
 
 func (h GoldenSampleHandler) recordQueuedGoldenSampleDryRun(taskID uint64, prompt model.AIPromptConfig, sample model.GoldenSample, userID uint64) (uint64, error) {

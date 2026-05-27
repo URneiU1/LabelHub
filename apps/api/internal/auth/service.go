@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"labelhub-api/internal/model"
@@ -33,6 +34,9 @@ type TokenPair struct {
 	RefreshToken          string    `json:"refreshToken"`
 	AccessTokenExpiresAt  time.Time `json:"accessTokenExpiresAt"`
 	RefreshTokenExpiresAt time.Time `json:"refreshTokenExpiresAt"`
+	// RefreshJTI 是 refresh token 的唯一标识(也写进 token 的 jti claim),
+	// 调用方据此持久化以支持服务端撤销;不回传给客户端。
+	RefreshJTI string `json:"-"`
 }
 
 type Service struct {
@@ -66,12 +70,13 @@ func (s *Service) GenerateTokenPair(user model.User, roles []string) (TokenPair,
 	accessExpiresAt := now.Add(s.accessTTL)
 	refreshExpiresAt := now.Add(s.refreshTTL)
 
-	accessToken, err := s.sign(user, roles, TokenTypeAccess, now, accessExpiresAt)
+	accessToken, err := s.sign(user, roles, TokenTypeAccess, "", now, accessExpiresAt)
 	if err != nil {
 		return TokenPair{}, err
 	}
 
-	refreshToken, err := s.sign(user, roles, TokenTypeRefresh, now, refreshExpiresAt)
+	refreshJTI := uuid.NewString()
+	refreshToken, err := s.sign(user, roles, TokenTypeRefresh, refreshJTI, now, refreshExpiresAt)
 	if err != nil {
 		return TokenPair{}, err
 	}
@@ -81,6 +86,7 @@ func (s *Service) GenerateTokenPair(user model.User, roles []string) (TokenPair,
 		RefreshToken:          refreshToken,
 		AccessTokenExpiresAt:  accessExpiresAt,
 		RefreshTokenExpiresAt: refreshExpiresAt,
+		RefreshJTI:            refreshJTI,
 	}, nil
 }
 
@@ -101,13 +107,14 @@ func (s *Service) Parse(tokenText string, expectedType string) (*Claims, error) 
 	return claims, nil
 }
 
-func (s *Service) sign(user model.User, roles []string, tokenType string, issuedAt time.Time, expiresAt time.Time) (string, error) {
+func (s *Service) sign(user model.User, roles []string, tokenType string, jti string, issuedAt time.Time, expiresAt time.Time) (string, error) {
 	claims := Claims{
 		UserID:    user.ID,
 		Username:  user.Username,
 		Roles:     roles,
 		TokenType: tokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			Subject:   strconv.FormatUint(user.ID, 10),
 			IssuedAt:  jwt.NewNumericDate(issuedAt),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),

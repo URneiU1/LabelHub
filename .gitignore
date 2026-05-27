@@ -125,3 +125,8 @@ backups/
 TODO.local.md
 NOTES.local.md
 scratch/
+
+# --- 安全:真实凭据文件不入仓(仅保留 .example 模板) ---
+deploy/nginx/asynqmon.htpasswd
+# 误建在 Go API 树里的前端空目录,防止再次被跟踪
+apps/api/apps/

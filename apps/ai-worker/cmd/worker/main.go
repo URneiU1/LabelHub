@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"time"
@@ -82,9 +83,14 @@ func openDB() (*sql.DB, error) {
 }
 
 func mysqlDSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC&multiStatements=true",
+	// worker 不跑 migration,无需 multiStatements;DB_PASSWORD 必须显式提供,缺失即 fatal。
+	password := os.Getenv("DB_PASSWORD")
+	if password == "" {
+		log.Fatal("DB_PASSWORD must be set")
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC",
 		envOrDefault("DB_USER", "labelhub"),
-		envOrDefault("DB_PASSWORD", "labelhub_dev"),
+		password,
 		envOrDefault("DB_HOST", "127.0.0.1"),
 		envOrDefault("DB_PORT", "13306"),
 		envOrDefault("DB_NAME", "labelhub"),

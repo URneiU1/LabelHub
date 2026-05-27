@@ -60,18 +60,15 @@ type GoldenSampleCreateResponse = {
 }
 type GoldenSampleBatchDryRunResult = {
   goldenSampleId: number
-  status: 'succeeded' | 'failed'
+  status: 'queued' | 'failed'
   dryRunId?: number
-  provider?: string
-  result?: AIDryRunResult['result']
-  matchedExpected?: boolean
   error?: string
 }
 type GoldenSampleBatchDryRunResponse = {
   results: GoldenSampleBatchDryRunResult[]
   summary: {
     total: number
-    succeeded: number
+    queued: number
     failed: number
   }
 }
@@ -566,16 +563,42 @@ export default function OwnerDashboard() {
         sample_ids: samples.map((sample) => sample.id),
       })
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
+      const sampleById = new Map(samples.map((sample) => [sample.id, sample]))
       const resultBySampleId = new Map(data.results.map((result) => [result.goldenSampleId, result]))
+      // 批量已改为异步入队:成功入队的标记 running 并复用单样本 poller 拉取结果,解析失败的直接标 failed。
       setGoldenRunRows((current) => {
         const next = { ...current }
         for (const sample of samples) {
-          next[sample.id] = goldenSampleBatchResultToRunRow(sample, resultBySampleId.get(sample.id))
+          const result = resultBySampleId.get(sample.id)
+          if (result?.status === 'queued') {
+            next[sample.id] = {
+              sampleId: sample.id,
+              expectedVerdict: sample.expectedVerdict,
+              status: 'running',
+              reason: result.status,
+              dryRunId: result.dryRunId,
+            }
+          } else {
+            next[sample.id] = {
+              sampleId: sample.id,
+              expectedVerdict: sample.expectedVerdict,
+              status: 'failed',
+              error: result?.error || 'golden sample dry-run 入队失败',
+            }
+          }
         }
         return next
       })
+      for (const result of data.results) {
+        if (result.status === 'queued' && result.dryRunId !== undefined) {
+          const sample = sampleById.get(result.goldenSampleId)
+          if (sample) {
+            void pollGoldenSampleRun(selected.id, sample, result.dryRunId, guard, 0)
+          }
+        }
+      }
       if (data.summary.failed > 0) {
-        setGoldenSampleError(data.results.find((result) => result.status === 'failed')?.error || '部分 golden sample dry-run 失败')
+        setGoldenSampleError(data.results.find((result) => result.status === 'failed')?.error || '部分 golden sample 入队失败')
       } else {
         setGoldenSampleError('')
       }
@@ -1244,30 +1267,6 @@ function goldenSampleResultToRunRow(sample: GoldenSample, result: AIDryRunResult
     model: result.result.model,
     reason: result.result.reason,
     dryRunId: result.dryRunId,
-  }
-}
-
-function goldenSampleBatchResultToRunRow(sample: GoldenSample, result: GoldenSampleBatchDryRunResult | undefined): GoldenSampleRunRow {
-  if (result?.status === 'succeeded' && result.result) {
-    return {
-      sampleId: sample.id,
-      expectedVerdict: sample.expectedVerdict,
-      status: 'succeeded',
-      actualVerdict: result.result.verdict,
-      matchedExpected: result.matchedExpected,
-      score: result.result.overall_score,
-      provider: result.provider,
-      model: result.result.model,
-      reason: result.result.reason,
-      dryRunId: result.dryRunId,
-    }
-  }
-  return {
-    sampleId: sample.id,
-    expectedVerdict: sample.expectedVerdict,
-    status: 'failed',
-    dryRunId: result?.dryRunId,
-    error: result?.error || 'missing dry-run result',
   }
 }
 

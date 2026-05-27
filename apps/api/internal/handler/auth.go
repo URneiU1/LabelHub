@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -37,8 +38,10 @@ func NewAuthHandler(db *gorm.DB, authService *auth.Service, authRouter gin.IRout
 }
 
 func (h AuthHandler) Register(router gin.IRouter) {
-	router.POST("/auth/login", h.Login)
-	router.POST("/auth/refresh", h.Refresh)
+	// 登录/刷新是无需认证、可被暴力枚举的端点,共用一个按 IP 的令牌桶:10 次突发后每 6s 补 1 次。
+	authLimiter := middleware.RateLimit(6*time.Second, 10)
+	router.POST("/auth/login", authLimiter, h.Login)
+	router.POST("/auth/refresh", authLimiter, h.Refresh)
 	h.authRouter.GET("/me", h.Me)
 	h.authRouter.POST("/auth/logout", h.Logout)
 }
@@ -75,11 +78,48 @@ func (h AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
+	// 校验该 refresh token 服务端仍有效(存在、未撤销、未过期)。
+	if !h.refreshTokenActive(c, claims.ID) {
+		return
+	}
+
 	user, ok := h.findActiveUser(c, claims.Username)
 	if !ok {
 		return
 	}
+
+	// 轮换:签发新对前先撤销旧 jti,防止 refresh token 被重放。
+	if err := h.db.Model(&model.RefreshToken{}).
+		Where("jti = ? AND revoked_at IS NULL", claims.ID).
+		Update("revoked_at", time.Now().UTC()).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to rotate refresh token")
+		return
+	}
 	h.respondWithTokens(c, user)
+}
+
+// refreshTokenActive 校验给定 jti 在 refresh_tokens 表中存在、未撤销且未过期。
+// 校验不通过时已写入 401/500 响应,返回 false。
+func (h AuthHandler) refreshTokenActive(c *gin.Context, jti string) bool {
+	if jti == "" {
+		httpx.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "invalid refresh token")
+		return false
+	}
+	var record model.RefreshToken
+	err := h.db.Where("jti = ?", jti).First(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		httpx.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "refresh token revoked or expired")
+		return false
+	}
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to verify refresh token")
+		return false
+	}
+	if record.RevokedAt != nil || record.ExpiresAt.Before(time.Now().UTC()) {
+		httpx.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "refresh token revoked or expired")
+		return false
+	}
+	return true
 }
 
 func (h AuthHandler) Me(c *gin.Context) {
@@ -103,14 +143,22 @@ func (h AuthHandler) Me(c *gin.Context) {
 	})
 }
 
-// Logout 是无服务端状态的"登出",由前端 clearToken() 负责真正失效。
-// 当前 JWT 无 revocation 列表 — 已签发的 access/refresh token 在过期前仍有效。
-// Sprint 5 工程质量收尾时引入 refresh token 持久化 + 黑名单后,这里改成真正撤销。
+// Logout 撤销当前用户全部未撤销的 refresh token(服务端登出),使其无法再换取新 access token。
+// 注意:已签发的 access token(短 TTL)在过期前仍可用 —— 这是 JWT 的标准取舍,
+// 全量 access 撤销需每请求查黑名单,代价过高,故仅撤 refresh。
 func (h AuthHandler) Logout(c *gin.Context) {
-	httpx.OK(c, gin.H{
-		"ok":   true,
-		"note": "client must clear local tokens; server-side revocation pending (Sprint 5)",
-	})
+	claims, ok := middleware.Claims(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing auth context")
+		return
+	}
+	if err := h.db.Model(&model.RefreshToken{}).
+		Where("user_id = ? AND revoked_at IS NULL", claims.UserID).
+		Update("revoked_at", time.Now().UTC()).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to revoke sessions")
+		return
+	}
+	httpx.OK(c, gin.H{"ok": true})
 }
 
 func (h AuthHandler) findActiveUser(c *gin.Context, username string) (model.User, bool) {
@@ -132,6 +180,16 @@ func (h AuthHandler) respondWithTokens(c *gin.Context, user model.User) {
 	tokens, err := h.auth.GenerateTokenPair(user, auth.RolesOf(user))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to issue token")
+		return
+	}
+
+	// 持久化新签发的 refresh token,以支持后续撤销/轮换校验。
+	if err := h.db.Create(&model.RefreshToken{
+		JTI:       tokens.RefreshJTI,
+		UserID:    user.ID,
+		ExpiresAt: tokens.RefreshTokenExpiresAt,
+	}).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to persist session")
 		return
 	}
 

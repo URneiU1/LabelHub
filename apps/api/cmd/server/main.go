@@ -15,6 +15,7 @@ import (
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"labelhub-api/internal/auth"
 	"labelhub-api/internal/db"
@@ -45,7 +46,13 @@ func main() {
 	startAIReviewSweeper(outboxCtx, database, logger)
 	startOrphanTempFileCleaner(outboxCtx, database, logger)
 
+	// 默认 release 模式(不打印调试路由/警告);本地调试可显式设 GIN_MODE=debug。
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	r := gin.Default()
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS())
 	r.Use(middleware.RequestID())
 	r.GET("/", healthResponse)
@@ -190,26 +197,14 @@ func startOrphanTempFileCleaner(ctx context.Context, database *gorm.DB, logger *
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				var orphans []model.UploadedFile
 				cutoff := time.Now().Add(-24 * time.Hour)
-				if err := database.WithContext(ctx).
-					Where("status = ? AND created_at < ?", "temp", cutoff).
-					Find(&orphans).Error; err != nil {
+				orphans, err := claimOrphanTempFiles(ctx, database, cutoff, orphanTempFileCleanerBatch())
+				if err != nil {
 					logger.Warn("failed to query orphan temp files", zap.Error(err))
 					continue
 				}
 				uploadDir := envOrDefault("UPLOAD_DIR", "./data/uploads")
 				for _, f := range orphans {
-					res := database.WithContext(ctx).Model(&model.UploadedFile{}).
-						Where("id = ? AND status = ?", f.ID, "temp").
-						Update("status", "deleted")
-					if res.Error != nil {
-						logger.Warn("failed to mark orphan temp file deleted", zap.Uint64("id", f.ID), zap.Error(res.Error))
-						continue
-					}
-					if res.RowsAffected != 1 {
-						continue
-					}
 					dest := filepath.Join(uploadDir, strconv.FormatUint(f.TaskID, 10), f.StorageKey)
 					if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
 						logger.Warn("failed to remove orphan temp file", zap.Uint64("id", f.ID), zap.String("path", dest), zap.Error(err))
@@ -222,10 +217,49 @@ func startOrphanTempFileCleaner(ctx context.Context, database *gorm.DB, logger *
 	}()
 }
 
+func claimOrphanTempFiles(ctx context.Context, database *gorm.DB, cutoff time.Time, batch int) ([]model.UploadedFile, error) {
+	var orphans []model.UploadedFile
+	err := database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("status = ? AND created_at < ?", "temp", cutoff).
+			Order("id ASC").
+			Limit(batch).
+			Find(&orphans).Error; err != nil {
+			return err
+		}
+		if len(orphans) == 0 {
+			return nil
+		}
+		ids := make([]uint64, 0, len(orphans))
+		for _, f := range orphans {
+			ids = append(ids, f.ID)
+		}
+		res := tx.Model(&model.UploadedFile{}).
+			Where("id IN ? AND status = ?", ids, "temp").
+			Update("status", "deleted")
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != int64(len(orphans)) {
+			return fmt.Errorf("orphan temp file claim lost update race")
+		}
+		return nil
+	})
+	return orphans, err
+}
+
 func orphanTempFileCleanerInterval() time.Duration {
 	ms, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_INTERVAL_MS", "3600000"))
 	if err != nil || ms <= 0 {
 		return time.Hour
 	}
 	return time.Duration(ms) * time.Millisecond
+}
+
+func orphanTempFileCleanerBatch() int {
+	batch, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_BATCH", "100"))
+	if err != nil || batch <= 0 {
+		return 100
+	}
+	return batch
 }

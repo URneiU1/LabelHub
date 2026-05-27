@@ -43,9 +43,9 @@ func findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, l
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Submission{}, err
 	}
-	templateVersion := 1
-	if version, err := templateVersionForTask(tx, task); err == nil {
-		templateVersion = version
+	templateVersion, err := templateVersionForTask(tx, task)
+	if err != nil {
+		return model.Submission{}, err
 	}
 	submission = model.Submission{
 		TaskID:          task.ID,
@@ -82,11 +82,14 @@ func lockClaimedItem(tx *gorm.DB, taskID uint64, itemID uint64, labelerID uint64
 
 func templateVersionForTask(tx *gorm.DB, task model.Task) (int, error) {
 	if task.TemplateID == nil {
-		return 1, gorm.ErrRecordNotFound
+		return 1, nil
 	}
 	template, err := templateByID(tx, task.ID, *task.TemplateID)
 	if err != nil {
-		return 1, err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, ErrTaskTemplate
+		}
+		return 0, err
 	}
 	return template.Version, nil
 }

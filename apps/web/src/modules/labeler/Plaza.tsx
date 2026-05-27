@@ -138,9 +138,11 @@ export default function LabelerPlaza() {
     }
     const taskId = bundle.task.id
     const itemId = bundle.item.id
-    const requestSeq = autoSaveSeq.current + 1
     const timer = window.setTimeout(() => {
-      autoSaveSeq.current = requestSeq
+      // 在触发时捕获当前活动序号(已由最近一次 onChange / 手动保存推进),且不在定时器里改写它;
+      // 任何更晚的改动或保存都会推进序号,使本次 autosave 的回调因序号不等而作废,
+      // 杜绝旧闭包里的 answer 覆盖更新的 lastSavedDraftKey。
+      const requestSeq = autoSaveSeq.current
       setAutoSaveState('saving')
       void apiPost<Submission>(`/tasks/${taskId}/items/${itemId}/draft`, { answer })
         .then((submission) => {
