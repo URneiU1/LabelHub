@@ -75,6 +75,7 @@ func main() {
 	exportHandler := handler.NewExportHandler(database, exportDownloadSecret(), exportDownloadTTL())
 	exportHandler.Register(authedAPI)
 	exportHandler.RegisterPublic(api) // 公开下载路由, 签名 token 即鉴权
+	handler.NewStatsHandler(database).Register(authedAPI)
 	handler.NewTemplateHandler(database).Register(authedAPI)
 	handler.NewAIPromptHandler(database).Register(authedAPI)
 	handler.NewGoldenSampleHandler(database).Register(authedAPI)
