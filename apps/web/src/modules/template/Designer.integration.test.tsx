@@ -278,6 +278,13 @@ describe('TemplateDesigner', () => {
     expect(screen.getByRole('button', { name: /select group_1/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /select tabs_1/ })).toBeInTheDocument()
 
+    const groupPreview = within(screen.getByLabelText('nested preview group_1'))
+    expect(groupPreview.getByLabelText('nested field group_summary')).toBeInTheDocument()
+    expect(groupPreview.getByLabelText('nested field group_decision')).toBeInTheDocument()
+    const tabsPreview = within(screen.getByLabelText('nested preview tabs_1'))
+    expect(tabsPreview.getByLabelText('nested field tabs_1_decision')).toBeInTheDocument()
+    expect(tabsPreview.getByLabelText('nested field tabs_1_tab2_text')).toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: 'Save as new version' }))
 
     await waitFor(() => {

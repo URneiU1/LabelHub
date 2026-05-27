@@ -55,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s6-designer-responsive`: S6 Day3 第二段完成:新增 `apps/web/src/modules/template/Designer.css`(原来 import 了但文件缺失,会直接挂 build),把 Designer 三栏布局从固定 `220px / 1fr / 320px` inline grid 改成响应式——1920 三栏(物料 / 画布 / 属性),≤1599 两栏(物料 + 画布,属性面板下移占满整行),≤768 单列堆叠;修正 Codex 贴错的类名(`template-designer-properties` 本来贴在左侧物料栏上,改为 `template-designer-palette`,并给画布 `template-designer-canvas`、右侧属性面板 `template-designer-property` 补正确类名);Group/Tabs 画布预览改为 `NestedCanvasPreview`/`NestedCanvasRow`,把子字段以 widget/name/label 迷你行展示(Tabs 按 tab 分组),并补集成测试断言画布上嵌套预览确实渲染 Group 子字段和 Tabs 各页子字段。
 - 2026-05-28 `s6-runtime-tabs`: S6 Day3 第一段完成: `SchemaRenderer` 的 Tabs 从“所有 tab panel 堆叠显示”改成真实 `tablist`/`tabpanel` 交互,默认显示第一 tab,点击切换后只渲染 active tab 字段,同时保持 flat answer object 中已填写答案不丢;补 `SchemaRenderer` 测试验证 tab 切换、隐藏字段、切回后 radio 选择保持;Designer round-trip 测试跟随新 Tabs 行为先切到 Tab 2 再断言子字段。
 - 2026-05-28 `s6-dense-status-surfaces`: S6 Day2 第一段完成:Owner Dashboard、ExportPanel、Labeler Plaza、Reviewer Queue 开始复用共享 `StatusBadge`/`EmptyState`/`LoadingBlock`,导出历史、任务列表、AI review 开关、golden sample、dry-run history、标注空态和审核空态不再直接裸显示 raw status/loading 文本;相关测试断言更新为新中文状态/可访问 loading 状态。
 - 2026-05-28 `s6-state-primitives`: S6 Day1 底座完成: `tokens.css` 从 Schematic/Inter/default-blue 收敛为 Editorial console tokens,移除 Google font 依赖,加入稳定 7 态 status 色、Semi 常用控件 CSS override、全局 focus-visible、skeleton/top-progress keyframes;新增共享 `StatusBadge`/`statusLabel`、`EmptyState`、`LoadingBlock`、`TopProgress` 和 `StatePrimitives` 测试,为后续 Owner/Labeler/Reviewer 页面统一状态、空态、加载态做准备。
@@ -125,6 +126,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S6 designer responsive: `pnpm -F web build` 通过(补回缺失的 `Designer.css`,仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web lint` 通过;`pnpm -F web test`（full）通过(13 files,108 tests,含新增嵌套画布预览断言,仍有 jsdom canvas warning);`git diff --check` 通过。响应式断点(1920/1280/窄屏)依赖 CSS media query,jsdom 不渲染布局,留待 Day5 浏览器 smoke 实测。
 - 2026-05-28 S6 runtime tabs: `pnpm -F web test -- SchemaRenderer Designer.integration` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 dense/status surfaces: `pnpm -F web test -- ExportPanel Plaza Queue Dashboard StatePrimitives` 通过;full `pnpm -F web test` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 state primitives: `pnpm -F web test -- StatePrimitives` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。

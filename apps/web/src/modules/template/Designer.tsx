@@ -6,6 +6,7 @@ import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
 import { parseTemplateSchema } from '../../renderer/parser'
 import { widgetRegistry } from '../../renderer/widgets'
 import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TemplateSchema, type WidgetType } from '../../renderer/types'
+import './Designer.css'
 
 type TemplateDetailResponse = {
   template: TaskTemplate
@@ -359,8 +360,8 @@ export default function TemplateDesigner() {
         </div>
       ) : null}
 
-      <div style={{ ...designerGridStyle, marginTop: 'var(--space-lg)' }}>
-        <aside style={panelStyle}>
+      <div className="template-designer-grid" style={{ marginTop: 'var(--space-lg)' }}>
+        <aside className="template-designer-palette" style={panelStyle}>
           <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
             <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
           </div>
@@ -376,7 +377,7 @@ export default function TemplateDesigner() {
           </div>
         </aside>
 
-        <main style={{ ...panelStyle, minHeight: 800 }}>
+        <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 800 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
             <label style={fieldStyle}>
               <span style={{ fontWeight: 600 }}>模板名称</span>
@@ -441,7 +442,7 @@ export default function TemplateDesigner() {
           </div>
         </main>
 
-        <aside style={panelStyle}>
+        <aside className="template-designer-property" style={panelStyle}>
           <PropertyPanel
             field={selectedField}
             errors={selectedField ? validationErrorsByDraftId.get(selectedField._draftId) ?? [] : []}
@@ -527,17 +528,53 @@ function CanvasField({
           </div>)}
         </div>
       ) : null}
-      <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8 }}>
-        <Widget
-          field={field}
-          value={field.widget === 'Tags' ? [] : ''}
-          answer={{}}
-          payload={previewPayload}
-          readOnly
-          onChange={() => undefined}
-        />
-      </div>
+      {field.widget === 'Group' || field.widget === 'Tabs' ? (
+        <NestedCanvasPreview field={field} />
+      ) : (
+        <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8 }}>
+          <Widget
+            field={field}
+            value={field.widget === 'Tags' ? [] : ''}
+            answer={{}}
+            payload={previewPayload}
+            readOnly
+            onChange={() => undefined}
+          />
+        </div>
+      )}
     </section>
+  )
+}
+
+function NestedCanvasPreview({ field }: { field: DraftField }) {
+  if (field.widget === 'Group') {
+    return (
+      <div style={nestedCanvasPreviewStyle} aria-label={`nested preview ${field.name}`}>
+        {(field.fields ?? []).map((child, index) => <NestedCanvasRow key={`${child.name}-${index}`} child={child} />)}
+      </div>
+    )
+  }
+  return (
+    <div style={nestedCanvasPreviewStyle} aria-label={`nested preview ${field.name}`}>
+      {(field.tabs ?? []).map((tab, index) => (
+        <div key={`${tab.label}-${index}`} style={nestedCanvasTabStyle}>
+          <strong>{tab.label}</strong>
+          <div style={nestedCanvasRowsStyle}>
+            {tab.fields.map((child, childIndex) => <NestedCanvasRow key={`${child.name}-${childIndex}`} child={child} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function NestedCanvasRow({ child }: { child: FieldSchema }) {
+  return (
+    <div style={nestedCanvasRowStyle} aria-label={`nested field ${child.name}`}>
+      <span style={nestedCanvasWidgetStyle}>{child.widget}</span>
+      <strong>{child.name}</strong>
+      <span>{child.label}</span>
+    </div>
   )
 }
 
@@ -548,7 +585,7 @@ function EmptyCanvasDiagram() {
         <div style={{ ...emptyNodeStyle, gridColumn: '1 / 2' }} />
         <div style={emptyConnectorStyle} />
         <div style={{ ...emptyNodeStyle, gridColumn: '3 / 4' }} />
-        <div style={{ ...emptyNodeStyle, gridColumn: '2 / 3', gridRow: '2 / 3', borderColor: 'var(--color-accent)' }} />
+        <div style={{ ...emptyNodeStyle, gridColumn: '2 / 3', gridRow: '2 / 3', border: '1px solid var(--color-accent)' }} />
       </div>
       <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>从左侧物料面板添加字段开始搭建</div>
       <div style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
@@ -1285,13 +1322,6 @@ const subHeadingStyle: CSSProperties = {
   fontSize: 'var(--text-h2)',
 }
 
-const designerGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '220px minmax(360px, 1fr) 320px',
-  gap: 'var(--space-md)',
-  alignItems: 'start',
-}
-
 const panelStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
@@ -1407,7 +1437,7 @@ const canvasItemStyle: CSSProperties = {
 
 const selectedCanvasItemStyle: CSSProperties = {
   ...canvasItemStyle,
-  borderColor: 'var(--color-accent)',
+  border: '1px solid var(--color-accent)',
   boxShadow: '0 0 0 2px var(--color-accent-soft)',
 }
 
@@ -1467,6 +1497,47 @@ const selectFieldButtonStyle: CSSProperties = {
 
 const widgetPreviewStyle: CSSProperties = {
   padding: 'var(--space-lg)',
+}
+
+const nestedCanvasPreviewStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-md)',
+  background: 'var(--color-surface)',
+}
+
+const nestedCanvasTabStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-surface-subtle)',
+}
+
+const nestedCanvasRowsStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-xs)',
+}
+
+const nestedCanvasRowStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '72px minmax(90px, 1fr) minmax(90px, 1fr)',
+  gap: 'var(--space-sm)',
+  alignItems: 'center',
+  padding: 'var(--space-xs) var(--space-sm)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-bg)',
+  color: 'var(--color-text-secondary)',
+  fontSize: 'var(--text-sm)',
+}
+
+const nestedCanvasWidgetStyle: CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 10,
+  color: 'var(--color-text-muted)',
+  textTransform: 'uppercase',
 }
 
 const fieldErrorListStyle: CSSProperties = {
