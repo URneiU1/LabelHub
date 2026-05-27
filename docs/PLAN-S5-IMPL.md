@@ -141,8 +141,7 @@ pnpm -F web add -D openapi-typescript @testing-library/jest-dom   # 后者若已
 
 ```
 apps/api/internal/integration/        # 新目录, 与 handler 的 sqlmock "integration_test.go" 区分
-  main_e2e_test.go                     # //go:build integration
-  containers_test.go                   # 起 mysql + redis 容器 + 跑 migration + seed 的脚手架
+  main_flow_integration_test.go        # //go:build integration,起 mysql + redis 容器 + 跑 migration + seed + 主链路
 ```
 
 ### Task 2.1:容器脚手架(`//go:build integration`)
@@ -184,7 +183,7 @@ integration:
     - run: go test -tags=integration ./apps/api/internal/integration -timeout 300s
 ```
 
-**Day 2 验证**:`go test -tags=integration ./apps/api/internal/integration -v` 本地绿(docker 起);普通 `go test ./...` 不受影响仍快。
+**Day 2 验证**:`go test -tags=integration ./apps/api/internal/integration -v` 本地绿(docker 起);普通 `go test ./...` 不受影响仍快。本机 Colima 若 Ryuk socket mount 失败,用 `DOCKER_HOST=unix:///Users/dadadineiyou/.colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true` 前缀跑本地验证;GitHub Actions runner 用默认 Docker。
 
 ---
 

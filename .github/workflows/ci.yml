@@ -46,3 +46,19 @@ jobs:
 
       - name: Build web
         run: pnpm -F web build
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.work
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Test API integration
+        run: go test -tags=integration ./apps/api/internal/integration -count=1
