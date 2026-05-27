@@ -203,7 +203,7 @@ const tabButtonStyle: CSSProperties = {
 
 const tabButtonActiveStyle: CSSProperties = {
   ...tabButtonStyle,
-  borderColor: 'var(--color-accent)',
+  border: '1px solid var(--color-accent)',
   background: 'var(--color-accent-soft)',
   color: 'var(--color-accent)',
 }
