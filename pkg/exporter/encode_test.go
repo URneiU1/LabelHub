@@ -95,6 +95,37 @@ func TestEncodeCSV_HeaderBOMAndNestedStringified(t *testing.T) {
 	}
 }
 
+func TestEncodeCSV_NeutralizesFormulaInjection(t *testing.T) {
+	cols := []Column{{Source: "answer", Export: "答案"}}
+	rows := []Row{{{Key: "answer", Value: `=HYPERLINK("http://evil","x")`}}}
+	var buf bytes.Buffer
+	if _, err := EncodeCSV(&buf, cols, rows); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// 危险单元格必须被前导单引号中和,不能裸 = 开头被 Excel 当公式执行。
+	if !strings.Contains(buf.String(), `'=HYPERLINK`) {
+		t.Fatalf("formula cell not neutralized: %q", buf.String())
+	}
+}
+
+func TestCSVSafeCell(t *testing.T) {
+	cases := map[string]string{
+		"=cmd":   "'=cmd",
+		"+1":     "'+1",
+		"-1":     "'-1",
+		"@x":     "'@x",
+		"\tx":    "'\tx",
+		"normal": "normal",
+		"a=b":    "a=b",
+		"":       "",
+	}
+	for in, want := range cases {
+		if got := csvSafeCell(in); got != want {
+			t.Errorf("csvSafeCell(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
 func TestEncodeXLSX_OpensWithExcelizeAndHasHeader(t *testing.T) {
 	var buf bytes.Buffer
 	n, err := EncodeXLSX(&buf, sampleCols(), sampleRows())

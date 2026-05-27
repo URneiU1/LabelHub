@@ -27,7 +27,7 @@ func EncodeCSV(w io.Writer, cols []Column, rows []Row) (int, error) {
 	for i, row := range rows {
 		record := make([]string, len(cols))
 		for j, col := range cols {
-			record[j] = stringifyCell(pick(row, col.Source))
+			record[j] = csvSafeCell(stringifyCell(pick(row, col.Source)))
 		}
 		if err := cw.Write(record); err != nil {
 			return i, err
@@ -38,4 +38,17 @@ func EncodeCSV(w io.Writer, cols []Column, rows []Row) (int, error) {
 		return len(rows), err
 	}
 	return len(rows), nil
+}
+
+// csvSafeCell 防 CSV 公式注入:以 = + - @ \t \r 开头的单元格会被 Excel / LibreOffice
+// 当公式执行(如用户答案 =HYPERLINK(...));给这类值加前导单引号,使其被当作纯文本。
+func csvSafeCell(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
 }
