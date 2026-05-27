@@ -72,7 +72,9 @@ func main() {
 	handler.NewReviewerHandler(database).Register(authedAPI)
 	handler.NewUploadHandler(database).Register(authedAPI)
 	handler.NewLLMHandler().Register(authedAPI)
-	handler.NewExportHandler(database).Register(authedAPI)
+	exportHandler := handler.NewExportHandler(database, exportDownloadSecret(), exportDownloadTTL())
+	exportHandler.Register(authedAPI)
+	exportHandler.RegisterPublic(api) // 公开下载路由, 签名 token 即鉴权
 	handler.NewTemplateHandler(database).Register(authedAPI)
 	handler.NewAIPromptHandler(database).Register(authedAPI)
 	handler.NewGoldenSampleHandler(database).Register(authedAPI)
@@ -102,6 +104,16 @@ func serverPort() string {
 		return port
 	}
 	return ":" + port
+}
+
+func exportDownloadSecret() string { return os.Getenv("EXPORT_DOWNLOAD_SECRET") }
+
+func exportDownloadTTL() time.Duration {
+	seconds, err := strconv.Atoi(os.Getenv("EXPORT_DOWNLOAD_TTL"))
+	if err != nil || seconds <= 0 {
+		seconds = 600
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Logger) {

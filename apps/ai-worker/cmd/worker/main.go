@@ -44,6 +44,7 @@ func main() {
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("ai:review", handlers.handleAIReview)
 	mux.HandleFunc("ai:dry-run", handlers.handleAIDryRun)
+	mux.HandleFunc("export", handlers.handleExport)
 	mux.HandleFunc("noop:ping", handlers.handleNoop)
 
 	logger.Info("AI Worker started", zap.String("redis_addr", redisAddr()))

@@ -2,7 +2,10 @@ module labelhub.local/exporter
 
 go 1.26.3
 
-require github.com/xuri/excelize/v2 v2.10.1
+require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/xuri/excelize/v2 v2.10.1
+)
 
 require (
 	github.com/richardlehane/mscfb v1.0.6 // indirect
