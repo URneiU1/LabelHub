@@ -10,9 +10,10 @@ After every code change, update project documentation before the final handoff:
 
 ## Current Handoff
 
-- Latest completed work: S3 demo hardening is now closed for the current slice: single golden dry-run uses durable `ai:dry-run` outbox/asynq worker execution, Reviewer can directly activate a task prompt/rule within the review access boundary, and Owner history shows guard state plus match-rate/average-score summary.
-- Current focus: stabilize and demo-test the S3 AI-assisted annotation loop end to end.
-- Next priority: run a local seeded browser smoke for the Owner -> Labeler -> AI -> Reviewer -> revision path, including Reviewer rule activation and worker-completed golden dry-run polling.
+- Latest completed work: **S4 (async multi-format export + Owner stats board) is done** on branch `s4-async-export`. New `pkg/exporter` module (shared by api+worker) encodes JSON/JSONL/CSV/XLSX; `POST /tasks/:id/exports` writes exports(queued)+outbox+audit in one tx, the export worker handler runs `exporter.Run` (queued→running→succeeded, atomic temp→rename), and HMAC-signed `/exports/download` streams the file (expired 410 / tampered 401 / path-traversal 403). Owner dashboard gains `ExportPanel` (format/field-map/history-poll/download) and `StatsBoard` (VChart: progress/pass-rate/status/AI-vs-human/dimension averages via `GET /tasks/:id/stats`). `first_come` has an explicit concurrency acceptance test. All 4 formats validated end-to-end against live MySQL+Redis. See `docs/S4_ACCEPTANCE.md`.
+- Also closed earlier this session: S0–S3 review findings (commit `6ead3c1` — failing outbox test, autosave race, JWT server-side revocation+rotation, login rate-limit, BatchDryRun async, security hardening).
+- Current focus: S4 demo-ready; optional S4 bonuses (Markdown export §A, JSONL/Excel import §B, assigned/quota dispatch §C) intentionally cut — see acceptance §7.
+- Next priority: S5 engineering-quality pass (raise coverage further, broader seeded browser smoke). Note: `make worker` needs LLM config to boot (`LLM_PROVIDER=mock` for export-only smoke); Makefile go-run targets fixed to package paths.
 
 ## Known Follow-Ups
 

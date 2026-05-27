@@ -15,13 +15,14 @@ install:
 	cd apps/ai-worker && go mod tidy
 
 api:
-	$(ENV_LOAD); cd apps/api && go run cmd/server/main.go
+	$(ENV_LOAD); cd apps/api && go run ./cmd/server
 
+# 用包路径 ./cmd/worker:worker 包是多文件,go run cmd/worker/main.go 只编单文件会编译失败。
 worker:
-	$(ENV_LOAD); cd apps/ai-worker && go run cmd/worker/main.go
+	$(ENV_LOAD); cd apps/ai-worker && go run ./cmd/worker
 
 web:
 	cd apps/web && pnpm dev
 
 seed:
-	$(ENV_LOAD); cd apps/api && go run cmd/seed/main.go
+	$(ENV_LOAD); cd apps/api && go run ./cmd/seed
