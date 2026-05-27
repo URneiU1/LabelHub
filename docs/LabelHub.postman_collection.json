@@ -1,0 +1,163 @@
+{
+  "info": {
+    "name": "LabelHub Main Flow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "S5 main-flow collection: login, claim, submit, review, export, and stats."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "taskId", "value": "1" },
+    { "key": "itemId", "value": "11" },
+    { "key": "submissionId", "value": "42" },
+    { "key": "exportId", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth - owner login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"owner1\",\n  \"password\": \"pass\"\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "const json = pm.response.json();",
+            "pm.collectionVariables.set('accessToken', json.data.accessToken);"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Tasks - list",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/tasks"
+      }
+    },
+    {
+      "name": "Labeler - claim item",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/tasks/{{taskId}}/claim",
+        "body": { "mode": "raw", "raw": "{}" }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "const data = pm.response.json().data;",
+            "if (data?.item?.id) pm.collectionVariables.set('itemId', String(data.item.id));",
+            "if (data?.submission?.id) pm.collectionVariables.set('submissionId', String(data.submission.id));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Labeler - submit answer",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/tasks/{{taskId}}/items/{{itemId}}/submit",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"summary\": \"回答完整\",\n  \"comment\": \"内容准确且可复核\",\n  \"issue_tags\": [\"无明显问题\"]\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "const data = pm.response.json().data;",
+            "if (data?.id) pm.collectionVariables.set('submissionId', String(data.id));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Reviewer - queue",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/reviewer/submissions"
+      }
+    },
+    {
+      "name": "Reviewer - detail",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/reviewer/submissions/{{submissionId}}"
+      }
+    },
+    {
+      "name": "Reviewer - approve",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/submissions/{{submissionId}}/review",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"verdict\": \"approve\",\n  \"reason\": \"\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Owner - create JSONL export",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/tasks/{{taskId}}/exports",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"format\": \"jsonl\",\n  \"include_reviews\": true\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "type": "text/javascript",
+          "exec": [
+            "const data = pm.response.json().data;",
+            "if (data?.id) pm.collectionVariables.set('exportId', String(data.id));"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Owner - list exports",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/tasks/{{taskId}}/exports"
+      }
+    },
+    {
+      "name": "Owner - export download URL",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/tasks/{{taskId}}/exports/{{exportId}}/download-url"
+      }
+    },
+    {
+      "name": "Owner - stats",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/tasks/{{taskId}}/stats"
+      }
+    }
+  ]
+}

@@ -1,0 +1,725 @@
+openapi: 3.1.0
+info:
+  title: LabelHub API
+  version: 0.5.0
+  description: Main-flow API contract for LabelHub S5 acceptance.
+servers:
+  - url: /api/v1
+security:
+  - BearerAuth: []
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login with username and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthEnvelope'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Rotated token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthEnvelope'
+        '401':
+          $ref: '#/components/responses/Error'
+  /tasks:
+    get:
+      tags: [tasks]
+      summary: List visible tasks
+      responses:
+        '200':
+          description: Task list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          tasks:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Task'
+    post:
+      tags: [tasks]
+      summary: Create a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '200':
+          description: Created task
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/claim:
+    post:
+      tags: [labeler]
+      summary: Claim the next available task item
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Claimed task bundle
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TaskBundle'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/items/{itemId}/save:
+    post:
+      tags: [labeler]
+      summary: Save a draft answer
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/ItemId'
+      requestBody:
+        $ref: '#/components/requestBodies/AnswerBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/Submission'
+        '400':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/items/{itemId}/submit:
+    post:
+      tags: [labeler]
+      summary: Submit an answer for AI or human review
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/ItemId'
+      requestBody:
+        $ref: '#/components/requestBodies/AnswerBody'
+      responses:
+        '200':
+          $ref: '#/components/responses/Submission'
+        '400':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /reviewer/submissions:
+    get:
+      tags: [reviewer]
+      summary: List submissions waiting for reviewer action
+      responses:
+        '200':
+          description: Review queue
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          submissions:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Submission'
+  /reviewer/submissions/{submissionId}:
+    get:
+      tags: [reviewer]
+      summary: Load reviewer submission detail
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200':
+          description: Submission detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SubmissionDetail'
+        '404':
+          $ref: '#/components/responses/Error'
+  /submissions/{submissionId}/review:
+    post:
+      tags: [reviewer]
+      summary: Approve, reject, or request revision
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Submission'
+        '400':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/templates:
+    get:
+      tags: [templates]
+      summary: List task template versions
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Template versions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          templates:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/TaskTemplate'
+    post:
+      tags: [templates]
+      summary: Save a new task template version
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateSchema'
+      responses:
+        '200':
+          description: Created template
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TaskTemplate'
+  /templates/{templateId}:
+    get:
+      tags: [templates]
+      summary: Load a template version
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Template detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          template:
+                            $ref: '#/components/schemas/TaskTemplate'
+                          isLatest:
+                            type: boolean
+                          latestTemplateId:
+                            type: integer
+  /tasks/{taskId}/exports:
+    get:
+      tags: [exports]
+      summary: List export jobs for a task
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Export jobs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          exports:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/ExportJob'
+    post:
+      tags: [exports]
+      summary: Create an async export job
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExportRequest'
+      responses:
+        '200':
+          description: Queued export job
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                          status:
+                            type: string
+  /tasks/{taskId}/exports/{exportId}/download-url:
+    get:
+      tags: [exports]
+      summary: Create a signed export download URL
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: exportId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Signed URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+                          expiresIn:
+                            type: integer
+  /tasks/{taskId}/stats:
+    get:
+      tags: [stats]
+      summary: Load owner task statistics
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: Task stats
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TaskStats'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: integer
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: integer
+    SubmissionId:
+      name: submissionId
+      in: path
+      required: true
+      schema:
+        type: integer
+  requestBodies:
+    AnswerBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Submission:
+      description: Submission snapshot
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Submission'
+  schemas:
+    Envelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+    AuthEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [accessToken, refreshToken, user]
+              properties:
+                accessToken:
+                  type: string
+                refreshToken:
+                  type: string
+                user:
+                  $ref: '#/components/schemas/User'
+    User:
+      type: object
+      required: [id, username, roles]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        displayName:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+    Task:
+      type: object
+      required: [id, ownerId, title, status]
+      properties:
+        id:
+          type: integer
+        ownerId:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+        aiReviewEnabled:
+          type: boolean
+        humanReviewEnabled:
+          type: boolean
+        totalItems:
+          type: integer
+        finishedItems:
+          type: integer
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    TaskItem:
+      type: object
+      required: [id, taskId, payload, status]
+      properties:
+        id:
+          type: integer
+        taskId:
+          type: integer
+        externalId:
+          type: string
+          nullable: true
+        payload:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+        status:
+          type: string
+    TaskTemplate:
+      type: object
+      required: [id, taskId, version, schemaJson]
+      properties:
+        id:
+          type: integer
+        taskId:
+          type: integer
+        version:
+          type: integer
+        schemaJson:
+          type: string
+    TemplateSchema:
+      type: object
+      required: [title, fields]
+      properties:
+        title:
+          type: string
+        layout:
+          type: string
+          enum: [single_page]
+        fields:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        export_fields:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+    TaskBundle:
+      type: object
+      required: [task, item, template]
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+        item:
+          $ref: '#/components/schemas/TaskItem'
+        template:
+          $ref: '#/components/schemas/TaskTemplate'
+        submission:
+          $ref: '#/components/schemas/Submission'
+        revision:
+          $ref: '#/components/schemas/SubmissionRevision'
+    Submission:
+      type: object
+      required: [id, taskId, itemId, status]
+      properties:
+        id:
+          type: integer
+        taskId:
+          type: integer
+        itemId:
+          type: integer
+        status:
+          type: string
+          enum: [draft, submitted, ai_reviewing, human_reviewing, revising, approved, rejected]
+        currentRevisionId:
+          type: integer
+          nullable: true
+        aiVerdict:
+          type: string
+          nullable: true
+          enum: [pass, reject, uncertain]
+        aiScore:
+          type: number
+          nullable: true
+        humanVerdict:
+          type: string
+          nullable: true
+          enum: [approve, reject, revise]
+    SubmissionRevision:
+      type: object
+      properties:
+        id:
+          type: integer
+        submissionId:
+          type: integer
+        revisionNo:
+          type: integer
+        answer:
+          type: string
+    SubmissionDetail:
+      type: object
+      additionalProperties: true
+      properties:
+        submission:
+          $ref: '#/components/schemas/Submission'
+        item:
+          $ref: '#/components/schemas/TaskItem'
+        template:
+          $ref: '#/components/schemas/TaskTemplate'
+        revision:
+          $ref: '#/components/schemas/SubmissionRevision'
+        aiReview:
+          type: object
+          additionalProperties: true
+        auditLogs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    ReviewRequest:
+      type: object
+      required: [verdict]
+      properties:
+        verdict:
+          type: string
+          enum: [approve, reject, revise]
+        reason:
+          type: string
+    CreateExportRequest:
+      type: object
+      required: [format]
+      properties:
+        format:
+          type: string
+          enum: [json, jsonl, csv, xlsx]
+        field_map:
+          type: object
+          additionalProperties: true
+          nullable: true
+        include_reviews:
+          type: boolean
+    ExportJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        taskId:
+          type: integer
+        format:
+          type: string
+        status:
+          type: string
+        rowCount:
+          type: integer
+          nullable: true
+        fileSize:
+          type: integer
+          nullable: true
+        errorMsg:
+          type: string
+          nullable: true
+    TaskStats:
+      type: object
+      properties:
+        progress:
+          type: object
+          properties:
+            total:
+              type: integer
+            finished:
+              type: integer
+        statusBreakdown:
+          type: object
+          additionalProperties:
+            type: integer
+        passRate:
+          type: number
+        aiVsHuman:
+          type: object
+          properties:
+            compared:
+              type: integer
+            disagree:
+              type: integer
+            rate:
+              type: number
+        dimensionAverages:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              avg:
+                type: number

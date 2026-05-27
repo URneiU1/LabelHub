@@ -49,6 +49,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s5-openapi-error-boundary`: S5 Day4/Day5 第一段完成:按计划 fallback 手写主流程 `docs/openapi.yaml`(auth/tasks/templates/labeler/reviewer/exports/stats),新增 `pnpm -F web gen:api` 用 `openapi-typescript` 生成 `apps/web/src/shared/api/schema.d.ts`;新增 `docs/LabelHub.postman_collection.json` 覆盖登录、领题、提交、审核、导出、stats 主流程;前端新增全站 `ErrorBoundary`,在 `main.tsx` 包住 `<App/>`,并补抛错 fallback/reset 测试。
 - 2026-05-28 `s5-frontend-strict-roundtrip`: S5 Day3 前端质量补强完成:开启 `apps/web/tsconfig.app.json` 的 `strict:true` 且 `pnpm -F web build` 直接通过;Renderer 新增 ShowItem text/video/json 模式测试与 LLMTrigger 写回 `target_field` 测试;Designer 集成测试补保存 payload → `parseTemplateSchema` → `SchemaRenderer` 的 round-trip 断言,覆盖 Group/Tabs 子字段、导出字段和 Renderer 实际渲染一致性。
 - 2026-05-28 `s5-integration-main-flow`: S5 Day2 新增 build-tag 隔离的 testcontainers 集成测试 `apps/api/internal/integration/main_flow_integration_test.go`:真 MySQL 8.0.36 + Redis 7 容器,真实迁移 SQL,seed owner/labeler/reviewer/task/prompt/item,覆盖 submit→ai_review outbox→Redis publish→AI 结果入库→review revise→labeler resubmit→AI pass→review approve→JSONL export 落盘的主链路。CI 新增独立 `integration` job 跑 `go test -tags=integration ./apps/api/internal/integration -count=1`,普通单测仍不跑 Docker。
 - 2026-05-28 `s5-quality-day1`: 按 `docs/PLAN-S5-IMPL.md` 开始 S5 工程质量 sprint:新增并纳入 S5 执行计划;CI Go workspace 补跑 `./pkg/exporter`;状态机测试改为覆盖 `Transitions()` 暴露的全部合法边与每个状态的非法事件,`internal/statemachine` 覆盖率到 100%;`review.Apply` 补 approve/reject/revise/非法状态/并发写 RowsAffected=0 的事务测试,覆盖率从 13.0% 提升到 70.1%;outbox publisher 补 stale processing reset、claim lost update、enqueue 失败重试/死信、TaskID 冲突幂等成功测试,覆盖率从 29.1% 提升到 45.5%;AI worker 补 `handleAIReview` verdict→状态 table-driven 覆盖(pass 自动通过/pass 转人工/reject 转人工/uncertain 转人工)和熔断 open 直接 failover 到人工路径;修复 S4 review 遗留两处质量问题:导出行加载 DB 错误不再被写成 terminal failed,保持 asynq 可重试;StatsBoard 维度均分只统计 `ai_reviews.revision_id = submissions.current_revision_id`,避免旧 revision AI 结果污染看板。前端 StatsBoard retry 改 request sequence guard,切任务后晚到 retry 响应不再覆盖当前任务。
@@ -97,7 +98,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- S5 仍未完成:还需要继续补 OpenAPI/Postman、ErrorBoundary、`docker-compose.prod.yml`、`make dev` 和 S5 acceptance。
+- S5 仍未完成:还需要继续补 `docker-compose.prod.yml`、Caddy、`make dev`、ARCHITECTURE/DEPLOY 文档和 S5 acceptance。
 - S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/Up-Down/drag order/simple property editing、逐字段 validation、`regex`/`requiredWhen` runtime 校验、真实 item payload 预览、Tabs/Group 最小结构物料、子字段属性栏可视化编辑和 Save as new version;但 Tabs/Group 子字段还不是画布内嵌套拖拽,layout 编辑也仍较基础。
 - AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend/guard 视图、Reviewer AI verdict/score/detail/audit 展示、Reviewer failed/dead AI retry、Reviewer 规则查看/Owner 编辑跳转、单样本 durable queued dry-run + polling、同步串行 batch dry-run endpoint、基础 batch delay 配置、provider 429/backoff 短重试、server-side dry-run quota/circuit breaker、AI worker 5xx 熔断、AI 自动 approved、Labeler 3s 自动保存/修订入口和 Reviewer 批量操作已具备。若后续要继续产品化,主要是把 batch dry-run 也异步化、补更完整 trend 图表和真实运营告警。
 - FileUpload 已完成 temp→attached 绑定、打回复用、下载授权接口和 temp orphan cleanup 定时清理;但前端文件预览/下载入口仍较基础,还需要 seeded browser smoke 覆盖。
@@ -105,7 +106,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 下一步
 
-- 继续 S5 Day 4/Day 5:推进 OpenAPI/Postman、ErrorBoundary、生产 compose/Caddy、`make dev` 和 S5 acceptance 文档。
+- 继续 S5 Day 5:推进生产 compose/Caddy、`make dev`、ARCHITECTURE/DEPLOY 文档和 S5 acceptance 文档。
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
 - 推进 S3 验收:做一次本地 seeded browser smoke,覆盖 Owner 配规则/跑 golden dry-run、Labeler 提交/修订、AI worker、Reviewer 批量审核和规则查看。
 - 补 FileUpload 前端预览/下载入口的 seeded browser smoke。
@@ -113,6 +114,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S5 openapi/error-boundary: `pnpm -F web gen:api` 通过并生成 `schema.d.ts`;`jq empty docs/LabelHub.postman_collection.json` 通过;`pnpm -F web test -- ErrorBoundary SchemaRenderer Designer.integration` 通过(12 files,103 tests);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning)。
 - 2026-05-28 S5 frontend strict/roundtrip: `pnpm -F web build` 通过(`strict:true`,仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web test -- SchemaRenderer Designer.integration` 通过(11 files,102 tests;含新增 Renderer/Designer round-trip);`pnpm -F web lint` 通过。
 - 2026-05-28 S5 integration main-flow:普通 `go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview -count=1` 通过;本机 Colima 环境用 `DOCKER_HOST=unix:///Users/dadadineiyou/.colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true go test -tags=integration ./apps/api/internal/integration -count=1 -v` 通过(真 MySQL+Redis 容器,7.8s);`git diff --check` 通过。
 - 2026-05-28 S5 quality day1 partial: targeted `go test -cover ./apps/api/internal/statemachine ./apps/api/internal/service/review ./apps/api/internal/service/outbox ./apps/api/internal/handler ./pkg/exporter` 通过,覆盖率分别为 statemachine 100.0%、review 70.1%、outbox 45.5%、handler 61.4%、exporter 87.8%;targeted `go test -cover ./apps/ai-worker/cmd/worker` 通过,worker 覆盖率 60.6%(含新增 verdict mapping + circuit open failover);targeted `pnpm -F web test -- StatsBoard` 通过(100 tests,含新增 stale retry guard)。
