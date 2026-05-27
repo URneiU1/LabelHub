@@ -95,6 +95,43 @@ describe('LabelerPlaza schema runtime flow', () => {
     })
   })
 
+  it('submits the active answer via Ctrl/Cmd+Enter', async () => {
+    const user = userEvent.setup()
+    const schema = {
+      title: 'qa_runtime',
+      layout: 'single_page',
+      fields: [
+        { name: 'summary', widget: 'Input', label: '一句话总评', required: true },
+      ],
+    }
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+          revision: null,
+        }
+      }
+      if (path === '/tasks/1/items/11/submit') {
+        return { id: 42, taskId: 1, itemId: 11, status: 'human_reviewing' }
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza />)
+
+    await screen.findByText('QA 质量标注')
+    await user.click(screen.getByRole('button', { name: '领取题目' }))
+    await user.type(await screen.findByLabelText('一句话总评'), '回答准确')
+    fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true })
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/items/11/submit', { answer: { summary: '回答准确' } })
+    })
+  })
+
   it('auto-saves changed answers after a 3s debounce', async () => {
     const schema = {
       title: 'qa_autosave',

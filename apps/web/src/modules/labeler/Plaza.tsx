@@ -132,6 +132,23 @@ export default function LabelerPlaza() {
     }
   }
 
+  // Ctrl/Cmd+Enter 提交:用 ref 持有最新 submit,只注册一次监听,避免随 answer 频繁重挂。
+  // submit 内部已对无 bundle / schema 错误 / 校验失败兜底,这里无需重复判断。
+  const submitRef = useRef(submit)
+  useEffect(() => {
+    submitRef.current = submit
+  })
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault()
+        void submitRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   const answerKey = useMemo(() => answerDraftKey(answer), [answer])
 
   useEffect(() => {
@@ -264,7 +281,7 @@ export default function LabelerPlaza() {
               <div style={{ ...actionRowStyle, borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)', marginTop: 'var(--space-2xl)' }}>
                 <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light" style={{ width: 120 }}>保存草稿</Button>
                 <span style={autoSaveTextStyle}>{autoSaveText(autoSaveState)}</span>
-                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} style={{ width: 120 }}>提交审核</Button>
+                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} style={{ width: 120 }} title="提交审核 (Ctrl/Cmd + Enter)">提交审核</Button>
               </div>
             </section>
           ) : (
