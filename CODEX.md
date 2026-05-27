@@ -59,7 +59,7 @@ After every code-writing turn:
 
 ## Next Work
 
-- S6 implementation plan is tracked in `docs/PLAN-S6-IMPL.md`. Day1 Editorial primitives are in place: `tokens.css` now uses Editorial console tokens, stable status colors, Semi CSS overrides, global focus-visible, skeleton/top-progress keyframes, and shared `StatusBadge`/`EmptyState`/`LoadingBlock`/`TopProgress` components with tests. Day2 status/empty/loading replacement has started across Owner Dashboard, ExportPanel, Labeler Plaza, and Reviewer Queue. Next S6 work is Day3 Designer responsive layout plus real Tabs/Group interaction.
+- S6 implementation plan is tracked in `docs/PLAN-S6-IMPL.md`. Day1 Editorial primitives are in place: `tokens.css` now uses Editorial console tokens, stable status colors, Semi CSS overrides, global focus-visible, skeleton/top-progress keyframes, and shared `StatusBadge`/`EmptyState`/`LoadingBlock`/`TopProgress` components with tests. Day2 status/empty/loading replacement has started across Owner Dashboard, ExportPanel, Labeler Plaza, and Reviewer Queue. Runtime Tabs now render a real tablist/tabpanel and preserve flat answers across tab switches. Next S6 work is Designer responsive layout plus nested Group/Tabs canvas usability.
 - Continue Designer implementation with canvas-level nested dragging and richer layout editing for Tabs/Group if contest polish requires it.
 - Run a seeded browser smoke for the S3 path: Owner prompt/golden dry-run, Labeler submit/revise, AI worker, Reviewer batch review, and Reviewer rule activation.
 - Consider async batch dry-run and richer charts only if demo usage shows the current summary table is not enough.

@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import type { AnswerValue, FieldSchema, RenderPayload, RenderRuntime, TemplateSchema, ValidationError } from './types'
 import { widgetRegistry } from './widgets'
 import FieldFrame from './widgets/FieldFrame'
@@ -55,20 +55,16 @@ function renderField(
   }
   if (field.widget === 'Tabs') {
     return (
-      <div key={field.name} style={fieldBlockStyle} data-widget={field.widget}>
-        <FieldFrame label={field.label} required={field.required}>
-          <div style={tabStackStyle}>
-            {(field.tabs ?? []).map((tab) => (
-              <section key={tab.label} style={tabPanelStyle} aria-label={tab.label}>
-                <h3 style={tabHeadingStyle}>{tab.label}</h3>
-                <div style={groupStyle}>
-                  {tab.fields.map((child) => renderField(child, value, payload, readOnly, errors, runtime, updateField))}
-                </div>
-              </section>
-            ))}
-          </div>
-        </FieldFrame>
-      </div>
+      <TabsField
+        key={field.name}
+        field={field}
+        value={value}
+        payload={payload}
+        readOnly={readOnly}
+        errors={errors}
+        runtime={runtime}
+        updateField={updateField}
+      />
     )
   }
 
@@ -92,6 +88,73 @@ function renderField(
   )
 }
 
+function TabsField({
+  field,
+  value,
+  payload,
+  readOnly,
+  errors,
+  runtime,
+  updateField,
+}: {
+  field: FieldSchema
+  value: AnswerValue
+  payload: RenderPayload
+  readOnly: boolean
+  errors: ValidationError[]
+  runtime: RenderRuntime | undefined
+  updateField: (name: string, nextValue: unknown) => void
+}) {
+  const tabs = field.tabs ?? []
+  const [activeIndex, setActiveIndex] = useState(0)
+  const safeIndex = tabs.length === 0 ? 0 : Math.min(activeIndex, tabs.length - 1)
+  const activeTab = tabs[safeIndex]
+
+  return (
+    <div style={fieldBlockStyle} data-widget={field.widget}>
+      <FieldFrame label={field.label} required={field.required}>
+        {tabs.length > 0 ? (
+          <>
+            <div role="tablist" aria-label={field.label} style={tabListStyle}>
+              {tabs.map((tab, index) => {
+                const selected = index === safeIndex
+                const tabId = `${field.name}-tab-${index}`
+                const panelId = `${field.name}-panel-${index}`
+                return (
+                  <button
+                    key={tab.label}
+                    id={tabId}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls={panelId}
+                    onClick={() => setActiveIndex(index)}
+                    style={selected ? tabButtonActiveStyle : tabButtonStyle}
+                  >
+                    {tab.label}
+                  </button>
+                )
+              })}
+            </div>
+            <section
+              id={`${field.name}-panel-${safeIndex}`}
+              role="tabpanel"
+              aria-labelledby={`${field.name}-tab-${safeIndex}`}
+              style={tabPanelStyle}
+            >
+              <div style={groupStyle}>
+                {activeTab.fields.map((child) => renderField(child, value, payload, readOnly, errors, runtime, updateField))}
+              </div>
+            </section>
+          </>
+        ) : (
+          <div style={emptyTabsStyle}>未配置 tab</div>
+        )}
+      </FieldFrame>
+    </div>
+  )
+}
+
 const formStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-lg)',
@@ -111,11 +174,6 @@ const groupStyle: CSSProperties = {
   borderLeft: '3px solid var(--color-rail)',
 }
 
-const tabStackStyle: CSSProperties = {
-  display: 'grid',
-  gap: 'var(--space-md)',
-}
-
 const tabPanelStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
@@ -125,15 +183,35 @@ const tabPanelStyle: CSSProperties = {
   background: 'var(--color-canvas)',
 }
 
-const tabHeadingStyle: CSSProperties = {
-  margin: 0,
-  fontFamily: 'var(--font-heading)',
-  fontSize: 'var(--text-base)',
+const tabListStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-xs)',
+  marginBottom: 'var(--space-md)',
+}
+
+const tabButtonStyle: CSSProperties = {
+  minHeight: 32,
+  padding: '0 var(--space-md)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text-secondary)',
+  cursor: 'pointer',
   fontWeight: 600,
-  color: 'var(--color-text)',
-  borderBottom: '2px solid var(--color-accent)',
-  width: 'fit-content',
-  paddingBottom: 4,
+}
+
+const tabButtonActiveStyle: CSSProperties = {
+  ...tabButtonStyle,
+  borderColor: 'var(--color-accent)',
+  background: 'var(--color-accent-soft)',
+  color: 'var(--color-accent)',
+}
+
+const emptyTabsStyle: CSSProperties = {
+  padding: 'var(--space-md)',
+  border: '1px dashed var(--color-border-light)',
+  color: 'var(--color-text-muted)',
 }
 
 const errorStyle: CSSProperties = {

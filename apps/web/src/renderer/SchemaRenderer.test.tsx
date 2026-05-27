@@ -139,12 +139,19 @@ describe('SchemaRenderer', () => {
     render(<StructuredRenderer />)
 
     await user.type(screen.getByLabelText('一句话总评'), '可以通过')
+    expect(screen.getByRole('tab', { name: '基础' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByLabelText('备注')).not.toBeInTheDocument()
     await user.click(within(screen.getByRole('radiogroup', { name: '结论' })).getByLabelText('pass'))
+    await user.click(screen.getByRole('tab', { name: '备注' }))
+    expect(screen.getByRole('tab', { name: '备注' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('radiogroup', { name: '结论' })).not.toBeInTheDocument()
     const commentInput = screen.getAllByLabelText('备注').find((element) => element.tagName === 'TEXTAREA')
     if (!commentInput) {
       throw new Error('comment textarea not found')
     }
     await user.type(commentInput, '结构完整')
+    await user.click(screen.getByRole('tab', { name: '基础' }))
+    expect(within(screen.getByRole('radiogroup', { name: '结论' })).getByLabelText('pass')).toBeChecked()
 
     const answer = JSON.parse(screen.getByLabelText('structured-answer-json').textContent || '{}') as AnswerValue
     expect(answer).toMatchObject({

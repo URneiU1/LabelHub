@@ -55,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s6-runtime-tabs`: S6 Day3 第一段完成: `SchemaRenderer` 的 Tabs 从“所有 tab panel 堆叠显示”改成真实 `tablist`/`tabpanel` 交互,默认显示第一 tab,点击切换后只渲染 active tab 字段,同时保持 flat answer object 中已填写答案不丢;补 `SchemaRenderer` 测试验证 tab 切换、隐藏字段、切回后 radio 选择保持;Designer round-trip 测试跟随新 Tabs 行为先切到 Tab 2 再断言子字段。
 - 2026-05-28 `s6-dense-status-surfaces`: S6 Day2 第一段完成:Owner Dashboard、ExportPanel、Labeler Plaza、Reviewer Queue 开始复用共享 `StatusBadge`/`EmptyState`/`LoadingBlock`,导出历史、任务列表、AI review 开关、golden sample、dry-run history、标注空态和审核空态不再直接裸显示 raw status/loading 文本;相关测试断言更新为新中文状态/可访问 loading 状态。
 - 2026-05-28 `s6-state-primitives`: S6 Day1 底座完成: `tokens.css` 从 Schematic/Inter/default-blue 收敛为 Editorial console tokens,移除 Google font 依赖,加入稳定 7 态 status 色、Semi 常用控件 CSS override、全局 focus-visible、skeleton/top-progress keyframes;新增共享 `StatusBadge`/`statusLabel`、`EmptyState`、`LoadingBlock`、`TopProgress` 和 `StatePrimitives` 测试,为后续 Owner/Labeler/Reviewer 页面统一状态、空态、加载态做准备。
 - 2026-05-28 `s6-plan`: 新增 `docs/PLAN-S6-IMPL.md`,把 Sprint 6 拆成 Editorial token/shared state components、Owner/Labeler/Reviewer 高密度界面、Designer 响应式布局、Tabs/Group 真实交互、友好错误/A11y、Browser smoke 和 `docs/S6_ACCEPTANCE.md` 验收文档。计划明确将 dark mode、Framer Motion、完整移动端、TanStack Query/Formily/dnd-kit 迁移列为可砍项。
@@ -116,7 +117,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 下一步
 
-- 按 `docs/PLAN-S6-IMPL.md` 推进 Day3:Designer 响应式布局,以及 Runtime Tabs 真实 tab 切换和 Group/Tabs 嵌套体验补强。
+- 继续 `docs/PLAN-S6-IMPL.md` Day3:做 Designer 响应式布局和 Group/Tabs 嵌套画布体验补强。
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
 - 推进 S3 验收:做一次本地 seeded browser smoke,覆盖 Owner 配规则/跑 golden dry-run、Labeler 提交/修订、AI worker、Reviewer 批量审核和规则查看。
 - 补 FileUpload 前端预览/下载入口的 seeded browser smoke。
@@ -124,6 +125,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S6 runtime tabs: `pnpm -F web test -- SchemaRenderer Designer.integration` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 dense/status surfaces: `pnpm -F web test -- ExportPanel Plaza Queue Dashboard StatePrimitives` 通过;full `pnpm -F web test` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 state primitives: `pnpm -F web test -- StatePrimitives` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 plan: 文档-only 变更,未跑测试;前一提交的 S5 全量 Go/web/config 门禁已通过。

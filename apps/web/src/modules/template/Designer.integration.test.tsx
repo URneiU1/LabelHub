@@ -321,6 +321,7 @@ describe('TemplateDesigner', () => {
     expect(roundTrip.getByLabelText('Summary')).toBeInTheDocument()
     expect(roundTrip.getByLabelText('组内摘要')).toBeInTheDocument()
     expect(roundTrip.getAllByRole('radiogroup', { name: '单选' })).toHaveLength(2)
+    await user.click(roundTrip.getByRole('tab', { name: 'Tab 2' }))
     expect(roundTrip.getByLabelText('多行文本')).toBeInTheDocument()
   })
 
