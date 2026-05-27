@@ -1,0 +1,221 @@
+import type { CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Toast } from '@douyinfe/semi-ui'
+import { apiGet, apiPostRawJSON } from '../../shared/api/client'
+
+type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx'
+
+type ExportRecord = {
+  id: number
+  format: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  rowCount: number | null
+  errorMsg: string | null
+  createdAt: string
+}
+type ExportListResponse = { exports: ExportRecord[] }
+type CreateExportResponse = { id: number, status: string }
+type DownloadURLResponse = { url: string, expiresIn: number }
+
+const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx']
+const BASE_COLUMNS = ['submission_id', 'item_id', 'external_id', 'payload', 'answer']
+const REVIEW_COLUMNS = ['ai_review.verdict', 'ai_review.overall_score', 'ai_review.reason', 'human_review.verdict', 'human_review.reason']
+const POLL_INTERVAL_MS = 2000
+
+interface ExportPanelProps {
+  taskId: number
+}
+
+export default function ExportPanel({ taskId }: ExportPanelProps) {
+  const [format, setFormat] = useState<ExportFormat>('csv')
+  const [includeReviews, setIncludeReviews] = useState(false)
+  const [selectedCols, setSelectedCols] = useState<Record<string, boolean>>({})
+  const [renames, setRenames] = useState<Record<string, string>>({})
+  const [records, setRecords] = useState<ExportRecord[]>([])
+  const [creating, setCreating] = useState(false)
+  // taskRef 做 stale guard:切任务后晚到的历史响应不污染当前任务。
+  const taskRef = useRef(taskId)
+
+  const availableColumns = includeReviews ? [...BASE_COLUMNS, ...REVIEW_COLUMNS] : BASE_COLUMNS
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const data = await apiGet<ExportListResponse>(`/tasks/${taskId}/exports`)
+      if (taskRef.current !== taskId) return
+      setRecords(data.exports)
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载导出历史失败')
+    }
+  }, [taskId])
+
+  useEffect(() => {
+    taskRef.current = taskId
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切任务时先清空旧历史
+    setRecords([])
+    void loadHistory()
+  }, [taskId, loadHistory])
+
+  // 有 queued/running 行时每 2s 轮询,全部 succeeded/failed 后停。
+  useEffect(() => {
+    if (!records.some((r) => r.status === 'queued' || r.status === 'running')) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      void loadHistory()
+    }, POLL_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [records, loadHistory])
+
+  function buildBody() {
+    const columns = availableColumns
+      .filter((src) => selectedCols[src])
+      .map((src) => ({ source: src, export: (renames[src] || '').trim() || src }))
+    return JSON.stringify({ format, include_reviews: includeReviews, field_map: { include_reviews: includeReviews, columns } })
+  }
+
+  async function createExport() {
+    setCreating(true)
+    try {
+      const data = await apiPostRawJSON<CreateExportResponse>(`/tasks/${taskId}/exports`, buildBody())
+      Toast.success(`已排队导出 #${data.id}`)
+      await loadHistory()
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '导出入队失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function download(id: number) {
+    try {
+      const data = await apiGet<DownloadURLResponse>(`/tasks/${taskId}/exports/${id}/download-url`)
+      window.open(data.url, '_blank')
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '获取下载链接失败')
+    }
+  }
+
+  return (
+    <section style={panelStyle} aria-label="数据导出">
+      <h3 style={headingStyle}>数据导出</h3>
+
+      <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-md)' }}>
+        {FORMATS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            aria-label={`格式 ${f}`}
+            aria-pressed={format === f}
+            onClick={() => setFormat(f)}
+            style={format === f ? formatActiveStyle : formatStyle}
+          >
+            {f.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      <label style={switchRowStyle}>
+        <input type="checkbox" checked={includeReviews} onChange={(e) => setIncludeReviews(e.target.checked)} aria-label="含审核记录" />
+        含审核记录
+      </label>
+
+      <div style={{ display: 'grid', gap: 4, margin: 'var(--space-md) 0' }}>
+        <span style={hintStyle}>字段映射(不勾选则导出全部默认列)</span>
+        {availableColumns.map((src) => (
+          <div key={src} style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
+            <label style={{ display: 'flex', gap: 4, minWidth: 200 }}>
+              <input
+                type="checkbox"
+                checked={!!selectedCols[src]}
+                onChange={(e) => setSelectedCols((cur) => ({ ...cur, [src]: e.target.checked }))}
+                aria-label={`选择列 ${src}`}
+              />
+              {src}
+            </label>
+            <input
+              type="text"
+              placeholder="重命名(可选)"
+              value={renames[src] || ''}
+              aria-label={`重命名 ${src}`}
+              onChange={(e) => setRenames((cur) => ({ ...cur, [src]: e.target.value }))}
+              style={renameInputStyle}
+            />
+          </div>
+        ))}
+      </div>
+
+      <button type="button" aria-label="开始导出" disabled={creating} onClick={() => void createExport()} style={primaryButtonStyle}>
+        {creating ? '导出入队中…' : '开始导出'}
+      </button>
+
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={thStyle}>ID</th>
+            <th style={thStyle}>格式</th>
+            <th style={thStyle}>状态</th>
+            <th style={thStyle}>行数</th>
+            <th style={thStyle}>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((record) => (
+            <tr key={record.id}>
+              <td style={tdStyle}>#{record.id}</td>
+              <td style={tdStyle}>{record.format}</td>
+              <td style={tdStyle}>
+                <span style={statusBadgeStyle(record.status)}>{record.status}</span>
+                {record.status === 'failed' && record.errorMsg ? <span style={errorTextStyle}> {record.errorMsg}</span> : null}
+              </td>
+              <td style={tdStyle}>{record.rowCount ?? '—'}</td>
+              <td style={tdStyle}>
+                {record.status === 'succeeded' ? (
+                  <button type="button" aria-label={`下载导出 #${record.id}`} onClick={() => void download(record.id)} style={linkButtonStyle}>
+                    下载
+                  </button>
+                ) : (
+                  '—'
+                )}
+              </td>
+            </tr>
+          ))}
+          {records.length === 0 ? (
+            <tr>
+              <td style={tdStyle} colSpan={5}>暂无导出记录</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </section>
+  )
+}
+
+const panelStyle: CSSProperties = {
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-lg)',
+  padding: 'var(--space-lg)',
+  marginTop: 'var(--space-lg)',
+}
+const headingStyle: CSSProperties = { fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
+const hintStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }
+const switchRowStyle: CSSProperties = { display: 'flex', gap: 'var(--space-xs)', alignItems: 'center', fontSize: 'var(--text-sm)' }
+const formatStyle: CSSProperties = { padding: '4px 14px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', cursor: 'pointer' }
+const formatActiveStyle: CSSProperties = { ...formatStyle, background: 'var(--color-accent)', color: '#fff', borderColor: 'var(--color-accent)' }
+const renameInputStyle: CSSProperties = { flex: 1, padding: '4px 8px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }
+const primaryButtonStyle: CSSProperties = { padding: '8px 20px', border: 'none', borderRadius: 'var(--radius-md)', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }
+const tableStyle: CSSProperties = { width: '100%', marginTop: 'var(--space-lg)', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }
+const thStyle: CSSProperties = { textAlign: 'left', padding: '6px 8px', borderBottom: '2px solid var(--color-border-light)', color: 'var(--color-text-secondary)' }
+const tdStyle: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--color-border-light)' }
+const errorTextStyle: CSSProperties = { color: 'var(--color-danger)', fontSize: 'var(--text-xs)' }
+const linkButtonStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', textDecoration: 'underline', padding: 0 }
+
+function statusBadgeStyle(status: string): CSSProperties {
+  const palette: Record<string, string> = {
+    queued: '#8c6d1f',
+    running: '#1f5c8c',
+    succeeded: '#2e7d32',
+    failed: '#c62828',
+  }
+  return { padding: '2px 8px', borderRadius: 10, fontSize: 'var(--text-xs)', fontWeight: 700, color: palette[status] || 'var(--color-text)' }
+}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
+import ExportPanel from './ExportPanel'
+import StatsBoard from './StatsBoard'
 
 type TaskListResponse = Task[]
 type ExportResponse = {
@@ -797,6 +799,9 @@ export default function OwnerDashboard() {
                 <MetricCell label="EVAL SET" value={String(goldenSamples.length)} detail={goldenSampleLoading ? 'loading samples' : `${Object.keys(goldenRunRows).length} recent runs`} tone="teal" />
                 <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
+
+              <StatsBoard taskId={selected.id} />
+              <ExportPanel taskId={selected.id} />
 
               <div style={{ background: 'var(--color-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--color-border-light)' }}>
                 <div style={aiSettingsRowStyle}>
