@@ -4,6 +4,7 @@
 **Scope**: 完整 S0–S3（Go 后端 ~12.5k LOC / 68 文件 + ai-worker，前端 ~11.8k LOC / 47 文件，6 个 migration）
 **Method**: 4 个并行领域 reviewer（workflow & state / API & AI pipeline / frontend / 跨切面安全），结论经本地运行验证
 **Decision**: **REQUEST CHANGES** —— 1 个失败测试（CI 红） + 多个 HIGH 级正确性/安全问题需在 demo/提交前处理
+**状态(2026-05-27 已修复, commit `6ead3c1`)**: C-1 outbox 测试、autosave 竞态、protocol-relative URL、登录限流、JWT 服务端吊销+轮换、BatchDryRun 异步化、DB 密码兜底/multiStatements/安全头/gin release、actor_type、死代码、gitignore 均已落地并验证(后端 -race 全绿 / 前端 89/89 / migration live / auth e2e)。**review.Apply 锁顺序经核实为误报**(Save 与 review 都 task→submission 先锁,本就无死锁;reviewer 建议的"先锁 submission"反会制造死锁),故未改。
 
 ---
 
