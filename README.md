@@ -55,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s6-browser-smoke`: S6 Day5 浏览器 smoke 完成(本地起整套栈,因 :8080 被无关 FastAPI 占用,API 跑 :8090、web 代理指过去;用 chrome-devtools 以 owner1 登录核验 login/owner/designer/reviewer/style-guide,跑完已杀进程不留僵尸)。**确认 Designer 响应式真实生效**:1920 三栏并排、1280 物料+画布两栏且属性面板下移占整行——这是 jsdom 测不了的核心点。StatusBadge/Editorial token 一致,无 console error(仅既有 React Router v7 future-flag warning),无文字重叠。smoke 中发现并修复一处不一致:`/style-guide` 仍是旧 Schematic/Inter/#0f62fe 标识 + 自己硬编码的状态标签,现改为 Editorial(色板直接读 CSS 变量、改用真实 `StatusBadge` 全 7 态、标题/footer 更新),`docs/S6_ACCEPTANCE.md` 同步记录。**S6 至此全部完成。**
 - 2026-05-28 `s6-acceptance`: 新增 `docs/S6_ACCEPTANCE.md`,记录 S6 Day1–4 全部完成(Editorial tokens/共享状态原语、高密度状态面、Runtime Tabs 真实交互、Designer 响应式+嵌套画布、友好错误文案、a11y、Labeler 快捷键)、刻意砍掉/跳过项(Reviewer 单键快捷键、dark mode、移动端、各类库迁移),以及唯一待办——Day5 浏览器 smoke 需本地起 `make web` 后在 1280/1920/窄屏核验(jsdom 测不了 CSS 断点)。docs-only。
 - 2026-05-28 `s6-a11y-shortcut`: S6 Day4 第二段(Task 4.2 a11y + 可选快捷键),Day4 完成。审计确认 Designer 嵌套控件(`NestedFieldsEditor`/`GroupControls`/`TabsControls` 的 name/widget/label/required/options input/select)已全部带 `aria-label`,全局 `:focus-visible` ring 已在 Day1 落地,a11y 必做项无需再改。新增 Labeler `Ctrl/Cmd+Enter` 提交快捷键(ref 持有最新 `submit` + 注册一次 `keydown`,内部已对无 bundle/校验失败兜底;提交按钮加 `title` 提示),补 Plaza 测试。Reviewer 单键 A/R/B 触发审核动作风险高(易误触不可逆操作),计划标"可选"——本次刻意跳过。
 - 2026-05-28 `s6-error-copy`: S6 Day4 第一段(Task 4.1 错误文案归一化)。`shared/api/client.ts` 新增 `ApiError`(继承 `Error`,带 `code`/`requestId`,向后兼容现有 `err instanceof Error` 判断),`request`/`apiUpload` 改抛 `ApiError`;对会卡住标注/审核流程的两个码给可执行中文提示——`INVALID_STATE`("状态已被改动,请刷新后再操作")、`LLM_PROVIDER_ERROR`("AI 暂不可用,可重试或转人工"),其余码仍用后端 message,不覆盖既有具体说明。友好文案经任何展示 `err.message` 的地方自动冒出,无需逐模块改。新增 `client.test.ts` 覆盖映射/兜底;过程中抓到并修掉自己引入的 bug——`??` 不兜空串导致后端空 message 时报空错误,改回 `||`。
@@ -130,6 +131,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S6 browser smoke / style-guide: `pnpm -F web test`（full）通过(14 files,114 tests);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。浏览器:本地 API:8090 + web:5173,chrome-devtools 截图核验 1280/1920(Designer 三栏↔属性下移正确)、console 仅 React Router future-flag warning;smoke 后已 `lsof -ti tcp:8090 tcp:5173 | xargs kill` 释放端口,无残留进程。
 - 2026-05-28 S6 a11y/shortcut: `pnpm -F web test`（full）通过(14 files,114 tests,含新增 Labeler Ctrl/Cmd+Enter 提交测试,仍有 jsdom canvas warning);`pnpm -F web lint` 通过(修了 `react-hooks/refs`——ref 改在无依赖 effect 里更新,不在 render 期间写);`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S6 error copy: `pnpm -F web test`（full）通过(14 files,113 tests,含新增 `ApiError` 5 条单测,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S5 review fixes: `docker compose --env-file deploy/.env.example -f deploy/docker-compose.prod.yml config` 通过(asynqmon 鉴权变量正确注入 caddy);缺 `ASYNQMON_PASSWORD_HASH` 时 compose 按 `:?` 拒绝渲染;`jq empty docs/LabelHub.postman_collection.json` 通过;`git diff --check` 通过。未跑 Go/web 测试(本次仅改部署模板 + Postman/文档,无代码逻辑改动)。

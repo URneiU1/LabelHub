@@ -15,7 +15,7 @@ S6 covers Editorial polish and bonus materials only — no new backend business 
 - [x] **Day4 — Friendly error copy.** `client.ts` throws a backwards-compatible `ApiError` carrying `code` / `requestId`; `INVALID_STATE` and `LLM_PROVIDER_ERROR` surface Chinese action copy through any existing `err.message` display, other codes keep the backend message. `client.test.ts` covers the mapping and the empty-message fallback.
 - [x] **Day4 — A11y.** Designer nested controls already carry `aria-label` (verified across `NestedFieldsEditor` / `GroupControls` / `TabsControls`); global `:focus-visible` ring shipped in Day1.
 - [x] **Day4 — Keyboard shortcut.** Labeler `Ctrl/Cmd+Enter` submits the active answer (with a button `title` hint and a Plaza test).
-- [ ] **Day5 — Browser smoke (PENDING).** Requires a locally-run dev server (`make web`); not yet executed. See "Pending Browser Verification" below.
+- [x] **Day5 — Browser smoke (done 2026-05-28).** Full local stack run (API on :8090 to avoid an :8080 conflict, web proxied to it); login/owner/designer/reviewer/style-guide checked via chrome-devtools at 1280 and 1920. Designer responsive confirmed (1280: palette+canvas with property panel full-width below; 1920: three columns side-by-side), StatusBadge/Editorial tokens consistent, no console errors (only pre-existing React Router v7 future-flag warnings). One inconsistency found and fixed: `/style-guide` still carried the old Schematic/Inter/#0f62fe identity and hand-rolled status tags — now Editorial-aligned (palette reads live CSS vars, real `StatusBadge`, updated title/footer).
 
 ## Deliberately Cut / Skipped
 
@@ -23,19 +23,29 @@ S6 covers Editorial polish and bonus materials only — no new backend business 
 - Dark mode, Framer Motion, full mobile experience, TanStack Query / axios migration, Formily / dnd-kit migration, new backend APIs — explicit S6 non-goals in `docs/PLAN-S6-IMPL.md`.
 - Designer canvas-level nested drag inside Tabs/Group remains Up/Down reorder only (drag was the optional, test-destabilizing path).
 
-## Pending Browser Verification (Day5 Task 5.1)
+## Browser Verification (Day5 Task 5.1 — done 2026-05-28)
 
-Run locally, then verify:
+Stack brought up locally (`:8080` was occupied by an unrelated FastAPI service, so the LabelHub API ran on `:8090` with the web proxy pointed there):
 
 ```bash
-cd ~/Desktop/LabelHub && make web   # http://localhost:5173
+# terminal A — API on a free port
+set -a; . ./.env; set +a; cd apps/api && API_PORT=8090 go run ./cmd/server
+# terminal B — web proxied to it
+VITE_API_PROXY_TARGET=http://localhost:8090 make web   # http://localhost:5173
 ```
 
-Routes: `/auth/login`, `/owner`, `/owner/tasks/:taskId/templates/:templateId`, `/labeler`, `/reviewer`, `/style-guide`.
-Viewports: 1280×800, 1920×1080, 390×844 (smoke only).
-Checks: no console error; no text overlap; Designer usable at 1280 and 1920 (property panel wraps below at 1280, three columns at 1920); status colors consistent; renderer Tabs switch works.
+Checked via chrome-devtools (login as owner1): `/auth/login`, `/owner`, `/owner/tasks/1/templates/1`, `/reviewer`, `/style-guide`.
 
-Automated tests cannot verify the responsive breakpoints — jsdom does not lay out CSS media queries — so the 1280/1920 layout claims rest on this browser pass.
+| Check | Result |
+|---|---|
+| Designer @ 1920 | Three columns side-by-side (palette / canvas / property) ✓ |
+| Designer @ 1280 | Palette + canvas two columns, property panel full-width below ✓ |
+| StatusBadge / Editorial tokens | Consistent on login, owner, reviewer (e.g. green `已发布`, queue tones) ✓ |
+| Console errors | None — only pre-existing React Router v7 future-flag warnings ✓ |
+| Text overlap | None observed ✓ |
+| `/style-guide` consistency | Was stale (Schematic/Inter/#0f62fe + hand-rolled tags) → fixed to Editorial (live CSS-var palette, real `StatusBadge`, updated title/footer) ✓ |
+
+jsdom cannot lay out CSS media queries, so the 1280/1920 Designer layout claims rested on this browser pass; now confirmed. 390×844 narrow smoke was not separately captured (single-column stack rule is CSS-only at ≤768).
 
 ## Verification Commands (already run during S6)
 
