@@ -31,10 +31,6 @@ func (h workerHandlers) handleAIDryRun(ctx context.Context, t *asynq.Task) error
 		h.logger.Warn("invalid ai dry-run payload", zap.Error(err), zap.ByteString("payload", t.Payload()))
 		return nil
 	}
-	if err := h.circuit.check(); err != nil {
-		h.logger.Warn("ai dry-run provider circuit open", zap.Uint64("run_id", payload.RunID), zap.Error(err))
-		return err
-	}
 	claimed, err := h.markAIDryRunRunning(ctx, payload.RunID)
 	if err != nil {
 		return err
@@ -42,6 +38,10 @@ func (h workerHandlers) handleAIDryRun(ctx context.Context, t *asynq.Task) error
 	if !claimed {
 		h.logger.Info("ai dry-run already finalized or claimed elsewhere", zap.Uint64("run_id", payload.RunID))
 		return nil
+	}
+	if err := h.circuit.check(); err != nil {
+		h.logger.Warn("ai dry-run provider circuit open", zap.Uint64("run_id", payload.RunID), zap.Error(err))
+		return h.failAIDryRun(ctx, payload.RunID, err)
 	}
 
 	reviewCtx, cancel := context.WithTimeout(ctx, aiReviewTimeout())

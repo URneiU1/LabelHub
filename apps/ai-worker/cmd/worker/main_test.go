@@ -534,6 +534,30 @@ func TestHandleAIDryRunFinalizedDuplicateDoesNotCallProvider(t *testing.T) {
 	}
 }
 
+func TestHandleAIDryRunCircuitOpenMarksRunFailed(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	circuit := newAIWorkerCircuit(1, time.Minute)
+	circuit.recordProvider5XX()
+
+	mock.ExpectExec(`(?is)^UPDATE ai_dry_runs SET status = 'running'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE ai_dry_runs SET status = 'failed'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}, circuit: circuit}
+	if err := handler.handleAIDryRun(context.Background(), newAIDryRunTask([]byte(`{"run_id":44}`))); err != nil {
+		t.Fatalf("handleAIDryRun returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 type staticEvaluator struct{}
 
 func (staticEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {

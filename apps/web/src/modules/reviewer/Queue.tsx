@@ -130,7 +130,6 @@ export default function ReviewerQueue() {
   const [ruleActivePromptId, setRuleActivePromptId] = useState<number | null>(null)
   const [ruleAIReviewEnabled, setRuleAIReviewEnabled] = useState(false)
   const [ruleLoading, setRuleLoading] = useState(false)
-  const [activatingRule, setActivatingRule] = useState(false)
   const [ruleError, setRuleError] = useState('')
   const ruleLoadSeq = useRef(0)
 
@@ -144,7 +143,6 @@ export default function ReviewerQueue() {
         setSelected(null)
         setDetail(null)
         setRulePanelOpen(false)
-        setActivatingRule(false)
       }
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载审核队列失败')
@@ -180,7 +178,6 @@ export default function ReviewerQueue() {
     ruleLoadSeq.current += 1
     setRulePanelOpen(false)
     setRuleLoading(false)
-    setActivatingRule(false)
     if (item.kind === 'demo') {
       setSelected(null)
       setDetail(null)
@@ -217,7 +214,6 @@ export default function ReviewerQueue() {
       setSelected(null)
       setDetail(null)
       setRulePanelOpen(false)
-      setActivatingRule(false)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '审核失败')
     } finally {
@@ -266,7 +262,6 @@ export default function ReviewerQueue() {
       setSelected(null)
       setDetail(null)
       setRulePanelOpen(false)
-      setActivatingRule(false)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : 'AI 重跑失败')
     } finally {
@@ -294,7 +289,6 @@ export default function ReviewerQueue() {
     const currentPrompt = detail.aiReview?.prompt ?? null
     setRulePanelOpen(true)
     setRuleLoading(true)
-    setActivatingRule(false)
     setRuleError('')
     setRuleConfigs(currentPrompt ? [currentPrompt] : [])
     setSelectedRuleId(currentPrompt?.id ?? null)
@@ -315,45 +309,6 @@ export default function ReviewerQueue() {
     } finally {
       if (ruleLoadSeq.current === requestSeq) {
         setRuleLoading(false)
-      }
-    }
-  }
-
-  async function activateSelectedRule() {
-    if (!selectedRule) {
-      Toast.error('请先选择一个规则版本')
-      return
-    }
-    const requestSeq = ruleLoadSeq.current + 1
-    ruleLoadSeq.current = requestSeq
-    if (showingDemo) {
-      setRuleActivePromptId(selectedRule.id)
-      setRuleAIReviewEnabled(true)
-      Toast.success('演示样例：已切换当前规则')
-      return
-    }
-    if (!detail?.task?.id) {
-      Toast.error('请先选择一条真实提交')
-      return
-    }
-    const taskId = detail.task.id
-    setActivatingRule(true)
-    setRuleError('')
-    try {
-      const data = await apiPost<ReviewerRuleConfigResponse>(`/reviewer/tasks/${taskId}/ai-prompts/${selectedRule.id}/activate`, {})
-      if (ruleLoadSeq.current !== requestSeq) return
-      const prompts = data.prompts.length === 0 ? ruleConfigs : data.prompts
-      setRuleConfigs(prompts)
-      setRuleActivePromptId(data.activePromptId)
-      setRuleAIReviewEnabled(data.aiReviewEnabled)
-      setSelectedRuleId(data.activePromptId ?? selectedRule.id)
-      Toast.success('当前审核规则已更新')
-    } catch (error) {
-      if (ruleLoadSeq.current !== requestSeq) return
-      setRuleError(error instanceof Error ? error.message : '启用规则失败')
-    } finally {
-      if (ruleLoadSeq.current === requestSeq) {
-        setActivatingRule(false)
       }
     }
   }
@@ -466,15 +421,12 @@ export default function ReviewerQueue() {
               aiReviewEnabled={ruleAIReviewEnabled}
               currentPromptId={detail?.aiReview?.prompt?.id ?? null}
               loading={ruleLoading}
-              activating={activatingRule}
               error={ruleError}
               onSelectRule={setSelectedRuleId}
-              onActivateRule={() => void activateSelectedRule()}
               onClose={() => {
                 ruleLoadSeq.current += 1
                 setRulePanelOpen(false)
                 setRuleLoading(false)
-                setActivatingRule(false)
               }}
             />
           ) : null}
@@ -890,10 +842,8 @@ function RuleConfigPanel({
   aiReviewEnabled,
   currentPromptId,
   loading,
-  activating,
   error,
   onSelectRule,
-  onActivateRule,
   onClose,
 }: {
   taskId?: number | null
@@ -904,10 +854,8 @@ function RuleConfigPanel({
   aiReviewEnabled: boolean
   currentPromptId: number | null
   loading: boolean
-  activating: boolean
   error: string
   onSelectRule: (id: number | null) => void
-  onActivateRule: () => void
   onClose: () => void
 }) {
   const editHref = taskId
@@ -953,14 +901,7 @@ function RuleConfigPanel({
           <pre style={ruleCodeBlockStyle}>{selectedRule.promptTemplate}</pre>
           <pre style={ruleCodeBlockStyle}>{formatRuleDimensions(selectedRule.dimensions)}</pre>
           <div style={ruleActionRowStyle}>
-            <Button
-              disabled={loading || activating || selectedRule.id === activePromptId}
-              loading={activating}
-              onClick={onActivateRule}
-              theme="solid"
-            >
-              设为当前规则
-            </Button>
+            <span style={mutedTextStyle}>规则切换请在 Owner 配置页完成。</span>
             <a href={editHref} style={editRuleLinkStyle}>跳转 Owner 编辑</a>
           </div>
         </>

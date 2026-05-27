@@ -319,48 +319,19 @@ describe('ReviewerQueue schema runtime flow', () => {
       }
       throw new Error(`unexpected GET ${path}`)
     })
-    mockApiPost.mockImplementation(async (path) => {
-      if (path === '/reviewer/tasks/1/ai-prompts/40/activate') {
-        return {
-          prompts: [
-            {
-              id: 41,
-              version: 2,
-              model: 'doubao-pro-32k',
-              promptTemplate: '当前规则模板',
-              dimensions: [{ name: '相关性', weight: 1 }],
-              passThreshold: 80,
-              uncertainMin: 60,
-            },
-            {
-              id: 40,
-              version: 1,
-              model: 'mock-model',
-              promptTemplate: '历史规则模板',
-              dimensions: [{ name: '准确性', weight: 1 }],
-              passThreshold: 75,
-              uncertainMin: 55,
-            },
-          ],
-          activePromptId: 40,
-          aiReviewEnabled: true,
-        }
-      }
-      throw new Error(`unexpected POST ${path}`)
-    })
 
     render(<ReviewerQueue />)
 
     await user.click(await screen.findByText('Submission #501'))
     await user.click(screen.getByRole('button', { name: '规则配置' }))
     await user.selectOptions(await screen.findByLabelText('reviewer_rule_select'), '40')
-    await user.click(screen.getByRole('button', { name: '设为当前规则' }))
 
     expect(await screen.findByText('历史规则模板')).toBeInTheDocument()
-    expect(await screen.findByText('active #40')).toBeInTheDocument()
+    expect(await screen.findByText('active #41')).toBeInTheDocument()
+    expect(screen.getByText('规则切换请在 Owner 配置页完成。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '跳转 Owner 编辑' })).toHaveAttribute('href', '/owner?taskId=1&aiPromptId=40#ai-prompts')
     expect(mockApiGet).toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts')
-    expect(mockApiPost).toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts/40/activate', {})
+    expect(mockApiPost).not.toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts/40/activate', {})
   })
 
   it('ignores stale rule selector responses after switching submissions', async () => {

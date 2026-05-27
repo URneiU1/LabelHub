@@ -81,7 +81,7 @@ func currentTemplate(db *gorm.DB, taskID uint64) (model.TaskTemplate, error) {
 
 func templateForBundle(db *gorm.DB, task model.Task, submission model.Submission) (model.TaskTemplate, error) {
 	var template model.TaskTemplate
-	if submission.ID != 0 && submission.Status == "revising" {
+	if submission.ID != 0 {
 		err := db.Where("task_id = ? AND version = ?", task.ID, submission.TemplateVersion).First(&template).Error
 		return template, err
 	}
