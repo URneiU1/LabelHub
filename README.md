@@ -55,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s6-error-copy`: S6 Day4 第一段(Task 4.1 错误文案归一化)。`shared/api/client.ts` 新增 `ApiError`(继承 `Error`,带 `code`/`requestId`,向后兼容现有 `err instanceof Error` 判断),`request`/`apiUpload` 改抛 `ApiError`;对会卡住标注/审核流程的两个码给可执行中文提示——`INVALID_STATE`("状态已被改动,请刷新后再操作")、`LLM_PROVIDER_ERROR`("AI 暂不可用,可重试或转人工"),其余码仍用后端 message,不覆盖既有具体说明。友好文案经任何展示 `err.message` 的地方自动冒出,无需逐模块改。新增 `client.test.ts` 覆盖映射/兜底;过程中抓到并修掉自己引入的 bug——`??` 不兜空串导致后端空 message 时报空错误,改回 `||`。
 - 2026-05-28 `s5-review-fixes`: S5 三方 review(Go / TypeScript / 安全)发现的部署模板问题修复。Critical:生产 `deploy/Caddyfile` 把 asynqmon 管理台 `/asynqmon/*` 无鉴权直接反代到公网(dev compose 本来有 nginx basic auth,prod 漏了),改为 Caddy `basic_auth`,凭证 `ASYNQMON_USER` / `ASYNQMON_PASSWORD_HASH` 用 `${VAR:?}` 强制——缺了 compose 直接拒起,杜绝无鉴权暴露。High:`docs/LabelHub.postman_collection.json` 硬编码 `owner1`/`pass`(repo 已公开),改为 `{{ownerUsername}}`/`{{ownerPassword}}` 变量,密码默认空。`docs/DEPLOY.md` 补 asynqmon 鉴权与 `LLM_API_KEY` 在真实 provider 下必填的说明,`.env.example` 补 TLS 域名提示。Go/TS reviewer 确认 S5 生产逻辑(exporter 瞬时/终态重试、stats 仅算当前 revision、StatsBoard request-seq guard、ErrorBoundary)均正确,其余为测试置信度缺口(见下方"待跟进")。
 - 2026-05-28 `s6-designer-responsive`: S6 Day3 第二段完成:新增 `apps/web/src/modules/template/Designer.css`(原来 import 了但文件缺失,会直接挂 build),把 Designer 三栏布局从固定 `220px / 1fr / 320px` inline grid 改成响应式——1920 三栏(物料 / 画布 / 属性),≤1599 两栏(物料 + 画布,属性面板下移占满整行),≤768 单列堆叠;修正 Codex 贴错的类名(`template-designer-properties` 本来贴在左侧物料栏上,改为 `template-designer-palette`,并给画布 `template-designer-canvas`、右侧属性面板 `template-designer-property` 补正确类名);Group/Tabs 画布预览改为 `NestedCanvasPreview`/`NestedCanvasRow`,把子字段以 widget/name/label 迷你行展示(Tabs 按 tab 分组),并补集成测试断言画布上嵌套预览确实渲染 Group 子字段和 Tabs 各页子字段。
 - 2026-05-28 `s6-runtime-tabs`: S6 Day3 第一段完成: `SchemaRenderer` 的 Tabs 从“所有 tab panel 堆叠显示”改成真实 `tablist`/`tabpanel` 交互,默认显示第一 tab,点击切换后只渲染 active tab 字段,同时保持 flat answer object 中已填写答案不丢;补 `SchemaRenderer` 测试验证 tab 切换、隐藏字段、切回后 radio 选择保持;Designer round-trip 测试跟随新 Tabs 行为先切到 Tab 2 再断言子字段。
@@ -127,6 +128,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S6 error copy: `pnpm -F web test`（full）通过(14 files,113 tests,含新增 `ApiError` 5 条单测,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。
 - 2026-05-28 S5 review fixes: `docker compose --env-file deploy/.env.example -f deploy/docker-compose.prod.yml config` 通过(asynqmon 鉴权变量正确注入 caddy);缺 `ASYNQMON_PASSWORD_HASH` 时 compose 按 `:?` 拒绝渲染;`jq empty docs/LabelHub.postman_collection.json` 通过;`git diff --check` 通过。未跑 Go/web 测试(本次仅改部署模板 + Postman/文档,无代码逻辑改动)。
 - 2026-05-28 S6 designer responsive: `pnpm -F web build` 通过(补回缺失的 `Designer.css`,仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web lint` 通过;`pnpm -F web test`（full）通过(13 files,108 tests,含新增嵌套画布预览断言,仍有 jsdom canvas warning);`git diff --check` 通过。响应式断点(1920/1280/窄屏)依赖 CSS media query,jsdom 不渲染布局,留待 Day5 浏览器 smoke 实测。
 - 2026-05-28 S6 runtime tabs: `pnpm -F web test -- SchemaRenderer Designer.integration` 通过(13 files,108 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`git diff --check` 通过。

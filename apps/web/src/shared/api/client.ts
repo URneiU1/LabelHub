@@ -11,6 +11,25 @@ type ApiErrorEnvelope = {
   request_id: string
 }
 
+// 对少数会让标注/审核流程卡住的错误码,给出可执行的中文提示;
+// 其余错误码沿用后端 message,避免覆盖已有的具体说明。
+const FRIENDLY_ERROR_BY_CODE: Record<string, string> = {
+  INVALID_STATE: '该记录的状态已被其他人改动,请刷新后再操作。',
+  LLM_PROVIDER_ERROR: 'AI 服务暂时不可用,可稍后重试,或直接转人工审核。',
+}
+
+export class ApiError extends Error {
+  code: string
+  requestId: string
+
+  constructor(code: string, backendMessage: string, requestId: string) {
+    super(FRIENDLY_ERROR_BY_CODE[code] || backendMessage || '请求失败')
+    this.name = 'ApiError'
+    this.code = code
+    this.requestId = requestId
+  }
+}
+
 const TOKEN_KEY = 'labelhub_access_token'
 const USER_KEY = 'labelhub_current_user'
 
@@ -95,7 +114,7 @@ export async function apiUpload<T>(path: string, body: FormData) {
   const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
   if (!response.ok) {
     const errorPayload = payload as ApiErrorEnvelope
-    throw new Error(errorPayload.error?.message || '上传失败')
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '上传失败', errorPayload.request_id ?? '')
   }
   return (payload as ApiEnvelope<T>).data
 }
@@ -114,7 +133,7 @@ async function request<T>(path: string, init: RequestInit, auth = true): Promise
   const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
   if (!response.ok) {
     const errorPayload = payload as ApiErrorEnvelope
-    throw new Error(errorPayload.error?.message || '请求失败')
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '请求失败', errorPayload.request_id ?? '')
   }
   return (payload as ApiEnvelope<T>).data
 }
