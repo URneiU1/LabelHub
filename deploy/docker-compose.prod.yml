@@ -1,0 +1,156 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-labelhub}
+      MYSQL_USER: ${MYSQL_USER:-labelhub}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      GIN_MODE: release
+      API_PORT: 8080
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:-labelhub}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE:-labelhub}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EXPORT_DIR: /var/lib/labelhub/exports
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-2h}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-336h}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:?set API_CORS_ORIGINS}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/var/lib/labelhub/uploads}
+      UPLOAD_MAX_SIZE_MB: ${UPLOAD_MAX_SIZE_MB:-10}
+      EXPORT_DOWNLOAD_SECRET: ${EXPORT_DOWNLOAD_SECRET:?set EXPORT_DOWNLOAD_SECRET}
+      EXPORT_DOWNLOAD_TTL: ${EXPORT_DOWNLOAD_TTL:-600}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-mock-model}
+      LLM_ALLOWED_MODELS: ${LLM_ALLOWED_MODELS:-mock-model}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      LLM_RETRY_MAX_ATTEMPTS: ${LLM_RETRY_MAX_ATTEMPTS:-2}
+      LLM_RETRY_BACKOFF_MS: ${LLM_RETRY_BACKOFF_MS:-200}
+      LLM_RETRY_MAX_BACKOFF_MS: ${LLM_RETRY_MAX_BACKOFF_MS:-2000}
+      LLM_DRY_RUN_QUOTA_MAX_RUNS: ${LLM_DRY_RUN_QUOTA_MAX_RUNS:-0}
+      LLM_DRY_RUN_CIRCUIT_MAX_FAILURES: ${LLM_DRY_RUN_CIRCUIT_MAX_FAILURES:-0}
+      LLM_DRY_RUN_GUARD_WINDOW_MINUTES: ${LLM_DRY_RUN_GUARD_WINDOW_MINUTES:-60}
+      OUTBOX_PUBLISHER_ENABLED: ${OUTBOX_PUBLISHER_ENABLED:-true}
+      OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
+      OUTBOX_BATCH: ${OUTBOX_BATCH:-20}
+      AI_REVIEW_SWEEPER_ENABLED: ${AI_REVIEW_SWEEPER_ENABLED:-true}
+      AI_REVIEW_SWEEPER_INTERVAL_MS: ${AI_REVIEW_SWEEPER_INTERVAL_MS:-60000}
+      AI_REVIEW_STALL_TIMEOUT_MS: ${AI_REVIEW_STALL_TIMEOUT_MS:-300000}
+      AI_REVIEW_SWEEPER_BATCH: ${AI_REVIEW_SWEEPER_BATCH:-20}
+      ORPHAN_TEMP_FILE_CLEANER_ENABLED: ${ORPHAN_TEMP_FILE_CLEANER_ENABLED:-true}
+    volumes:
+      - exports_data:/var/lib/labelhub/exports
+      - uploads_data:/var/lib/labelhub/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    command: ["worker"]
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER:-labelhub}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE:-labelhub}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      EXPORT_DIR: /var/lib/labelhub/exports
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-mock-model}
+      LLM_ALLOWED_MODELS: ${LLM_ALLOWED_MODELS:-mock-model}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      LLM_RETRY_MAX_ATTEMPTS: ${LLM_RETRY_MAX_ATTEMPTS:-2}
+      LLM_RETRY_BACKOFF_MS: ${LLM_RETRY_BACKOFF_MS:-200}
+      LLM_RETRY_MAX_BACKOFF_MS: ${LLM_RETRY_MAX_BACKOFF_MS:-2000}
+    volumes:
+      - exports_data:/var/lib/labelhub/exports
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  asynqmon:
+    build:
+      context: ./asynqmon
+    restart: unless-stopped
+    command: ["--redis-addr=redis:6379", "--port=8080"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:?set CADDY_SITE_ADDRESS}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+      - asynqmon
+
+volumes:
+  mysql_data:
+  redis_data:
+  exports_data:
+  uploads_data:
+  caddy_data:
+  caddy_config:

@@ -5,6 +5,9 @@
 ## 快速启动
 
 ```bash
+# 最短路径:起基础设施、安装依赖、seed,然后按提示开长跑进程
+make dev
+
 # 1. 起基础设施(MySQL + Redis + Adminer)
 make up
 
@@ -17,7 +20,10 @@ make seed
 # 4. 跑 API(终端 A,复用或新开)
 make api                 # http://localhost:8080/health
 
-# 5. 跑前端(终端 B,新开)
+# 5. 跑 Worker(终端 B,新开)
+make worker
+
+# 6. 跑前端(终端 C,新开)
 make web                 # http://localhost:5173
 
 # MySQL(host):        localhost:13306  (user=labelhub, pass=labelhub_dev)
@@ -49,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s5-deploy-docs`: S5 Day5 收尾完成:新增生产部署模板 `deploy/docker-compose.prod.yml`,覆盖 api/worker/web/mysql/redis/asynqmon/caddy;新增 api/worker 共用多阶段 Dockerfile、web 静态 Caddy 镜像和 SPA fallback;生产 compose 通过 env 显式注入密钥/LLM/JWT/导出配置,api/worker 共享绝对 `EXPORT_DIR` volume,api 上传目录单独持久化;新增 `deploy/Caddyfile`、`deploy/.env.example`、`.dockerignore`;`make dev` 现在可一键起基础设施、安装依赖、seed 并提示分别启动 api/worker/web;新增 `docs/ARCHITECTURE.md`、`docs/DEPLOY.md`、`docs/S5_ACCEPTANCE.md`。
 - 2026-05-28 `s5-openapi-error-boundary`: S5 Day4/Day5 第一段完成:按计划 fallback 手写主流程 `docs/openapi.yaml`(auth/tasks/templates/labeler/reviewer/exports/stats),新增 `pnpm -F web gen:api` 用 `openapi-typescript` 生成 `apps/web/src/shared/api/schema.d.ts`;新增 `docs/LabelHub.postman_collection.json` 覆盖登录、领题、提交、审核、导出、stats 主流程;前端新增全站 `ErrorBoundary`,在 `main.tsx` 包住 `<App/>`,并补抛错 fallback/reset 测试。
 - 2026-05-28 `s5-frontend-strict-roundtrip`: S5 Day3 前端质量补强完成:开启 `apps/web/tsconfig.app.json` 的 `strict:true` 且 `pnpm -F web build` 直接通过;Renderer 新增 ShowItem text/video/json 模式测试与 LLMTrigger 写回 `target_field` 测试;Designer 集成测试补保存 payload → `parseTemplateSchema` → `SchemaRenderer` 的 round-trip 断言,覆盖 Group/Tabs 子字段、导出字段和 Renderer 实际渲染一致性。
 - 2026-05-28 `s5-integration-main-flow`: S5 Day2 新增 build-tag 隔离的 testcontainers 集成测试 `apps/api/internal/integration/main_flow_integration_test.go`:真 MySQL 8.0.36 + Redis 7 容器,真实迁移 SQL,seed owner/labeler/reviewer/task/prompt/item,覆盖 submit→ai_review outbox→Redis publish→AI 结果入库→review revise→labeler resubmit→AI pass→review approve→JSONL export 落盘的主链路。CI 新增独立 `integration` job 跑 `go test -tags=integration ./apps/api/internal/integration -count=1`,普通单测仍不跑 Docker。
@@ -98,7 +105,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 仍需提升
 
-- S5 仍未完成:还需要继续补 `docker-compose.prod.yml`、Caddy、`make dev`、ARCHITECTURE/DEPLOY 文档和 S5 acceptance。
+- S5 工程质量 sprint 已完成主目标;生产 compose 目前完成 `config` 级校验,真实 `up --build` 留给有目标域名/端口和部署机资源的发布环境执行。
 - S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/Up-Down/drag order/simple property editing、逐字段 validation、`regex`/`requiredWhen` runtime 校验、真实 item payload 预览、Tabs/Group 最小结构物料、子字段属性栏可视化编辑和 Save as new version;但 Tabs/Group 子字段还不是画布内嵌套拖拽,layout 编辑也仍较基础。
 - AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend/guard 视图、Reviewer AI verdict/score/detail/audit 展示、Reviewer failed/dead AI retry、Reviewer 规则查看/Owner 编辑跳转、单样本 durable queued dry-run + polling、同步串行 batch dry-run endpoint、基础 batch delay 配置、provider 429/backoff 短重试、server-side dry-run quota/circuit breaker、AI worker 5xx 熔断、AI 自动 approved、Labeler 3s 自动保存/修订入口和 Reviewer 批量操作已具备。若后续要继续产品化,主要是把 batch dry-run 也异步化、补更完整 trend 图表和真实运营告警。
 - FileUpload 已完成 temp→attached 绑定、打回复用、下载授权接口和 temp orphan cleanup 定时清理;但前端文件预览/下载入口仍较基础,还需要 seeded browser smoke 覆盖。
@@ -106,7 +113,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 下一步
 
-- 继续 S5 Day 5:推进生产 compose/Caddy、`make dev`、ARCHITECTURE/DEPLOY 文档和 S5 acceptance 文档。
+- 开始 S6 前先补一份 `docs/PLAN-S6-IMPL.md`,把性能/可观测性目标拆成可执行检查项和验收命令。
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
 - 推进 S3 验收:做一次本地 seeded browser smoke,覆盖 Owner 配规则/跑 golden dry-run、Labeler 提交/修订、AI worker、Reviewer 批量审核和规则查看。
 - 补 FileUpload 前端预览/下载入口的 seeded browser smoke。
@@ -114,6 +121,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S5 deploy/docs: `docker compose --env-file deploy/.env.example -f deploy/docker-compose.prod.yml config` 通过;`make -n dev` 通过;`go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview -count=1` 通过;`pnpm -F web test` 通过(12 files,103 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web gen:api` 通过;`jq empty docs/LabelHub.postman_collection.json` 通过;`git diff --check` 通过。生产 compose 未在本机执行 `up --build`,避免占用 80/443 和拉取/构建全部镜像。
 - 2026-05-28 S5 openapi/error-boundary: `pnpm -F web gen:api` 通过并生成 `schema.d.ts`;`jq empty docs/LabelHub.postman_collection.json` 通过;`pnpm -F web test -- ErrorBoundary SchemaRenderer Designer.integration` 通过(12 files,103 tests);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning)。
 - 2026-05-28 S5 frontend strict/roundtrip: `pnpm -F web build` 通过(`strict:true`,仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web test -- SchemaRenderer Designer.integration` 通过(11 files,102 tests;含新增 Renderer/Designer round-trip);`pnpm -F web lint` 通过。
 - 2026-05-28 S5 integration main-flow:普通 `go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview -count=1` 通过;本机 Colima 环境用 `DOCKER_HOST=unix:///Users/dadadineiyou/.colima/default/docker.sock TESTCONTAINERS_RYUK_DISABLED=true go test -tags=integration ./apps/api/internal/integration -count=1 -v` 通过(真 MySQL+Redis 容器,7.8s);`git diff --check` 通过。

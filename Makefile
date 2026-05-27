@@ -1,4 +1,4 @@
-.PHONY: up down install api worker web seed
+.PHONY: up down install dev api worker web seed
 
 # 自动加载 .env(若存在);CI / prod 通过显式 env vars 注入
 ENV_LOAD := if [ -f .env ]; then set -a; . ./.env; set +a; fi
@@ -13,6 +13,16 @@ install:
 	cd apps/web && pnpm install
 	cd apps/api && go mod tidy
 	cd apps/ai-worker && go mod tidy
+
+dev: up install
+	@printf "Waiting for MySQL and Redis health checks...\n"
+	sleep 5
+	$(MAKE) seed
+	@printf "\nDevelopment stack is ready.\n"
+	@printf "Run long-lived processes in separate terminals:\n"
+	@printf "  make api\n"
+	@printf "  make worker\n"
+	@printf "  make web\n\n"
 
 api:
 	$(ENV_LOAD); cd apps/api && go run ./cmd/server
