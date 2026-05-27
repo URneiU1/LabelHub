@@ -1,10 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TemplateDesigner from './Designer'
 import { apiGet, apiPost } from '../../shared/api/client'
+import SchemaRenderer from '../../renderer/SchemaRenderer'
+import { parseTemplateSchema } from '../../renderer/parser'
 
 vi.mock('../../shared/api/client', () => ({
   apiGet: vi.fn(),
@@ -309,6 +311,17 @@ describe('TemplateDesigner', () => {
       ],
     })
     expect(JSON.stringify(body)).not.toContain('_draftId')
+
+    const parsed = parseTemplateSchema(body)
+    if (!parsed.ok) {
+      throw new Error(parsed.error.message)
+    }
+    render(<SchemaRenderer schema={parsed.value} payload={{}} />)
+    const roundTrip = within(screen.getByRole('form', { name: 'QA template' }))
+    expect(roundTrip.getByLabelText('Summary')).toBeInTheDocument()
+    expect(roundTrip.getByLabelText('组内摘要')).toBeInTheDocument()
+    expect(roundTrip.getAllByRole('radiogroup', { name: '单选' })).toHaveLength(2)
+    expect(roundTrip.getByLabelText('多行文本')).toBeInTheDocument()
   })
 
   it('shows field-level validation and blocks saving invalid fields', async () => {
