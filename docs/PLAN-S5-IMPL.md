@@ -102,7 +102,7 @@ pnpm -F web add -D openapi-typescript @testing-library/jest-dom   # 后者若已
 `apps/ai-worker/cmd/worker/ai_review_test.go`(或新建)table-driven 覆盖 `handleAIReview` 的 verdict→状态映射:
 - `pass` + `human_review_enabled=false` → `approved`(`ai_auto_approved` audit)
 - `pass` + `human_review_enabled=true` → `human_reviewing`
-- `fail` / `uncertain` → `human_reviewing`(+ `ai_verdict` 落字段)
+- `reject` / `uncertain` → `human_reviewing`(+ `ai_verdict` 落字段)
 - verdict 与 score threshold 不一致 → 拒绝(non-retryable failover,S3 已有逻辑,补断言)
 - 熔断 open / provider 5xx → failover 人工
 - 幂等:重复消费 finalized submission → no-op
