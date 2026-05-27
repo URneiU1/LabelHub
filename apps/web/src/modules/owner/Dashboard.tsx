@@ -90,8 +90,19 @@ type AIDryRunHistoryItem = {
   createdAt: string
   finishedAt: string | null
 }
+type AIDryRunGuardStatus = {
+  windowMinutes: number
+  quotaMaxRuns: number
+  circuitMaxFailures: number
+  recentRuns: number
+  recentFailures: number
+  quotaRemaining: number | null
+  circuitOpen: boolean
+  state: string
+}
 type AIDryRunHistoryResponse = {
   dryRuns: AIDryRunHistoryItem[]
+  guard?: AIDryRunGuardStatus
 }
 type GoldenSampleRunRow = {
   sampleId: number
@@ -146,6 +157,7 @@ export default function OwnerDashboard() {
   const [dryRunHistorySampleFilter, setDryRunHistorySampleFilter] = useState('all')
   const [dryRunHistoryLoading, setDryRunHistoryLoading] = useState(false)
   const [dryRunHistoryError, setDryRunHistoryError] = useState('')
+  const [dryRunGuard, setDryRunGuard] = useState<AIDryRunGuardStatus | null>(null)
   const [promptError, setPromptError] = useState('')
   const [promptLoading, setPromptLoading] = useState(false)
   const [promptLoadFailed, setPromptLoadFailed] = useState(false)
@@ -284,11 +296,13 @@ export default function OwnerDashboard() {
       const data = await apiGet<AIDryRunHistoryResponse>(`/tasks/${taskId}/ai-dry-runs?${sampleQuery}limit=10`)
       if (dryRunHistorySeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
       setDryRunHistory(data.dryRuns)
+      setDryRunGuard(data.guard ?? null)
       setDryRunHistoryLoading(false)
       setDryRunHistoryError('')
     } catch (error) {
       if (dryRunHistorySeq.current !== requestSeq || selectedTaskIdRef.current !== taskId) return
       setDryRunHistory([])
+      setDryRunGuard(null)
       setDryRunHistoryLoading(false)
       setDryRunHistoryError(error instanceof Error ? error.message : '加载 dry-run history 失败')
     }
@@ -347,6 +361,7 @@ export default function OwnerDashboard() {
     setCreatingGoldenSample(false)
     setDeletingGoldenSampleId(null)
     setDryRunHistory([])
+    setDryRunGuard(null)
     setDryRunHistorySampleFilter('all')
     setDryRunHistoryError('')
     setDryRunHistoryLoading(true)
@@ -664,6 +679,7 @@ export default function OwnerDashboard() {
           },
         }))
         setDryRunHistory(data.dryRuns)
+        setDryRunGuard(data.guard ?? null)
         return
       }
       if (run?.status === 'failed') {
@@ -678,6 +694,7 @@ export default function OwnerDashboard() {
           },
         }))
         setDryRunHistory(data.dryRuns)
+        setDryRunGuard(data.guard ?? null)
         return
       }
     } catch {
@@ -755,7 +772,7 @@ export default function OwnerDashboard() {
                 <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={activePromptId ? promptVersionLabel(activePromptId) : 'no active prompt'} tone={aiReviewEnabled ? 'success' : 'muted'} />
                 <MetricCell label="PROMPTS" value={String(prompts.length)} detail={promptLoading ? 'loading config' : promptLoadFailed ? 'load failed' : 'versions loaded'} />
                 <MetricCell label="EVAL SET" value={String(goldenSamples.length)} detail={goldenSampleLoading ? 'loading samples' : `${Object.keys(goldenRunRows).length} recent runs`} tone="teal" />
-                <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${dryRunHistorySummary.matched} matched / ${dryRunHistorySummary.failed} failed`} />
+                <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
 
               <div style={{ background: 'var(--color-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--color-border-light)' }}>
@@ -1009,8 +1026,19 @@ export default function OwnerDashboard() {
                         <span style={{ color: 'var(--color-success)' }}>匹配 {dryRunHistorySummary.matched}</span>
                         <span style={{ color: 'var(--color-danger)' }}>不匹配 {dryRunHistorySummary.mismatch}</span>
                         <span style={{ color: 'var(--color-text-muted)' }}>失败 {dryRunHistorySummary.failed}</span>
+                        <span>匹配率 {formatPercent(dryRunHistorySummary.matchRate)}</span>
+                        <span>均分 {formatOptionalNumber(dryRunHistorySummary.averageScore)}</span>
                       </div>
                     )}
+                    {dryRunGuard ? (
+                      <div style={{ ...historySummaryStyle, background: 'var(--color-surface)', padding: 'var(--space-sm) var(--space-md)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border-light)' }}>
+                        <span style={{ fontWeight: 600 }}>Guard:</span>
+                        <span>{formatDryRunGuardState(dryRunGuard)}</span>
+                        <span>{dryRunGuard.windowMinutes}m window</span>
+                        <span>runs {dryRunGuard.recentRuns}{dryRunGuard.quotaMaxRuns > 0 ? `/${dryRunGuard.quotaMaxRuns}` : ''}</span>
+                        <span>failures {dryRunGuard.recentFailures}{dryRunGuard.circuitMaxFailures > 0 ? `/${dryRunGuard.circuitMaxFailures}` : ''}</span>
+                      </div>
+                    ) : null}
                     {dryRunHistoryLoading ? (
                       <p style={mutedStyle}>加载 dry-run history...</p>
                     ) : dryRunHistory.length === 0 ? (
@@ -1280,18 +1308,43 @@ function formatMatched(value: boolean | null | undefined) {
 }
 
 function summarizeDryRunHistory(runs: AIDryRunHistoryItem[]) {
-  return runs.reduce((summary, run) => {
-    summary.total += 1
+  const summary = runs.reduce((current, run) => {
+    current.total += 1
     if (run.matchedExpected === true) {
-      summary.matched += 1
+      current.matched += 1
     } else if (run.matchedExpected === false) {
-      summary.mismatch += 1
+      current.mismatch += 1
     }
     if (run.status === 'failed') {
-      summary.failed += 1
+      current.failed += 1
     }
-    return summary
-  }, { total: 0, matched: 0, mismatch: 0, failed: 0 })
+    if (typeof run.result?.overall_score === 'number' && Number.isFinite(run.result.overall_score)) {
+      current.scoreTotal += run.result.overall_score
+      current.scored += 1
+    }
+    return current
+  }, { total: 0, matched: 0, mismatch: 0, failed: 0, scoreTotal: 0, scored: 0 })
+  return {
+    ...summary,
+    matchRate: summary.total > 0 ? Math.round((summary.matched / summary.total) * 100) : null,
+    averageScore: summary.scored > 0 ? Math.round(summary.scoreTotal / summary.scored) : null,
+  }
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? '-%' : `${value}%`
+}
+
+function formatOptionalNumber(value: number | null) {
+  return value === null ? '-' : String(value)
+}
+
+function formatDryRunGuardState(guard: AIDryRunGuardStatus) {
+  if (guard.state === 'disabled') return 'disabled'
+  if (guard.circuitOpen || guard.state === 'circuit_open') return 'circuit open'
+  if (guard.state === 'quota_exhausted') return 'quota exhausted'
+  if (guard.quotaRemaining !== null) return `${guard.quotaRemaining} quota left`
+  return 'ok'
 }
 
 function requestedNumberParam(key: string) {

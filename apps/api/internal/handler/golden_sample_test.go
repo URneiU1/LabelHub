@@ -306,11 +306,6 @@ func TestGoldenSampleDryRunQueuesAsyncRun(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
-			originalEnqueue := enqueueGoldenSampleDryRun
-			enqueueGoldenSampleDryRun = func(_ GoldenSampleHandler, _ goldenSampleDryRunJob) {}
-			defer func() {
-				enqueueGoldenSampleDryRun = originalEnqueue
-			}()
 			db, mock, sqlDB := newMockDB(t)
 			defer sqlDB.Close()
 
@@ -327,6 +322,8 @@ func TestGoldenSampleDryRunQueuesAsyncRun(t *testing.T) {
 			mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
 				WithArgs(1, tc.promptID, uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, tc.expected, nil, nil, "queued", nil, nil, 7, sqlmock.AnyArg(), nil).
 				WillReturnResult(sqlmock.NewResult(44, 1))
+			mock.ExpectExec(`(?is)^INSERT INTO .outbox_events.`).
+				WillReturnResult(sqlmock.NewResult(81, 1))
 			mock.ExpectCommit()
 
 			r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
@@ -420,11 +417,6 @@ func TestGoldenSampleDryRunRecordsSanitizedProviderFailure(t *testing.T) {
 	t.Setenv("LLM_PROVIDER", "openai")
 	t.Setenv("LLM_API_KEY", secret)
 	t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
-	originalEnqueue := enqueueGoldenSampleDryRun
-	enqueueGoldenSampleDryRun = func(_ GoldenSampleHandler, _ goldenSampleDryRunJob) {}
-	defer func() {
-		enqueueGoldenSampleDryRun = originalEnqueue
-	}()
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
 
@@ -441,6 +433,8 @@ func TestGoldenSampleDryRunRecordsSanitizedProviderFailure(t *testing.T) {
 	mock.ExpectExec(`(?is)^INSERT INTO .ai_dry_runs.`).
 		WithArgs(1, uint64(33), uint64(11), 3, `{"text":"a"}`, `{"label":"ok"}`, "pass", nil, nil, "queued", nil, nil, 7, sqlmock.AnyArg(), nil).
 		WillReturnResult(sqlmock.NewResult(44, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .outbox_events.`).
+		WillReturnResult(sqlmock.NewResult(81, 1))
 	mock.ExpectCommit()
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})

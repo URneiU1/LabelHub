@@ -471,6 +471,69 @@ func TestHandleAIReviewNonRetryableEvaluationErrorFailsOverImmediately(t *testin
 	}
 }
 
+func TestParseAIDryRunPayloadRequiresRunID(t *testing.T) {
+	payload, err := parseAIDryRunPayload([]byte(`{"run_id":44}`))
+	if err != nil {
+		t.Fatalf("valid payload rejected: %v", err)
+	}
+	if payload.RunID != 44 {
+		t.Fatalf("runID = %d, want 44", payload.RunID)
+	}
+	if _, err := parseAIDryRunPayload([]byte(`{"run_id":0}`)); err == nil {
+		t.Fatal("payload without positive run_id must be rejected")
+	}
+}
+
+func TestHandleAIDryRunCompletesQueuedRun(t *testing.T) {
+	t.Setenv("LLM_PROVIDER", "mock")
+	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(`(?is)^UPDATE ai_dry_runs SET status = 'running'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT dr.task_id, dr.ai_prompt_id, dr.prompt_version, COALESCE\(dr.payload_snapshot, ''\), COALESCE\(dr.expected_answer_snapshot, ''\), COALESCE\(dr.expected_verdict, ''\), COALESCE\(t.baseline_description, ''\), cfg.prompt_template, cfg.dimensions, cfg.pass_threshold, cfg.uncertain_min, cfg.model`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"task_id", "ai_prompt_id", "prompt_version", "payload_snapshot", "expected_answer_snapshot", "expected_verdict",
+			"baseline_description", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model",
+		}).AddRow(
+			1, 33, 3, `{"text":"a"}`, `{"label":"ok"}`, "uncertain",
+			"baseline", "review {{answer.label}}", `[{"name":"相关性"}]`, 80, 60, "test-model",
+		))
+	mock.ExpectExec(`(?is)^UPDATE ai_dry_runs SET status = 'succeeded'.+actual_verdict = \?.+matched_expected = \?.+error_msg = NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}, circuit: newAIWorkerCircuit(0, time.Minute)}
+	if err := handler.handleAIDryRun(context.Background(), newAIDryRunTask([]byte(`{"run_id":44}`))); err != nil {
+		t.Fatalf("handleAIDryRun returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestHandleAIDryRunFinalizedDuplicateDoesNotCallProvider(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec(`(?is)^UPDATE ai_dry_runs SET status = 'running'`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}, circuit: newAIWorkerCircuit(0, time.Minute)}
+	if err := handler.handleAIDryRun(context.Background(), newAIDryRunTask([]byte(`{"run_id":44}`))); err != nil {
+		t.Fatalf("handleAIDryRun returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 type staticEvaluator struct{}
 
 func (staticEvaluator) Evaluate(ctx context.Context, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
@@ -503,6 +566,10 @@ func (nonRetryableEvaluator) Evaluate(ctx context.Context, payload aiReviewPaylo
 
 func newAsynqTask(payload []byte) *asynq.Task {
 	return asynq.NewTask("ai:review", payload)
+}
+
+func newAIDryRunTask(payload []byte) *asynq.Task {
+	return asynq.NewTask("ai:dry-run", payload)
 }
 
 func validAIReviewPayloadJSON() []byte {

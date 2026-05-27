@@ -38,6 +38,7 @@ func (h ReviewerHandler) Register(api gin.IRouter) {
 	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerQueue)
 	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerDetail)
 	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerAIPrompts)
+	api.POST("/reviewer/tasks/:taskId/ai-prompts/:promptId/activate", middleware.RequireRoles("reviewer", "owner", "admin"), h.ActivateReviewerAIPrompt)
 	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "owner", "admin"), h.RetryAIReview)
 	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
 	api.POST("/reviews/batch", middleware.RequireRoles("reviewer", "owner", "admin"), h.BatchReview)
@@ -135,6 +136,8 @@ var (
 	errAIRetryReviewState     = errors.New("ai retry requires failed or dead review")
 	errAIRetryPromptInvalid   = errors.New("ai retry prompt invalid")
 	errAIRetryKeyMismatch     = errors.New("ai retry idempotency key mismatch")
+	errReviewerRuleForbidden  = errors.New("reviewer rule forbidden")
+	errReviewerRuleInvalid    = errors.New("reviewer rule prompt invalid")
 )
 
 func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
@@ -194,25 +197,93 @@ func (h ReviewerHandler) ReviewerAIPrompts(c *gin.Context) {
 		return
 	}
 
-	var prompts []model.AIPromptConfig
-	if err := h.db.Where("task_id = ?", task.ID).Order("version DESC").Find(&prompts).Error; err != nil {
+	response, err := reviewerAIPromptList(h.db, task)
+	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list ai prompts")
 		return
 	}
-	responses := make([]reviewerAIPromptResponse, 0, len(prompts))
-	for _, prompt := range prompts {
-		response, err := reviewerAIPromptResponseFromModel(prompt)
-		if err != nil {
-			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load ai prompt")
-			return
-		}
-		responses = append(responses, response)
+	httpx.OK(c, response)
+}
+
+func (h ReviewerHandler) ActivateReviewerAIPrompt(c *gin.Context) {
+	taskID, ok := parseIDParam(c, "taskId")
+	if !ok {
+		return
 	}
-	httpx.OK(c, reviewerAIPromptListResponse{
-		Prompts:         responses,
-		ActivePromptID:  task.AIPromptID,
-		AIReviewEnabled: task.AIReviewEnabled,
+	promptID, ok := parseIDParam(c, "promptId")
+	if !ok {
+		return
+	}
+	claims, _ := middleware.Claims(c)
+	response, err := h.activateReviewerAIPrompt(taskID, promptID, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task or ai prompt not found")
+		case errors.Is(err, errReviewerRuleForbidden):
+			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+		case errors.Is(err, errReviewerRuleInvalid):
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		default:
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to activate ai prompt")
+		}
+		return
+	}
+	httpx.OK(c, response)
+}
+
+func (h ReviewerHandler) activateReviewerAIPrompt(taskID uint64, promptID uint64, claims *auth.Claims) (reviewerAIPromptListResponse, error) {
+	var response reviewerAIPromptListResponse
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var task model.Task
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, taskID).Error; err != nil {
+			return err
+		}
+		allowed, err := canReviewTask(tx, claims, task)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return errReviewerRuleForbidden
+		}
+		var prompt model.AIPromptConfig
+		if err := tx.Where("id = ? AND task_id = ?", promptID, task.ID).First(&prompt).Error; err != nil {
+			return err
+		}
+		if _, err := llmreview.ParseDimensions(prompt.Dimensions); err != nil || !llmreview.AllowedModelName(prompt.Model) {
+			return errReviewerRuleInvalid
+		}
+		if err := tx.Model(&model.Task{}).Where("id = ?", task.ID).Updates(map[string]any{
+			"ai_review_enabled": true,
+			"ai_prompt_id":      prompt.ID,
+		}).Error; err != nil {
+			return err
+		}
+		if err := audit.Write(tx, audit.LogEntry{
+			EntityType: "task",
+			EntityID:   task.ID,
+			FromState:  task.Status,
+			ToState:    task.Status,
+			ActorType:  "user",
+			ActorID:    &claims.UserID,
+			Event:      "reviewer_rule_activate",
+			Payload: map[string]any{
+				"ai_prompt_id": prompt.ID,
+				"version":      prompt.Version,
+			},
+		}); err != nil {
+			return err
+		}
+		task.AIPromptID = &prompt.ID
+		task.AIReviewEnabled = true
+		list, err := reviewerAIPromptList(tx, task)
+		if err != nil {
+			return err
+		}
+		response = list
+		return nil
 	})
+	return response, err
 }
 
 func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
@@ -697,6 +768,26 @@ func reviewerAIPromptResponseFromModel(prompt model.AIPromptConfig) (reviewerAIP
 		Dimensions:     dimensions,
 		PassThreshold:  prompt.PassThreshold,
 		UncertainMin:   prompt.UncertainMin,
+	}, nil
+}
+
+func reviewerAIPromptList(db *gorm.DB, task model.Task) (reviewerAIPromptListResponse, error) {
+	var prompts []model.AIPromptConfig
+	if err := db.Where("task_id = ?", task.ID).Order("version DESC").Find(&prompts).Error; err != nil {
+		return reviewerAIPromptListResponse{}, err
+	}
+	responses := make([]reviewerAIPromptResponse, 0, len(prompts))
+	for _, prompt := range prompts {
+		response, err := reviewerAIPromptResponseFromModel(prompt)
+		if err != nil {
+			return reviewerAIPromptListResponse{}, err
+		}
+		responses = append(responses, response)
+	}
+	return reviewerAIPromptListResponse{
+		Prompts:         responses,
+		ActivePromptID:  task.AIPromptID,
+		AIReviewEnabled: task.AIReviewEnabled,
 	}, nil
 }
 

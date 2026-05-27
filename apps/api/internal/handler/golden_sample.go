@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -90,22 +89,9 @@ type resolvedGoldenSamplePrompt struct {
 	dimensions []llmreview.DimensionConfig
 }
 
-type goldenSampleDryRunJob struct {
-	RunID               uint64
-	UserID              uint64
-	TaskID              uint64
-	Prompt              model.AIPromptConfig
-	Dimensions          []llmreview.DimensionConfig
-	Sample              model.GoldenSample
-	BaselineDescription string
-}
-
-var enqueueGoldenSampleDryRun = func(handler GoldenSampleHandler, job goldenSampleDryRunJob) {
-	go handler.processGoldenSampleDryRun(context.Background(), job)
-}
-
 const maxGoldenSampleBatchDryRunSamples = 20
 const goldenSampleBatchDelayEnv = "LLM_BATCH_DRY_RUN_DELAY_MS"
+const goldenSampleDryRunTopic = "ai:dry-run"
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
@@ -435,8 +421,7 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai_prompt_id must belong to task")
 		return
 	}
-	dimensions, err := llmreview.ParseDimensions(prompt.Dimensions)
-	if err != nil {
+	if _, err := llmreview.ParseDimensions(prompt.Dimensions); err != nil {
 		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "ai prompt dimensions are invalid")
 		return
 	}
@@ -450,15 +435,6 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
 		return
 	}
-	enqueueGoldenSampleDryRun(h, goldenSampleDryRunJob{
-		RunID:               dryRunID,
-		UserID:              currentUserID(c),
-		TaskID:              task.ID,
-		Prompt:              prompt,
-		Dimensions:          dimensions,
-		Sample:              sample,
-		BaselineDescription: task.BaselineDescription.String,
-	})
 	httpx.OK(c, gin.H{
 		"dryRunId": dryRunID,
 		"status":   "queued",
@@ -738,75 +714,34 @@ func (h GoldenSampleHandler) recordQueuedGoldenSampleDryRun(taskID uint64, promp
 		Status:                 "queued",
 		CreatedBy:              userID,
 	}
-	if err := h.db.Create(&run).Error; err != nil {
-		return 0, err
-	}
-	return run.ID, nil
+	var dryRunID uint64
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&run).Error; err != nil {
+			return err
+		}
+		payload, err := goldenSampleDryRunPayload(run.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&model.OutboxEvent{
+			Topic:   goldenSampleDryRunTopic,
+			Payload: payload,
+			Status:  "pending",
+		}).Error; err != nil {
+			return err
+		}
+		dryRunID = run.ID
+		return nil
+	})
+	return dryRunID, err
 }
 
-func (h GoldenSampleHandler) processGoldenSampleDryRun(ctx context.Context, job goldenSampleDryRunJob) {
-	if err := h.db.Model(&model.AIDryRun{}).
-		Where("id = ? AND status = ?", job.RunID, "queued").
-		Update("status", "running").Error; err != nil {
-		return
-	}
-	provider, _, err := llmreview.NewProviderFromEnv(nil)
-	var result llmreview.EvaluationResult
-	if err == nil {
-		result, err = provider.Evaluate(ctx, llmreview.PromptConfig{
-			ID:             job.Prompt.ID,
-			Version:        job.Prompt.Version,
-			PromptTemplate: job.Prompt.PromptTemplate,
-			Dimensions:     job.Dimensions,
-			PassThreshold:  job.Prompt.PassThreshold,
-			UncertainMin:   job.Prompt.UncertainMin,
-			Model:          job.Prompt.Model,
-		}, llmreview.EvaluationInput{
-			TaskID:              job.TaskID,
-			PromptConfigID:      job.Prompt.ID,
-			PromptVersion:       job.Prompt.Version,
-			PayloadJSON:         job.Sample.Payload,
-			AnswerJSON:          job.Sample.ExpectedAnswer,
-			BaselineDescription: job.BaselineDescription,
-		})
-	}
-	if err == nil {
-		err = llmreview.ValidateThresholdConsistency(result, llmreview.PromptConfig{PassThreshold: job.Prompt.PassThreshold, UncertainMin: job.Prompt.UncertainMin})
-	}
-	now := time.Now().UTC()
+func goldenSampleDryRunPayload(runID uint64) (string, error) {
+	raw, err := json.Marshal(gin.H{"run_id": runID})
 	if err != nil {
-		_ = h.db.Model(&model.AIDryRun{}).
-			Where("id = ?", job.RunID).
-			Updates(map[string]any{
-				"status":      "failed",
-				"error_msg":   llmreview.SafeErrorMessage(err),
-				"finished_at": now,
-			}).Error
-		return
+		return "", err
 	}
-	raw, err := json.Marshal(result)
-	if err != nil {
-		_ = h.db.Model(&model.AIDryRun{}).
-			Where("id = ?", job.RunID).
-			Updates(map[string]any{
-				"status":      "failed",
-				"error_msg":   "failed to serialize dry-run result",
-				"finished_at": now,
-			}).Error
-		return
-	}
-	rawText := string(raw)
-	matchedExpected := result.Verdict == job.Sample.ExpectedVerdict
-	_ = h.db.Model(&model.AIDryRun{}).
-		Where("id = ?", job.RunID).
-		Updates(map[string]any{
-			"status":           "succeeded",
-			"result":           rawText,
-			"actual_verdict":   result.Verdict,
-			"matched_expected": matchedExpected,
-			"error_msg":        nil,
-			"finished_at":      now,
-		}).Error
+	return string(raw), nil
 }
 
 func goldenSamplePayloadHash(payloadJSON []byte) string {

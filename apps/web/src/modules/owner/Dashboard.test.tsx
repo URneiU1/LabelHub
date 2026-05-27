@@ -1594,9 +1594,10 @@ describe('OwnerDashboard AI prompt flow', () => {
       if (path === '/tasks/1/ai-dry-runs?limit=10') {
         return {
           dryRuns: [
-            { id: 44, taskId: 1, aiPromptId: 33, goldenSampleId: 11, promptVersion: 3, expectedVerdict: 'pass', actualVerdict: 'pass', matchedExpected: true, status: 'succeeded', errorMsg: null, createdAt: '2026-05-25T12:00:00Z', finishedAt: '2026-05-25T12:01:00Z' },
-            { id: 45, taskId: 1, aiPromptId: 33, goldenSampleId: 11, promptVersion: 3, expectedVerdict: 'pass', actualVerdict: null, matchedExpected: null, status: 'failed', errorMsg: 'provider timeout', createdAt: '2026-05-25T12:02:00Z', finishedAt: '2026-05-25T12:03:00Z' },
+            { id: 44, taskId: 1, aiPromptId: 33, goldenSampleId: 11, promptVersion: 3, expectedVerdict: 'pass', actualVerdict: 'pass', matchedExpected: true, status: 'succeeded', result: { verdict: 'pass', overall_score: 95, dimensions: [], reason: 'ok' }, errorMsg: null, createdAt: '2026-05-25T12:00:00Z', finishedAt: '2026-05-25T12:01:00Z' },
+            { id: 45, taskId: 1, aiPromptId: 33, goldenSampleId: 11, promptVersion: 3, expectedVerdict: 'pass', actualVerdict: null, matchedExpected: null, status: 'failed', result: null, errorMsg: 'provider timeout', createdAt: '2026-05-25T12:02:00Z', finishedAt: '2026-05-25T12:03:00Z' },
           ],
+          guard: { windowMinutes: 30, quotaMaxRuns: 5, circuitMaxFailures: 2, recentRuns: 4, recentFailures: 2, quotaRemaining: 1, circuitOpen: true, state: 'circuit_open' },
         }
       }
       throw new Error(`unexpected GET ${path}`)
@@ -1609,6 +1610,8 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByText('failed · provider timeout')).toBeInTheDocument()
     expect(screen.getAllByText('v3 #33')).toHaveLength(2)
     expect(screen.getAllByText('matched').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('circuit open')).toBeInTheDocument()
+    expect(screen.getByText('runs 4/5')).toBeInTheDocument()
   })
 
   it('filters dry-run history by golden sample', async () => {

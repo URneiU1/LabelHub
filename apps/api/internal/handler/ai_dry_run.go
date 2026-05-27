@@ -72,7 +72,12 @@ func (h AIDryRunHandler) List(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to serialize ai dry-runs")
 		return
 	}
-	httpx.OK(c, gin.H{"dryRuns": responses})
+	guard, err := dryRunGuardStatusForTask(h.db, task.ID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	httpx.OK(c, gin.H{"dryRuns": responses, "guard": guard})
 }
 
 func optionalPositiveUintQuery(c *gin.Context, name string) (*uint64, bool) {
