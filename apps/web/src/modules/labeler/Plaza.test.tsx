@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -93,6 +93,58 @@ describe('LabelerPlaza schema runtime flow', () => {
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/items/11/submit', { answer: { summary: '回答准确' } })
     })
+  })
+
+  it('auto-saves changed answers after a 3s debounce', async () => {
+    const schema = {
+      title: 'qa_autosave',
+      layout: 'single_page',
+      fields: [
+        { name: 'summary', widget: 'Input', label: '一句话总评', required: true },
+      ],
+    }
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+          revision: null,
+        }
+      }
+      if (path === '/tasks/1/items/11/draft') {
+        return { id: 42, taskId: 1, itemId: 11, status: 'draft' }
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    try {
+      render(<LabelerPlaza />)
+
+      fireEvent.click(await screen.findByRole('button', { name: '领取题目' }))
+      const input = await screen.findByLabelText('一句话总评')
+
+      vi.useFakeTimers()
+      fireEvent.change(input, { target: { value: '自动保存答案' } })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2999)
+      })
+      expect(mockApiPost).not.toHaveBeenCalledWith('/tasks/1/items/11/draft', { answer: { summary: '自动保存答案' } })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      vi.useRealTimers()
+
+      await waitFor(() => {
+        expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/items/11/draft', { answer: { summary: '自动保存答案' } })
+      })
+      expect(screen.getByText('已自动保存')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows schema error banner and disables actions for bad schema', async () => {

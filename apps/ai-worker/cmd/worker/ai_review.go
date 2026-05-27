@@ -33,6 +33,14 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 		)
 		return nil
 	}
+	if err := h.circuit.check(); err != nil {
+		h.logger.Warn("ai review provider circuit open",
+			zap.Uint64("submission_id", payload.SubmissionID),
+			zap.Uint64("revision_id", payload.RevisionID),
+			zap.Error(err),
+		)
+		return h.retryOrFailover(ctx, payload, err)
+	}
 
 	reviewCtx, cancel := context.WithTimeout(ctx, aiReviewTimeout())
 	defer cancel()
@@ -42,8 +50,10 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 	}
 	result, err := h.evaluator.Evaluate(reviewCtx, payload, input)
 	if err != nil {
+		h.circuit.recordProviderFailure(err)
 		return h.retryOrFailover(ctx, payload, err)
 	}
+	h.circuit.recordProviderSuccess()
 	if err := h.complete(ctx, payload, result); err != nil {
 		return h.retryOrFailover(ctx, payload, err)
 	}

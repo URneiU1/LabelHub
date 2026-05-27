@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/hibiken/asynq"
@@ -133,6 +134,37 @@ func TestMarkFailedMovesRunningReviewBackToFailedForRetry(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestAIWorkerCircuitOpensAfterConsecutiveProvider5XX(t *testing.T) {
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+	circuit := newAIWorkerCircuit(2, time.Minute)
+	circuit.now = func() time.Time { return now }
+
+	circuit.recordProvider5XX()
+	if err := circuit.check(); err != nil {
+		t.Fatalf("circuit opened before threshold: %v", err)
+	}
+	circuit.recordProvider5XX()
+	if err := circuit.check(); !errors.Is(err, errAIWorkerCircuitOpen) {
+		t.Fatalf("circuit error = %v, want errAIWorkerCircuitOpen", err)
+	}
+
+	now = now.Add(time.Minute + time.Second)
+	if err := circuit.check(); err != nil {
+		t.Fatalf("circuit should close after cooldown: %v", err)
+	}
+}
+
+func TestAIWorkerCircuitResetsConsecutive5XXAfterProviderSuccess(t *testing.T) {
+	circuit := newAIWorkerCircuit(2, time.Minute)
+
+	circuit.recordProvider5XX()
+	circuit.recordProviderSuccess()
+	circuit.recordProvider5XX()
+	if err := circuit.check(); err != nil {
+		t.Fatalf("single 5xx after success should not open circuit: %v", err)
 	}
 }
 

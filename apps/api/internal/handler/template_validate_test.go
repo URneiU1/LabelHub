@@ -121,6 +121,35 @@ func TestValidateTemplateSchema(t *testing.T) {
 			wantValid: true,
 		},
 		{
+			name: "regex and requiredWhen valid",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"decision","widget":"Radio","options":["pass","reject"]},
+					{"name":"reason","widget":"Input","regex":"^.{4,}$","requiredWhen":{"field":"decision","equals":"reject"}}
+				]}`,
+			wantValid: true,
+		},
+		{
+			name: "invalid regex rejected",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"summary","widget":"Input","regex":"["}
+				]}`,
+			wantValid: false, wantField: "fields[0].regex", wantMsg: "valid",
+		},
+		{
+			name: "requiredWhen dangling field rejected",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"reason","widget":"Input","requiredWhen":{"field":"missing","notEmpty":true}}
+				]}`,
+			wantValid: false, wantField: "fields[0].requiredWhen.field", wantMsg: "existing field",
+		},
+		{
+			name: "requiredWhen needs condition",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"reason","widget":"Input","requiredWhen":{"field":"reason"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].requiredWhen", wantMsg: "equals or notEmpty",
+		},
+		{
 			name: "group and tabs nested fields are valid",
 			raw: `{"title":"t","layout":"single_page","fields":[
 					{"name":"summary","widget":"Input"},

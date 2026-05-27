@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("configure llm provider", zap.Error(err))
 	}
-	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator}
+	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator, circuit: newAIWorkerCircuitFromEnv()}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("ai:review", handlers.handleAIReview)
 	mux.HandleFunc("noop:ping", handlers.handleNoop)
@@ -54,6 +54,7 @@ type workerHandlers struct {
 	logger    *zap.Logger
 	db        *sql.DB
 	evaluator aiEvaluator
+	circuit   *aiWorkerCircuit
 }
 
 func (h workerHandlers) handleNoop(_ context.Context, t *asynq.Task) error {

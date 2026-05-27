@@ -104,6 +104,13 @@ function parseField(rawField: Record<string, unknown>, path: string, names: Set<
   } else if ('required' in rawField) {
     return parseError(`${path}.required`, 'required must be boolean')
   }
+  if ('requiredWhen' in rawField) {
+    const requiredWhenResult = parseRequiredWhen(rawField.requiredWhen, `${path}.requiredWhen`)
+    if (!requiredWhenResult.ok) {
+      return requiredWhenResult
+    }
+    field.requiredWhen = requiredWhenResult.value
+  }
   if (widget === 'Group') {
     const childrenResult = parseFields(rawField.fields, `${path}.fields`, names)
     if (!childrenResult.ok) {
@@ -141,6 +148,16 @@ function parseField(rawField: Record<string, unknown>, path: string, names: Set<
   }
   if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {
     return parseError(`${path}.maxLength`, 'minLength cannot exceed maxLength')
+  }
+  if (typeof rawField.regex === 'string') {
+    try {
+      new RegExp(rawField.regex)
+    } catch {
+      return parseError(`${path}.regex`, 'regex must be valid')
+    }
+    field.regex = rawField.regex
+  } else if ('regex' in rawField) {
+    return parseError(`${path}.regex`, 'regex must be string')
   }
   if (typeof rawField.path === 'string') {
     field.path = rawField.path
@@ -214,6 +231,9 @@ function validateLLMTargets(fields: FieldSchema[], path: string, names: Set<stri
         return parseError(`${fieldPath}.target_field`, 'target_field must reference an existing field')
       }
     }
+    if (field.requiredWhen && !names.has(field.requiredWhen.field)) {
+      return parseError(`${fieldPath}.requiredWhen.field`, 'requiredWhen.field must reference an existing field')
+    }
     if (field.fields) {
       const result = validateLLMTargets(field.fields, `${fieldPath}.fields`, names)
       if (!result.ok) return result
@@ -226,6 +246,32 @@ function validateLLMTargets(fields: FieldSchema[], path: string, names: Set<stri
     }
   }
   return { ok: true, value: true }
+}
+
+function parseRequiredWhen(raw: unknown, path: string): ParseResult<FieldSchema['requiredWhen']> {
+  if (!isRecord(raw)) {
+    return parseError(path, 'requiredWhen must be an object')
+  }
+  const field = stringProp(raw.field)
+  if (!field) {
+    return parseError(`${path}.field`, 'field is required')
+  }
+  const hasEquals = 'equals' in raw
+  const notEmpty = raw.notEmpty
+  if ('notEmpty' in raw && typeof notEmpty !== 'boolean') {
+    return parseError(`${path}.notEmpty`, 'notEmpty must be boolean')
+  }
+  if (!hasEquals && notEmpty !== true) {
+    return parseError(path, 'requiredWhen must set equals or notEmpty=true')
+  }
+  const result: FieldSchema['requiredWhen'] = { field }
+  if (hasEquals) {
+    result.equals = raw.equals
+  }
+  if (typeof notEmpty === 'boolean') {
+    result.notEmpty = notEmpty
+  }
+  return { ok: true, value: result }
 }
 
 export function parseAnswer(raw?: string | null): AnswerValue {

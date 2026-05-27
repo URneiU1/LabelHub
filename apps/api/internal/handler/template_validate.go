@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -25,8 +26,6 @@ type ValidationError struct {
 //   - widget ∈ allowedWidgets
 //   - required 必须是 bool(或缺省)
 //   - 同字段 minLength 和 maxLength 都必须是非负整数 且 min <= max(若两者都给)
-//
-// requiredWhen / regex 等高级校验推到 S3(spec §12)。
 func validateTemplateSchema(raw string) []ValidationError {
 	var parsed struct {
 		Fields []any `json:"fields"`
@@ -54,21 +53,32 @@ func validateTemplateSchema(raw string) []ValidationError {
 			state.errs = append(state.errs, ValidationError{Field: target.path + ".target_field", Message: "target_field must reference an existing field"})
 		}
 	}
+	for _, condition := range state.requiredWhenRefs {
+		if _, ok := state.fieldNames[condition.field]; !ok {
+			state.errs = append(state.errs, ValidationError{Field: condition.path + ".requiredWhen.field", Message: "requiredWhen.field must reference an existing field"})
+		}
+	}
 	return state.errs
 }
 
 type templateValidationState struct {
-	errs       []ValidationError
-	seenNames  map[string]int
-	fieldNames map[string]struct{}
-	fieldCount int
-	llmTargets []templateLLMTarget
+	errs             []ValidationError
+	seenNames        map[string]int
+	fieldNames       map[string]struct{}
+	fieldCount       int
+	llmTargets       []templateLLMTarget
+	requiredWhenRefs []templateRequiredWhenRef
 }
 
 type templateLLMTarget struct {
 	path          string
 	target        string
 	allowExternal bool
+}
+
+type templateRequiredWhenRef struct {
+	path  string
+	field string
 }
 
 func newTemplateValidationState() *templateValidationState {
@@ -121,6 +131,22 @@ func (state *templateValidationState) validateField(path string, f map[string]an
 			state.errs = append(state.errs, ValidationError{Field: path + ".required", Message: "required must be bool"})
 		}
 	}
+	if regexRaw, has := f["regex"]; has {
+		regex, ok := regexRaw.(string)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".regex", Message: "regex must be string"})
+		} else if _, err := regexp.Compile(regex); err != nil {
+			state.errs = append(state.errs, ValidationError{Field: path + ".regex", Message: "regex must be valid"})
+		}
+	}
+	if requiredWhenRaw, has := f["requiredWhen"]; has {
+		condition, ok := requiredWhenRaw.(map[string]any)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen", Message: "requiredWhen must be an object"})
+		} else {
+			state.validateRequiredWhen(path, condition)
+		}
+	}
 	minLen, hasMin, minOK := numericField(f, "minLength")
 	maxLen, hasMax, maxOK := numericField(f, "maxLength")
 	if hasMin && !minOK {
@@ -165,6 +191,28 @@ func (state *templateValidationState) validateField(path string, f map[string]an
 			state.errs = append(state.errs, ValidationError{Field: path + ".tabs", Message: "tabs must be an array"})
 		} else {
 			state.validateTabs(path+".tabs", tabs)
+		}
+	}
+}
+
+func (state *templateValidationState) validateRequiredWhen(path string, condition map[string]any) {
+	fieldRaw, hasField := condition["field"]
+	field, fieldOK := fieldRaw.(string)
+	field = strings.TrimSpace(field)
+	if !hasField || !fieldOK || field == "" {
+		state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen.field", Message: "field is required"})
+	} else {
+		state.requiredWhenRefs = append(state.requiredWhenRefs, templateRequiredWhenRef{path: path, field: field})
+	}
+	if notEmptyRaw, hasNotEmpty := condition["notEmpty"]; hasNotEmpty {
+		if _, ok := notEmptyRaw.(bool); !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen.notEmpty", Message: "notEmpty must be bool"})
+		}
+	}
+	if _, hasEquals := condition["equals"]; !hasEquals {
+		notEmpty, _ := condition["notEmpty"].(bool)
+		if !notEmpty {
+			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen", Message: "requiredWhen must set equals or notEmpty=true"})
 		}
 	}
 }

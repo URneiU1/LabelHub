@@ -26,6 +26,7 @@ After every code-writing turn:
 - S2 Designer real item preview is in place: owner/admin can load `GET /tasks/:taskId/item-preview`, which returns only minimal item id/externalId/payload JSON for the task; Designer passes that payload into widget previews, including ShowItem via `$payload`, with stale task guards.
 - S2 Designer drag ordering is in place: latest templates expose a drag handle per canvas field, reorder by `_draftId` over the existing `fields` array, preserve selected field state, keep Copy/Up/Down as fallback controls, disable drag in readonly/fail-closed states, and let `buildTemplatePayload` serialize the final `fields/export_fields` order.
 - S2 Tabs/Group bonus widgets are in place for the first product slice: parser and renderer support recursive `Group.fields` and `Tabs.tabs[].fields`, Designer can add/edit nested child fields in the property panel without JSON textareas, `export_fields` expands leaf fields in visual order, and answer storage remains the existing flat answer object.
+- S2 runtime/template validation now supports `regex` and `requiredWhen` metadata across frontend parser, Labeler validation, and backend template validation.
 - P1 safety defaults now recheck labeler item ownership inside the submission service transaction and make AI review disabled by default at schema/model/migration level.
 - P1/P2 closeout is in place: FileUpload submit attaches uploaded files to the revision; Go/TS schema validators are aligned; Labeler/Reviewer page tests cover schema runtime; AI submit writes pending `ai_reviews` and `ai:review` outbox; API publisher and worker consume/failover path move AI-reviewed submissions to `human_reviewing`.
 - P1/P2 edge hardening is in place: revising submissions may reuse attached FileUpload keys from the same submission history; AI worker finalized duplicate tasks no-op instead of replaying; API-side AI sweeper moves stale pending/running reviews out of `ai_reviewing`.
@@ -53,6 +54,7 @@ After every code-writing turn:
 - OpenAI-compatible provider retry/backoff controls are in place: `LLM_RETRY_MAX_ATTEMPTS`, `LLM_RETRY_BACKOFF_MS`, and `LLM_RETRY_MAX_BACKOFF_MS` bound short retries to network errors, HTTP 429, and 5xx while keeping 400/401/schema/threshold failures fail-fast and sanitized.
 - Server-side dry-run cost guard is in place behind env switches: `LLM_DRY_RUN_QUOTA_MAX_RUNS`, `LLM_DRY_RUN_CIRCUIT_MAX_FAILURES`, and `LLM_DRY_RUN_GUARD_WINDOW_MINUTES` enforce task-scoped recent-run quota/failure circuit breaker across ad-hoc prompt dry-run, single golden sample dry-run, and batch golden sample dry-run before provider calls.
 - S3 demo productization closure is in place: Owner can edit baseline inline; AI Prompt dimensions/thresholds have form controls instead of JSON-only input; single golden sample dry-run queues an `ai_dry_runs` record and is polled from the frontend while the API process completes it in the background; AI worker can auto-approve `pass` results when human review is disabled; Labeler has a revising queue with previous reject reason; Reviewer has batch approve/revise and previous-opinion display.
+- S0/S1/S3 plan-gap polish is in place: GitHub Actions CI runs Go workspace plus web test/lint/build; deploy compose has an ops-profile asynqmon behind nginx basic auth; `/style-guide` shows Button/Card/Form/Table/Modal/Tag; Labeler autosaves drafts after a 3s debounce; AI worker opens a process-local circuit after consecutive provider HTTP 5xx and resets after a successful provider response.
 
 ## Next Work
 
@@ -61,6 +63,7 @@ After every code-writing turn:
 - Add richer Owner dry-run trend/history analysis after the minimal summary table proves useful.
 - Upgrade single golden sample dry-run from API goroutine to durable Asynq execution if demo/runtime reliability becomes more important than keeping the slice minimal.
 - Surface dry-run quota/circuit breaker state in Owner UI if real provider usage needs operator feedback.
+- Treat Formily, TipTap, `packages/schema-spec`, and `@dnd-kit/core` as explicit migration decisions rather than incidental cleanup; current code intentionally stays on the existing renderer/designer stack.
 - Add FileUpload download/preview authorization and orphan temp cleanup.
 - Keep tests focused on behavior and role/resource boundaries.
 - Add reviewer assignment management endpoints/UI before treating multi-reviewer operation as product-complete.

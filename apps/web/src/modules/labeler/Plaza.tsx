@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
@@ -18,6 +18,9 @@ export default function LabelerPlaza() {
   const [answer, setAnswer] = useState<AnswerValue>({})
   const [errors, setErrors] = useState<ValidationError[]>([])
   const [loading, setLoading] = useState(false)
+  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+  const lastSavedDraftKey = useRef('')
+  const autoSaveSeq = useRef(0)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -51,8 +54,12 @@ export default function LabelerPlaza() {
     try {
       const data = await apiPost<TaskBundle>(`/tasks/${taskId}/claim`, {})
       setBundle(data)
-      setAnswer(parseAnswer(data.revision?.answer))
+      const nextAnswer = parseAnswer(data.revision?.answer)
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(nextAnswer)
+      setAnswer(nextAnswer)
       setErrors([])
+      setAutoSaveState('idle')
       Toast.success('已领取题目')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '领取失败')
@@ -66,8 +73,12 @@ export default function LabelerPlaza() {
     try {
       const data = await apiGet<TaskBundle>(`/tasks/${submission.taskId}/items/${submission.itemId}`)
       setBundle(data)
-      setAnswer(parseAnswer(data.revision?.answer))
+      const nextAnswer = parseAnswer(data.revision?.answer)
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(nextAnswer)
+      setAnswer(nextAnswer)
       setErrors([])
+      setAutoSaveState('idle')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载待修改任务失败')
     } finally {
@@ -80,8 +91,11 @@ export default function LabelerPlaza() {
       return
     }
     try {
+      autoSaveSeq.current += 1
       const data = await apiPost<Submission>(`/tasks/${bundle.task.id}/items/${bundle.item.id}/draft`, { answer })
       setBundle({ ...bundle, submission: data })
+      lastSavedDraftKey.current = answerDraftKey(answer)
+      setAutoSaveState('saved')
       Toast.success('草稿已保存')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '保存失败')
@@ -106,12 +120,45 @@ export default function LabelerPlaza() {
     try {
       const data = await apiPost<Submission>(`/tasks/${bundle.task.id}/items/${bundle.item.id}/submit`, { answer })
       setBundle({ ...bundle, submission: data })
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(answer)
+      setAutoSaveState('idle')
       void loadMySubmissions()
       Toast.success(`已提交，状态 ${data.status}`)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '提交失败')
     }
   }
+
+  const answerKey = useMemo(() => answerDraftKey(answer), [answer])
+
+  useEffect(() => {
+    if (!bundle?.task || !bundle.item || !schema.ok || answerKey === lastSavedDraftKey.current) {
+      return
+    }
+    const taskId = bundle.task.id
+    const itemId = bundle.item.id
+    const requestSeq = autoSaveSeq.current + 1
+    const timer = window.setTimeout(() => {
+      autoSaveSeq.current = requestSeq
+      setAutoSaveState('saving')
+      void apiPost<Submission>(`/tasks/${taskId}/items/${itemId}/draft`, { answer })
+        .then((submission) => {
+          if (autoSaveSeq.current !== requestSeq) {
+            return
+          }
+          lastSavedDraftKey.current = answerKey
+          setBundle((current) => current && current.task.id === taskId && current.item?.id === itemId ? { ...current, submission } : current)
+          setAutoSaveState('saved')
+        })
+        .catch(() => {
+          if (autoSaveSeq.current === requestSeq) {
+            setAutoSaveState('failed')
+          }
+        })
+    }, 3000)
+    return () => window.clearTimeout(timer)
+  }, [answer, answerKey, bundle?.item, bundle?.task, schema])
 
   return (
     <div>
@@ -198,7 +245,11 @@ export default function LabelerPlaza() {
                     errors={errors}
                     runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
                     onChange={(next) => {
+                      autoSaveSeq.current += 1
                       setAnswer(next)
+                      if (answerDraftKey(next) !== lastSavedDraftKey.current) {
+                        setAutoSaveState('idle')
+                      }
                       if (errors.length > 0) {
                         setErrors(validateAnswer(schema.schema, next))
                       }
@@ -211,6 +262,7 @@ export default function LabelerPlaza() {
 
               <div style={{ ...actionRowStyle, borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)', marginTop: 'var(--space-2xl)' }}>
                 <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light" style={{ width: 120 }}>保存草稿</Button>
+                <span style={autoSaveTextStyle}>{autoSaveText(autoSaveState)}</span>
                 <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} style={{ width: 120 }}>提交审核</Button>
               </div>
             </section>
@@ -255,6 +307,23 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
     return { ok: false, message: `${result.error.field}: ${result.error.message}` }
   }
   return { ok: true, schema: result.value }
+}
+
+function answerDraftKey(answer: AnswerValue) {
+  return JSON.stringify(answer)
+}
+
+function autoSaveText(state: 'idle' | 'saving' | 'saved' | 'failed') {
+  switch (state) {
+    case 'saving':
+      return '自动保存中...'
+    case 'saved':
+      return '已自动保存'
+    case 'failed':
+      return '自动保存失败'
+    default:
+      return '3s 自动保存'
+  }
 }
 
 const layoutStyle: CSSProperties = {
@@ -365,6 +434,13 @@ const actionRowStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
   gap: 'var(--space-md)',
+}
+
+const autoSaveTextStyle: CSSProperties = {
+  alignSelf: 'center',
+  marginRight: 'auto',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
 }
 
 const emptyDiagramStyle: CSSProperties = {

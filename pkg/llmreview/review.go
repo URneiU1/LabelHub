@@ -518,7 +518,7 @@ func (p OpenAICompatibleProvider) call(ctx context.Context, body []byte, model s
 		msg := fmt.Sprintf("llm provider returned HTTP %d", resp.StatusCode)
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			retryAfter, hasRetryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-			return EvaluationResult{}, retryableError{err: errors.New(msg), retryAfter: retryAfter, hasRetryAfter: hasRetryAfter}
+			return EvaluationResult{}, retryableError{err: errors.New(msg), retryAfter: retryAfter, hasRetryAfter: hasRetryAfter, statusCode: resp.StatusCode}
 		}
 		return EvaluationResult{}, errors.New(msg)
 	}
@@ -730,6 +730,7 @@ type retryableError struct {
 	err           error
 	retryAfter    time.Duration
 	hasRetryAfter bool
+	statusCode    int
 }
 
 func (e retryableError) Error() string { return e.err.Error() }
@@ -738,6 +739,11 @@ func (e retryableError) Unwrap() error { return e.err }
 func isRetryableProviderError(err error) bool {
 	var retryable retryableError
 	return errors.As(err, &retryable)
+}
+
+func IsProviderHTTP5xx(err error) bool {
+	var retryable retryableError
+	return errors.As(err, &retryable) && retryable.statusCode >= 500 && retryable.statusCode <= 599
 }
 
 func parseRetryAfter(raw string) (time.Duration, bool) {

@@ -25,11 +25,19 @@ export type TabSchema = {
   fields: FieldSchema[]
 }
 
+export type RequiredWhen = {
+  field: string
+  equals?: unknown
+  notEmpty?: boolean
+}
+
 export type FieldSchema = {
   name: string
   widget: WidgetType
   label: string
   required?: boolean
+  requiredWhen?: RequiredWhen
+  regex?: string
   fields?: FieldSchema[]
   tabs?: TabSchema[]
   options?: FieldOption[]
