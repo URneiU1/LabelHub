@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"labelhub-api/internal/db"
 	"labelhub-api/internal/handler"
 	"labelhub-api/internal/middleware"
+	"labelhub-api/internal/model"
 	"labelhub-api/internal/service/aireview"
 	"labelhub-api/internal/service/outbox"
 )
@@ -41,6 +43,7 @@ func main() {
 	defer stopOutbox()
 	startOutboxPublisher(outboxCtx, database, logger)
 	startAIReviewSweeper(outboxCtx, database, logger)
+	startOrphanTempFileCleaner(outboxCtx, database, logger)
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -170,4 +173,59 @@ func aiReviewSweeperBatch() int {
 		return 20
 	}
 	return batch
+}
+
+func startOrphanTempFileCleaner(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
+	if envOrDefault("ORPHAN_TEMP_FILE_CLEANER_ENABLED", "true") == "false" {
+		logger.Info("orphan temp file cleaner disabled")
+		return
+	}
+	interval := orphanTempFileCleanerInterval()
+	ticker := time.NewTicker(interval)
+	logger.Info("orphan temp file cleaner started", zap.Duration("interval", interval))
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				var orphans []model.UploadedFile
+				cutoff := time.Now().Add(-24 * time.Hour)
+				if err := database.WithContext(ctx).
+					Where("status = ? AND created_at < ?", "temp", cutoff).
+					Find(&orphans).Error; err != nil {
+					logger.Warn("failed to query orphan temp files", zap.Error(err))
+					continue
+				}
+				uploadDir := envOrDefault("UPLOAD_DIR", "./data/uploads")
+				for _, f := range orphans {
+					res := database.WithContext(ctx).Model(&model.UploadedFile{}).
+						Where("id = ? AND status = ?", f.ID, "temp").
+						Update("status", "deleted")
+					if res.Error != nil {
+						logger.Warn("failed to mark orphan temp file deleted", zap.Uint64("id", f.ID), zap.Error(res.Error))
+						continue
+					}
+					if res.RowsAffected != 1 {
+						continue
+					}
+					dest := filepath.Join(uploadDir, strconv.FormatUint(f.TaskID, 10), f.StorageKey)
+					if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+						logger.Warn("failed to remove orphan temp file", zap.Uint64("id", f.ID), zap.String("path", dest), zap.Error(err))
+						continue
+					}
+					logger.Info("cleaned up orphan temp file", zap.Uint64("id", f.ID), zap.String("storage_key", f.StorageKey))
+				}
+			}
+		}
+	}()
+}
+
+func orphanTempFileCleanerInterval() time.Duration {
+	ms, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_INTERVAL_MS", "3600000"))
+	if err != nil || ms <= 0 {
+		return time.Hour
+	}
+	return time.Duration(ms) * time.Millisecond
 }

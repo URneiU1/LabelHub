@@ -13,15 +13,16 @@ const (
 )
 
 const (
-	EventSave      = "save"
-	EventSubmit    = "submit"
-	EventEnqueue   = "enqueue"
-	EventSkipAI    = "skip_ai"
-	EventAIDone    = "ai_done"
-	EventAIFailMax = "ai_fail_max"
-	EventApprove   = "approve"
-	EventReject    = "reject"
-	EventRevise    = "revise"
+	EventSave           = "save"
+	EventSubmit         = "submit"
+	EventEnqueue        = "enqueue"
+	EventSkipAI         = "skip_ai"
+	EventAIDone         = "ai_done"
+	EventAIAutoApproved = "ai_auto_approved"
+	EventAIFailMax      = "ai_fail_max"
+	EventApprove        = "approve"
+	EventReject         = "reject"
+	EventRevise         = "revise"
 )
 
 type Key struct {
@@ -36,16 +37,17 @@ type Transition struct {
 }
 
 var transitions = map[Key]Transition{
-	{StateDraft, EventSave}:             {From: StateDraft, Event: EventSave, To: []string{StateDraft}},
-	{StateDraft, EventSubmit}:           {From: StateDraft, Event: EventSubmit, To: []string{StateSubmitted}},
-	{StateSubmitted, EventEnqueue}:      {From: StateSubmitted, Event: EventEnqueue, To: []string{StateAIReviewing}},
-	{StateSubmitted, EventSkipAI}:       {From: StateSubmitted, Event: EventSkipAI, To: []string{StateHumanReviewing}},
-	{StateAIReviewing, EventAIDone}:     {From: StateAIReviewing, Event: EventAIDone, To: []string{StateApproved, StateHumanReviewing}},
-	{StateAIReviewing, EventAIFailMax}:  {From: StateAIReviewing, Event: EventAIFailMax, To: []string{StateHumanReviewing}},
-	{StateHumanReviewing, EventApprove}: {From: StateHumanReviewing, Event: EventApprove, To: []string{StateApproved}},
-	{StateHumanReviewing, EventReject}:  {From: StateHumanReviewing, Event: EventReject, To: []string{StateRejected}},
-	{StateHumanReviewing, EventRevise}:  {From: StateHumanReviewing, Event: EventRevise, To: []string{StateRevising}},
-	{StateRevising, EventSubmit}:        {From: StateRevising, Event: EventSubmit, To: []string{StateSubmitted}},
+	{StateDraft, EventSave}:                 {From: StateDraft, Event: EventSave, To: []string{StateDraft}},
+	{StateDraft, EventSubmit}:               {From: StateDraft, Event: EventSubmit, To: []string{StateSubmitted}},
+	{StateSubmitted, EventEnqueue}:          {From: StateSubmitted, Event: EventEnqueue, To: []string{StateAIReviewing}},
+	{StateSubmitted, EventSkipAI}:           {From: StateSubmitted, Event: EventSkipAI, To: []string{StateHumanReviewing}},
+	{StateAIReviewing, EventAIDone}:         {From: StateAIReviewing, Event: EventAIDone, To: []string{StateApproved, StateHumanReviewing}},
+	{StateAIReviewing, EventAIAutoApproved}: {From: StateAIReviewing, Event: EventAIAutoApproved, To: []string{StateApproved}},
+	{StateAIReviewing, EventAIFailMax}:      {From: StateAIReviewing, Event: EventAIFailMax, To: []string{StateHumanReviewing}},
+	{StateHumanReviewing, EventApprove}:     {From: StateHumanReviewing, Event: EventApprove, To: []string{StateApproved}},
+	{StateHumanReviewing, EventReject}:      {From: StateHumanReviewing, Event: EventReject, To: []string{StateRejected}},
+	{StateHumanReviewing, EventRevise}:      {From: StateHumanReviewing, Event: EventRevise, To: []string{StateRevising}},
+	{StateRevising, EventSubmit}:            {From: StateRevising, Event: EventSubmit, To: []string{StateSubmitted}},
 }
 
 func Can(from string, event string, to string) bool {

@@ -2,6 +2,8 @@ package outbox
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -52,36 +54,47 @@ func (p Publisher) Run(ctx context.Context) {
 }
 
 func (p Publisher) PublishOnce(ctx context.Context) error {
-	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var events []model.OutboxEvent
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+	var events []model.OutboxEvent
+	if err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("status = ?", StatusPending).
 			Order("id ASC").
 			Limit(p.batch).
-			Find(&events).Error; err != nil {
-			return err
-		}
-		for _, event := range events {
-			task := asynq.NewTask(event.Topic, []byte(event.Payload))
-			if _, err := p.client.EnqueueContext(ctx, task, asynq.MaxRetry(5)); err != nil {
-				status := StatusPending
-				retryCount := event.RetryCount + 1
-				if retryCount >= 5 {
-					status = StatusFailed
-				}
-				if err := tx.Model(&model.OutboxEvent{}).
-					Where("id = ? AND status = ?", event.ID, StatusPending).
-					Updates(map[string]any{"status": status, "retry_count": retryCount}).Error; err != nil {
-					return err
-				}
-				continue
+			Find(&events).Error
+	}); err != nil {
+		return err
+	}
+
+	for _, event := range events {
+		task := asynq.NewTask(event.Topic, []byte(event.Payload))
+		if _, err := p.client.EnqueueContext(ctx, task, asynq.MaxRetry(5), asynq.TaskID(outboxTaskID(event))); err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
+			retryCount := event.RetryCount + 1
+			newStatus := StatusPending
+			if retryCount >= 5 {
+				newStatus = StatusFailed
 			}
-			if err := tx.Model(&model.OutboxEvent{}).
+			if err := p.db.WithContext(ctx).Model(&model.OutboxEvent{}).
 				Where("id = ? AND status = ?", event.ID, StatusPending).
-				Updates(map[string]any{"status": StatusPublished, "published_at": time.Now().UTC()}).Error; err != nil {
-				return err
+				Updates(map[string]any{"status": newStatus, "retry_count": retryCount}).Error; err != nil {
+				p.warn("failed to mark outbox event failed", zap.Uint64("id", event.ID), zap.Error(err))
 			}
+			continue
 		}
-		return nil
-	})
+		if err := p.db.WithContext(ctx).Model(&model.OutboxEvent{}).
+			Where("id = ? AND status = ?", event.ID, StatusPending).
+			Updates(map[string]any{"status": StatusPublished, "published_at": time.Now().UTC()}).Error; err != nil {
+			p.warn("failed to mark outbox event published", zap.Uint64("id", event.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func outboxTaskID(event model.OutboxEvent) string {
+	return fmt.Sprintf("outbox:%d", event.ID)
+}
+
+func (p Publisher) warn(msg string, fields ...zap.Field) {
+	if p.logger != nil {
+		p.logger.Warn(msg, fields...)
+	}
 }

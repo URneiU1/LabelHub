@@ -14,6 +14,7 @@ func TestAllPlannedTransitions(t *testing.T) {
 		{StateSubmitted, EventSkipAI, StateHumanReviewing},
 		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
+		{StateAIReviewing, EventAIAutoApproved, StateApproved},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},
 		{StateHumanReviewing, EventApprove, StateApproved},
 		{StateHumanReviewing, EventReject, StateRejected},
@@ -49,7 +50,7 @@ func TestInvalidTransitions(t *testing.T) {
 }
 
 func TestTransitionTableCoversPlan(t *testing.T) {
-	if got := len(Transitions()); got != 10 {
-		t.Fatalf("Transitions() len = %d, want 10", got)
+	if got := len(Transitions()); got != 11 {
+		t.Fatalf("Transitions() len = %d, want 11", got)
 	}
 }

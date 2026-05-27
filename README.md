@@ -49,6 +49,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-27 `s3-hardening-cleanup`: 收尾 S3 hardening 未提交修复:状态机补 `ai_auto_approved` transition 并纳入全表覆盖;`GET /uploads/:id` 复用 task 上传权限策略下载非 deleted 文件;outbox publisher 在事务内只取 pending event、事务外 enqueue,并用 deterministic Asynq `TaskID(outbox:<id>)` 防重复投递;AI worker 5xx 熔断默认调整为连续 20 次/5 分钟;API 主进程新增 hourly orphan temp upload cleaner,24h 以上未 attached 的 temp 记录会先条件标 deleted 再删除磁盘文件。
 - 2026-05-27 `s3-review-finding-fixes`: 修复提交 diff review 的三处回归/边界问题:所有已有 submission 的答题 bundle 都固定按 `submission.template_version` 读取历史模板,避免待审/详情状态在 owner 改模板后误用当前 schema;Reviewer 规则面板改回只读查看 + 跳 Owner 编辑,移除 reviewer 侧直接启用 AI prompt 的 mutating route;ai-worker 的 golden dry-run 在 provider circuit open 时会先 claim run 再写 failed,避免 owner 轮询长期停在 queued。
 - 2026-05-27 `s3-durable-dry-run-rule-ops`: 收尾 S3 demo 稳定性缺口:单条 golden sample dry-run 从 API 进程内 goroutine 升级为 durable outbox/asynq 链路,API 同事务写 `ai_dry_runs` + `outbox_events(ai:dry-run)`,ai-worker 消费后读取 prompt/sample snapshot、调用 provider、写 succeeded/failed 结果;Reviewer 规则配置可查看历史/当前 prompt 并跳转 Owner 编辑;Owner dry-run history API 返回 guard snapshot,Dashboard 展示 quota/circuit 状态、匹配率和均分。
 - 2026-05-27 `s0-s3-plan-gap-polish`: 补齐第一批 S0-S3 计划缺口:新增 GitHub Actions CI,覆盖 Go workspace、web test/lint/build;deploy compose 增加 `ops` profile 下的 asynqmon + nginx basic auth;`/style-guide` 补齐 Button/Card/Form/Table/Modal/Tag 六类核心组件展示;Labeler Plaza 增加 3s debounce 自动保存草稿并带 request identity guard;schema parser/validator 和后端模板校验支持 `regex` 与 `requiredWhen`;AI worker 增加连续 provider HTTP 5xx 熔断,成功响应自动重置。
@@ -94,18 +95,19 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 - S2 Designer 已有模板版本列表、latest 编辑、历史只读/Fork、append/delete/copy/Up-Down/drag order/simple property editing、逐字段 validation、`regex`/`requiredWhen` runtime 校验、真实 item payload 预览、Tabs/Group 最小结构物料、子字段属性栏可视化编辑和 Save as new version;但 Tabs/Group 子字段还不是画布内嵌套拖拽,layout 编辑也仍较基础。
 - AI 预审 P1 安全/状态/前端竞态问题已收敛,并补了 P2 action stale guard/provider error/non-retryable validation cleanup;golden sample 后端 persistence API、Owner 管理 UI、batch result table、task-scoped dry-run history API、Owner history/trend/guard 视图、Reviewer AI verdict/score/detail/audit 展示、Reviewer failed/dead AI retry、Reviewer 规则查看/Owner 编辑跳转、单样本 durable queued dry-run + polling、同步串行 batch dry-run endpoint、基础 batch delay 配置、provider 429/backoff 短重试、server-side dry-run quota/circuit breaker、AI worker 5xx 熔断、AI 自动 approved、Labeler 3s 自动保存/修订入口和 Reviewer 批量操作已具备。若后续要继续产品化,主要是把 batch dry-run 也异步化、补更完整 trend 图表和真实运营告警。
-- FileUpload 已完成 temp→attached 绑定和打回复用,但下载/预览授权接口与 temp orphan cleanup 定时清理还未做。
+- FileUpload 已完成 temp→attached 绑定、打回复用、下载授权接口和 temp orphan cleanup 定时清理;但前端文件预览/下载入口仍较基础,还需要 seeded browser smoke 覆盖。
 - `task_reviewers` 目前通过 seed 赋予官方任务的 `reviewer1` 权限,Owner 后台的审核员分配 UI/API 还未实现。
 
 ### 下一步
 
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
 - 推进 S3 验收:做一次本地 seeded browser smoke,覆盖 Owner 配规则/跑 golden dry-run、Labeler 提交/修订、AI worker、Reviewer 批量审核和规则查看。
-- 补 FileUpload 下载/预览授权与 orphan cleanup。
+- 补 FileUpload 前端预览/下载入口的 seeded browser smoke。
 - 若必须严格贴 PLAN.md 技术路线,再单独评估 Formily、TipTap、`packages/schema-spec` 和 `@dnd-kit/core` 迁移;当前实现优先保持既有自写 renderer/designer 稳定。
 
 ### 验证记录
 
+- 2026-05-27 S3 hardening cleanup: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'Upload|DownloadUpload|RespondItem|ReviewerAIPromptActivateRouteIsNotRegistered'` 通过;targeted `cd apps/api && go test -count=1 ./internal/statemachine ./internal/service/submission ./internal/service/aireview ./internal/handler` 通过;targeted `cd apps/ai-worker && go test -count=1 ./cmd/worker -run 'AIWorkerCircuit|HandleAIDryRunCircuitOpenMarksRunFailed'` 通过;full `cd apps/api && go test -count=1 ./...` 通过;full `cd apps/ai-worker && go test -count=1 ./...` 通过;`git diff --check` 通过。
 - 2026-05-27 S3 review finding fixes: targeted `cd apps/api && go test -count=1 ./internal/handler -run 'TestRespondItem_ExistingSubmissionUsesTemplateVersion|TestReviewerAIPromptsScopedToAssignedReviewer|TestReviewerAIPromptsRejectsUnassignedReviewer|TestReviewerAIPromptActivateRouteIsNotRegistered|TestReviewerDetailIncludesAIReviewAndAuditLogs'` 通过;targeted `cd apps/ai-worker && go test -count=1 ./cmd/worker -run 'TestHandleAIDryRun|TestAIWorkerCircuit'` 通过;`pnpm -F web test -- Queue` 通过;full `cd apps/api && go test -count=1 ./...` 通过;full `cd apps/ai-worker && go test -count=1 ./...` 通过;`pnpm -F web lint` 通过。
 - 2026-05-27 S3 durable dry-run/rule ops: targeted `go test ./apps/api/internal/handler ./apps/ai-worker/cmd/worker` 通过;targeted `pnpm -F web test -- Queue Dashboard` 通过;full `go test ./apps/api/... ./apps/ai-worker/... ./pkg/llmreview` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既有 >500k chunk warning);`git diff --check` 通过。
 - 2026-05-27 S0-S3 plan gap polish: `docker compose --profile ops -f deploy/docker-compose.yml config` 通过;targeted `go test ./apps/api/internal/handler -run 'TemplateSchema|Template'` 通过;targeted `go test ./apps/ai-worker/cmd/worker ./pkg/llmreview` 通过;CI 等价 Go command `go test ./apps/api/... ./apps/ai-worker/... ./pkg/llmreview` 通过;targeted `pnpm -F web test -- validator parser Plaza` 通过;full `pnpm -F web test` 通过;`pnpm -F web lint` 通过;`pnpm -F web build` 通过。

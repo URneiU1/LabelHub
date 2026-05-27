@@ -89,6 +89,33 @@ func TestUploadOwnerCannotUploadToOtherTask(t *testing.T) {
 	}
 }
 
+func TestDownloadUploadRequiresTaskAccess(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "original_name", "status", "created_by"}).
+			AddRow(301, 1, "file.txt", "file.txt", "attached", 8))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
+			AddRow(1, 99, "published"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/uploads/301", nil))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func multipartUploadRequest(path string, taskID string, filename string, contentType string, content []byte) *http.Request {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)

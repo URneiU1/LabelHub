@@ -63,6 +63,7 @@ func NewUploadHandler(db *gorm.DB) UploadHandler {
 
 func (h UploadHandler) Register(api gin.IRouter) {
 	api.POST("/uploads", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.Upload)
+	api.GET("/uploads/:id", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.Download)
 }
 
 func (h UploadHandler) Upload(c *gin.Context) {
@@ -229,6 +230,42 @@ func isWebPSample(sample []byte) bool {
 	return len(sample) >= 12 &&
 		string(sample[0:4]) == "RIFF" &&
 		string(sample[8:12]) == "WEBP"
+}
+
+func (h UploadHandler) Download(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid upload id")
+		return
+	}
+
+	var uploaded model.UploadedFile
+	if err := h.db.Where("id = ? AND status <> ?", id, "deleted").First(&uploaded).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "upload not found")
+		return
+	}
+
+	var task model.Task
+	if err := h.db.First(&task, uploaded.TaskID).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+		return
+	}
+
+	claims, _ := middleware.Claims(c)
+	allowed, err := h.canUploadToTask(claims, task)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check download access")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "download is not allowed for this task")
+		return
+	}
+
+	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
+	dest := filepath.Join(uploadDir, strconv.FormatUint(uploaded.TaskID, 10), uploaded.StorageKey)
+	c.FileAttachment(dest, uploaded.OriginalName)
 }
 
 func storageKey(name string) string {

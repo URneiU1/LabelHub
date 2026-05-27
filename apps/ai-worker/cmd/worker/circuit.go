@@ -23,8 +23,8 @@ type aiWorkerCircuit struct {
 
 func newAIWorkerCircuitFromEnv() *aiWorkerCircuit {
 	return newAIWorkerCircuit(
-		positiveIntEnv("AI_WORKER_CIRCUIT_MAX_5XX", 5),
-		positiveDurationEnv("AI_WORKER_CIRCUIT_OPEN_MS", 60000),
+		positiveIntEnv("AI_WORKER_CIRCUIT_MAX_5XX", 20),
+		positiveDurationEnv("AI_WORKER_CIRCUIT_OPEN_MS", 300000),
 	)
 }
 
