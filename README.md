@@ -55,6 +55,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 最近完成
 
+- 2026-05-28 `s6-plan`: 新增 `docs/PLAN-S6-IMPL.md`,把 Sprint 6 拆成 Editorial token/shared state components、Owner/Labeler/Reviewer 高密度界面、Designer 响应式布局、Tabs/Group 真实交互、友好错误/A11y、Browser smoke 和 `docs/S6_ACCEPTANCE.md` 验收文档。计划明确将 dark mode、Framer Motion、完整移动端、TanStack Query/Formily/dnd-kit 迁移列为可砍项。
 - 2026-05-28 `s5-deploy-docs`: S5 Day5 收尾完成:新增生产部署模板 `deploy/docker-compose.prod.yml`,覆盖 api/worker/web/mysql/redis/asynqmon/caddy;新增 api/worker 共用多阶段 Dockerfile、web 静态 Caddy 镜像和 SPA fallback;生产 compose 通过 env 显式注入密钥/LLM/JWT/导出配置,api/worker 共享绝对 `EXPORT_DIR` volume,api 上传目录单独持久化;新增 `deploy/Caddyfile`、`deploy/.env.example`、`.dockerignore`;`make dev` 现在可一键起基础设施、安装依赖、seed 并提示分别启动 api/worker/web;新增 `docs/ARCHITECTURE.md`、`docs/DEPLOY.md`、`docs/S5_ACCEPTANCE.md`。
 - 2026-05-28 `s5-openapi-error-boundary`: S5 Day4/Day5 第一段完成:按计划 fallback 手写主流程 `docs/openapi.yaml`(auth/tasks/templates/labeler/reviewer/exports/stats),新增 `pnpm -F web gen:api` 用 `openapi-typescript` 生成 `apps/web/src/shared/api/schema.d.ts`;新增 `docs/LabelHub.postman_collection.json` 覆盖登录、领题、提交、审核、导出、stats 主流程;前端新增全站 `ErrorBoundary`,在 `main.tsx` 包住 `<App/>`,并补抛错 fallback/reset 测试。
 - 2026-05-28 `s5-frontend-strict-roundtrip`: S5 Day3 前端质量补强完成:开启 `apps/web/tsconfig.app.json` 的 `strict:true` 且 `pnpm -F web build` 直接通过;Renderer 新增 ShowItem text/video/json 模式测试与 LLMTrigger 写回 `target_field` 测试;Designer 集成测试补保存 payload → `parseTemplateSchema` → `SchemaRenderer` 的 round-trip 断言,覆盖 Group/Tabs 子字段、导出字段和 Renderer 实际渲染一致性。
@@ -113,7 +114,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 下一步
 
-- 开始 S6 前先补一份 `docs/PLAN-S6-IMPL.md`,把性能/可观测性目标拆成可执行检查项和验收命令。
+- 按 `docs/PLAN-S6-IMPL.md` 开始 Day1:Editorial tokens、共享 `StatusBadge`/`EmptyState`/`LoadingBlock`/顶部 progress bar,先把视觉和状态原语统一。
 - 推进 S2 后续:补 Tabs/Group 子字段画布内嵌套拖拽和更完整 layout 编辑。
 - 推进 S3 验收:做一次本地 seeded browser smoke,覆盖 Owner 配规则/跑 golden dry-run、Labeler 提交/修订、AI worker、Reviewer 批量审核和规则查看。
 - 补 FileUpload 前端预览/下载入口的 seeded browser smoke。
@@ -121,6 +122,7 @@ apps/ai-worker — Go Asynq AI 预审 Worker
 
 ### 验证记录
 
+- 2026-05-28 S6 plan: 文档-only 变更,未跑测试;前一提交的 S5 全量 Go/web/config 门禁已通过。
 - 2026-05-28 S5 deploy/docs: `docker compose --env-file deploy/.env.example -f deploy/docker-compose.prod.yml config` 通过;`make -n dev` 通过;`go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview -count=1` 通过;`pnpm -F web test` 通过(12 files,103 tests,仍有 jsdom canvas warning);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web gen:api` 通过;`jq empty docs/LabelHub.postman_collection.json` 通过;`git diff --check` 通过。生产 compose 未在本机执行 `up --build`,避免占用 80/443 和拉取/构建全部镜像。
 - 2026-05-28 S5 openapi/error-boundary: `pnpm -F web gen:api` 通过并生成 `schema.d.ts`;`jq empty docs/LabelHub.postman_collection.json` 通过;`pnpm -F web test -- ErrorBoundary SchemaRenderer Designer.integration` 通过(12 files,103 tests);`pnpm -F web lint` 通过;`pnpm -F web build` 通过(仍有既存 StatsBoard chunk >500KB warning)。
 - 2026-05-28 S5 frontend strict/roundtrip: `pnpm -F web build` 通过(`strict:true`,仍有既存 StatsBoard chunk >500KB warning);`pnpm -F web test -- SchemaRenderer Designer.integration` 通过(11 files,102 tests;含新增 Renderer/Designer round-trip);`pnpm -F web lint` 通过。
