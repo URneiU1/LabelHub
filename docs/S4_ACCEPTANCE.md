@@ -86,10 +86,20 @@ open http://localhost:5173                 # owner1 / pass:看板 → 配字段�
 
 ## 9. 已知 warning / 非阻塞遗留
 
-- **VChart 撑大 vendor chunk(>500kB gzip 616kB)**:Vite 既有 chunk-size warning,非阻塞;后续可 `React.lazy` 仅在 Owner 路由加载。
+- **VChart bundle**(已缓解,2026-05-28):StatsBoard 改 `React.lazy` + `vite.config` 让 `@visactor` 脱离 eager vendor,首屏 eager vendor 从 2.2MB(gzip 616KB)降到 412KB(gzip 125KB),VChart(gzip ~491KB)进按需加载的 StatsBoard chunk。仍有 >500kB chunk warning,但只在选中任务时拉,非阻塞。
 - **worker 启动依赖 LLM 配置**:`newEvaluatorFromEnv` 缺 `LLM_*` 会 fatal(为 `ai:review` 设计)。只验导出链路时设 `LLM_PROVIDER=mock LLM_ALLOWED_MODELS=mock-model` 即可启动;正式 demo 配真实豆包 EP。
 - **Makefile 修复**:`go run cmd/worker/main.go` 只编单文件(worker 是多文件包)会编译失败,已改为 `go run ./cmd/worker`(api/seed 同步改包路径)。
-- `pkg/exporter` 单测覆盖 86.9%(编码器 ≥90%,Run/loadrows/token 全覆盖核心路径)。
+- `pkg/exporter` 单测覆盖核心路径(编码器 + Run + loadrows + token + CSV 注入回归)。
+
+### 9.1 code review 修复(2026-05-28,`s4-review-fixes`)
+
+go/typescript/security 三审 + 人工核验后修掉的 HIGH/MEDIUM:
+- **EXPORT_DIR 加固**:api/worker 启动强制绝对路径(相对路径在两进程不同 CWD 下会让签名下载静默 403),`.env.example` 改绝对示例。
+- **重试语义**:`pkg/exporter.ErrTerminal` 区分永久(编码/落盘,已写 failed)vs 瞬时(DB)失败,worker `asynq.SkipRetry` vs 重试,不可解析 payload 直接 SkipRetry。
+- **CSV 公式注入**:`= + - @ \t \r` 开头单元格加前导单引号。
+- **前端**:ExportPanel `catch` stale guard;StatsBoard 错误态 + 重试(去永久转圈);VChart 懒加载;AI 饼图负值兜底。
+
+**仍故意延后的 MEDIUM/LOW**(竞赛体量非阻塞):下载 token 加 `task_id` claim、`sanitizeExportError` 按类别脱敏、stats 聚合下推 SQL、`safeExportPath` 拦 `rel=="."`。
 
 ## 10. 进入 S5 的先决条件
 
