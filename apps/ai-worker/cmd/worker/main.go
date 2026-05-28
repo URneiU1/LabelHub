@@ -34,7 +34,7 @@ func main() {
 	defer database.Close()
 
 	srv := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: redisAddr()},
+		asynq.RedisClientOpt{Addr: redisAddr(), Password: os.Getenv("REDIS_PASSWORD")},
 		asynq.Config{Concurrency: 2},
 	)
 

@@ -319,12 +319,12 @@ export default function ReviewerQueue() {
     <div style={pageStyle}>
       <header style={topBarStyle}>
         <div>
-          <div style={breadcrumbStyle}>审核与质检 / <strong>{showingDemo ? 'AI 预审规则 · 队列' : '人工审核 / 商品标题清洗 v3'}</strong></div>
+          <div style={breadcrumbStyle}>审核与质检 / <strong>{showingDemo ? 'AI 预审规则 · 队列' : (detail?.task.title ?? '人工审核工作台')}</strong></div>
           <h1 style={pageTitleStyle}>{showingDemo ? 'AI 自动预审队列' : '人工审核工作台'}</h1>
           <p style={pageSubTitleStyle}>异步消费提交数据 → 按评分维度调用 LLM 结构化输出 → 通过 / 打回 / 转人工复核</p>
         </div>
         <div style={headerActionsStyle}>
-          <span style={modelPillStyle}>Agent v2.3 · 模型 doubao-pro-32k</span>
+          {showingDemo ? <span style={modelPillStyle}>Agent v2.3 · 模型 doubao-pro-32k</span> : null}
           <Button loading={ruleLoading} onClick={() => void openRuleConfig()} theme="light">规则配置</Button>
           <Button disabled={retryDisabled} loading={retryingAI} onClick={() => void retryAIReview()} theme="light">失败重跑</Button>
         </div>
@@ -332,11 +332,13 @@ export default function ReviewerQueue() {
 
       <div style={layoutStyle}>
         <aside style={leftPanelStyle}>
-          <div style={tabRowStyle}>
-            <div style={activeTabStyle}>AI 已建议通过 <strong>128</strong></div>
-            <div style={tabStyle}>AI 已建议打回 <strong>47</strong></div>
-            <div style={tabStyle}>转人工 <strong>9</strong></div>
-          </div>
+          {showingDemo ? (
+            <div style={tabRowStyle}>
+              <div style={activeTabStyle}>AI 已建议通过 <strong>128</strong></div>
+              <div style={tabStyle}>AI 已建议打回 <strong>47</strong></div>
+              <div style={tabStyle}>转人工 <strong>9</strong></div>
+            </div>
+          ) : null}
           <div style={bulkBarStyle}>
             <input
               aria-label="选择全部审核项"
@@ -348,11 +350,13 @@ export default function ReviewerQueue() {
             <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('approve')} style={miniButtonStyle}>批量通过</button>
             <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('revise')} style={miniButtonStyle}>批量打回</button>
           </div>
-          <div style={slaCardStyle}>
-            <strong>38</strong>
-            <span>/ s · 平均耗时 1.4s · 重试率 1.2%</span>
-            <small>任务 T-2041 · 规则「电商相关性 v2」</small>
-          </div>
+          {showingDemo ? (
+            <div style={slaCardStyle}>
+              <strong>38</strong>
+              <span>/ s · 平均耗时 1.4s · 重试率 1.2%</span>
+              <small>任务 T-2041 · 规则「电商相关性 v2」</small>
+            </div>
+          ) : null}
           <div style={queueListStyle}>
             {queueItems.map((item) => (
               <QueueCard
@@ -412,7 +416,7 @@ export default function ReviewerQueue() {
         </main>
 
         <aside style={rightPanelStyle}>
-          <MetricGrid />
+          {showingDemo ? <MetricGrid /> : null}
           {rulePanelOpen ? (
             <RuleConfigPanel
               taskId={showingDemo ? null : detail?.task.id}
@@ -432,7 +436,7 @@ export default function ReviewerQueue() {
               }}
             />
           ) : null}
-          <Timeline auditLogs={showingDemo ? undefined : detail?.auditLogs} submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id} />
+          <Timeline auditLogs={showingDemo ? undefined : detail?.auditLogs} submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id} demoMode={showingDemo} />
         </aside>
       </div>
     </div>
@@ -792,7 +796,7 @@ function Metric({ label, value, tone }: { label: string, value: string, tone: 'b
   )
 }
 
-function Timeline({ auditLogs, submissionId }: { auditLogs?: AuditLog[], submissionId?: number | string }) {
+function Timeline({ auditLogs, submissionId, demoMode = false }: { auditLogs?: AuditLog[], submissionId?: number | string, demoMode?: boolean }) {
   if (auditLogs && auditLogs.length > 0) {
     return (
       <section style={timelineStyle}>
@@ -806,6 +810,14 @@ function Timeline({ auditLogs, submissionId }: { auditLogs?: AuditLog[], submiss
             </div>
           </div>
         ))}
+      </section>
+    )
+  }
+  if (!demoMode) {
+    return (
+      <section style={timelineStyle}>
+        <h3 style={sectionTitleStyle}>审计时间线{submissionId ? `（SUB-${submissionId}）` : ''}</h3>
+        <EmptyState title="暂无审计记录" body="提交进入审核流程后,事件会自动写入审计时间线。" variant="empty" />
       </section>
     )
   }

@@ -19,11 +19,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -43,6 +45,7 @@ services:
       DB_NAME: ${MYSQL_DATABASE:-labelhub}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
       EXPORT_DIR: /var/lib/labelhub/exports
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-2h}
@@ -95,6 +98,7 @@ services:
       DB_NAME: ${MYSQL_DATABASE:-labelhub}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
       EXPORT_DIR: /var/lib/labelhub/exports
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
@@ -125,7 +129,10 @@ services:
     build:
       context: ./asynqmon
     restart: unless-stopped
-    command: ["--redis-addr=redis:6379", "--port=8080"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    entrypoint: ["sh", "-c"]
+    command: ["asynqmon --redis-addr=redis:6379 --redis-password=\"$$REDIS_PASSWORD\" --port=8080"]
     depends_on:
       redis:
         condition: service_healthy

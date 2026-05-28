@@ -1,6 +1,13 @@
 {$CADDY_SITE_ADDRESS} {
 	encode zstd gzip
 
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
 	handle /api/* {
 		reverse_proxy api:8080
 	}

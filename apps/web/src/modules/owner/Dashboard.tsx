@@ -817,7 +817,7 @@ export default function OwnerDashboard() {
                   </div>
                 </div>
                 <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--space-sm)', fontSize: 'var(--text-base)' }}>
-                  官方 qa_quality 主线任务。配置标注模板与 AI 预审参数。
+                  {selected.description ?? '配置标注模板与 AI 预审参数。'}
                 </p>
               </div>
 

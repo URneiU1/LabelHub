@@ -147,7 +147,7 @@ func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Lo
 		logger.Info("outbox publisher disabled")
 		return
 	}
-	client := asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr()})
+	client := asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr(), Password: os.Getenv("REDIS_PASSWORD")})
 	publisher := outbox.NewPublisher(database, client, logger, outboxInterval(), outboxBatch())
 	go publisher.Run(ctx)
 	go func() {
