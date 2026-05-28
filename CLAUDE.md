@@ -4,8 +4,9 @@
 
 After every code change, update project documentation before the final handoff:
 
-- Update `README.md` with what was completed, what still needs improvement, next steps, and verification.
+- Append a dated entry to **`docs/CHANGELOG.md`** under `## 最近完成` covering: what was completed, what still needs improvement (update `## 仍需提升`), next steps (update `## 下一步`), and verification (update `## 验证记录`). The `README.md` is now the judge-facing front page and should NOT be touched for dev-log updates.
 - Update this file when Claude-specific workflow, handoff, or review notes change.
+- Update `submission/` when delivery artifacts change (DEMO_SCRIPT, assets manifest, judge README).
 - Keep entries factual and tied to commits or completed work.
 
 ## Current Handoff

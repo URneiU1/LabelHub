@@ -4,11 +4,13 @@
 
 After every code-writing turn:
 
-- Update `README.md` with:
+- Append a dated entry to **`docs/CHANGELOG.md`** under `## 最近完成` covering:
   - what was completed;
-  - what still needs improvement;
-  - what should happen next;
-  - what verification was run.
+  - what still needs improvement (update `## 仍需提升`);
+  - what should happen next (update `## 下一步`);
+  - what verification was run (update `## 验证记录`).
+- **Do NOT touch `README.md` for dev-log updates** — it is now the judge-facing front page (badges, quickstart, demo credentials, tech highlights). Only edit it when the front page itself needs to change.
+- Update `submission/` when delivery artifacts change (DEMO_SCRIPT, assets manifest, judge README).
 - Update `CODEX.md` when Codex-specific workflow notes, implementation constraints, or handoff details change.
 - If Claude-facing workflow notes changed too, update `CLAUDE.md` in the same commit.
 - Commit each logical change and keep the worktree clean before final handoff when possible.
