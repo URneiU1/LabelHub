@@ -11,19 +11,60 @@ type ApiErrorEnvelope = {
   request_id: string
 }
 
+// 对少数会让标注/审核流程卡住的错误码,给出可执行的中文提示;
+// 其余错误码沿用后端 message,避免覆盖已有的具体说明。
+const FRIENDLY_ERROR_BY_CODE: Record<string, string> = {
+  INVALID_STATE: '该记录的状态已被其他人改动,请刷新后再操作。',
+  LLM_PROVIDER_ERROR: 'AI 服务暂时不可用,可稍后重试,或直接转人工审核。',
+}
+
+export class ApiError extends Error {
+  code: string
+  requestId: string
+
+  constructor(code: string, backendMessage: string, requestId: string) {
+    super(FRIENDLY_ERROR_BY_CODE[code] || backendMessage || '请求失败')
+    this.name = 'ApiError'
+    this.code = code
+    this.requestId = requestId
+  }
+}
+
 const TOKEN_KEY = 'labelhub_access_token'
+const USER_KEY = 'labelhub_current_user'
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
+export function getCurrentUser(): DemoUser | null {
+  const raw = localStorage.getItem(USER_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const user = JSON.parse(raw) as DemoUser
+    return Array.isArray(user.roles) ? user : null
+  } catch {
+    return null
+  }
+}
+
+export function hasAnyRole(allowedRoles: string[]) {
+  const user = getCurrentUser()
+  return Boolean(user?.roles.some((role) => allowedRoles.includes(role)))
+}
+
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
 }
 
 export async function login(username: string, password: string) {
   const data = await apiPost<{ tokens: { accessToken: string }, user: DemoUser }>('/auth/login', { username, password }, false)
   localStorage.setItem(TOKEN_KEY, data.tokens.accessToken)
+  localStorage.setItem(USER_KEY, JSON.stringify(data.user))
   return data.user
 }
 
@@ -49,6 +90,18 @@ export async function apiPost<T>(path: string, body: Record<string, unknown> | F
   }, auth)
 }
 
+export async function apiPostRawJSON<T>(path: string, body: string, auth = true) {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }, auth)
+}
+
+export async function apiDelete<T>(path: string) {
+  return request<T>(path, { method: 'DELETE' })
+}
+
 export async function apiUpload<T>(path: string, body: FormData) {
   const headers = new Headers()
   const token = getToken()
@@ -61,7 +114,7 @@ export async function apiUpload<T>(path: string, body: FormData) {
   const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
   if (!response.ok) {
     const errorPayload = payload as ApiErrorEnvelope
-    throw new Error(errorPayload.error?.message || '上传失败')
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '上传失败', errorPayload.request_id ?? '')
   }
   return (payload as ApiEnvelope<T>).data
 }
@@ -80,7 +133,7 @@ async function request<T>(path: string, init: RequestInit, auth = true): Promise
   const payload = await response.json() as ApiEnvelope<T> | ApiErrorEnvelope
   if (!response.ok) {
     const errorPayload = payload as ApiErrorEnvelope
-    throw new Error(errorPayload.error?.message || '请求失败')
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '请求失败', errorPayload.request_id ?? '')
   }
   return (payload as ApiEnvelope<T>).data
 }
@@ -98,8 +151,11 @@ export type Task = {
   description: string | null
   baselineDescription: string | null
   status: string
+  templateId?: number | null
   totalItems: number
   finishedItems: number
+  aiPromptId?: number | null
+  aiReviewEnabled?: boolean
 }
 
 export type TaskItem = {
@@ -115,13 +171,20 @@ export type Submission = {
   taskId: number
   itemId: number
   status: string
+  aiVerdict?: string | null
+  aiScore?: number | null
   humanVerdict?: string
   currentRevisionId?: number
 }
 
 export type TaskTemplate = {
   id: number
+  taskId?: number
+  version?: number
   schemaJson: string
+  schemaHash?: string
+  createdBy?: number
+  createdAt?: string
 }
 
 export type SubmissionRevision = {
@@ -130,10 +193,64 @@ export type SubmissionRevision = {
   draft: boolean
 }
 
+export type AIPromptSummary = {
+  id: number
+  version: number
+  model: string
+  promptTemplate: string
+  dimensions: unknown
+  passThreshold: number
+  uncertainMin: number
+}
+
+export type AIReviewDetail = {
+  id: number
+  submissionId: number
+  revisionId: number
+  idempotencyKey: string
+  promptVersion: number
+  verdict?: string | null
+  overallScore?: number | null
+  dimensions?: unknown
+  reason?: string | null
+  rawResponse?: unknown
+  tokensInput: number
+  tokensOutput: number
+  latencyMs: number
+  status: string
+  retryCount: number
+  errorMsg?: string | null
+  createdAt: string
+  finishedAt?: unknown
+  prompt?: AIPromptSummary | null
+}
+
+export type AuditLog = {
+  id: number
+  entityType: string
+  entityId: number
+  fromState?: { String?: string, Valid?: boolean } | null
+  toState: string
+  actorType: string
+  actorId?: number | null
+  event: string
+  payload?: unknown
+  createdAt: string
+}
+
+export type HumanReviewSummary = {
+  verdict: string
+  reason?: string | null
+  createdAt?: string
+}
+
 export type TaskBundle = {
   task: Task
   item?: TaskItem
   template?: TaskTemplate
   submission?: Submission
   revision?: SubmissionRevision | null
+  aiReview?: AIReviewDetail | null
+  latestHumanReview?: HumanReviewSummary | null
+  auditLogs?: AuditLog[]
 }

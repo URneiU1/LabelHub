@@ -143,6 +143,44 @@ describe('parseTemplateSchema', () => {
     expect(good.ok).toBe(true)
   })
 
+  it('parses regex and requiredWhen validation metadata', () => {
+    const result = parseTemplateSchema({
+      title: 'advanced',
+      fields: [
+        { name: 'decision', widget: 'Radio', options: ['pass', 'reject'] },
+        { name: 'reject_reason', widget: 'Input', regex: '^.{4,}$', requiredWhen: { field: 'decision', equals: 'reject' } },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields[1]).toMatchObject({
+        regex: '^.{4,}$',
+        requiredWhen: { field: 'decision', equals: 'reject' },
+      })
+    }
+  })
+
+  it('rejects invalid regex and dangling requiredWhen references', () => {
+    const badRegex = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'summary', widget: 'Input', regex: '[' }],
+    })
+    expect(badRegex.ok).toBe(false)
+    if (!badRegex.ok) {
+      expect(badRegex.error.field).toBe('fields[0].regex')
+    }
+
+    const badRef = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'reason', widget: 'Input', requiredWhen: { field: 'missing', notEmpty: true } }],
+    })
+    expect(badRef.ok).toBe(false)
+    if (!badRef.ok) {
+      expect(badRef.error.field).toBe('fields[0].requiredWhen.field')
+    }
+  })
+
   it('preserves export_fields and x-* extensions round-trip', () => {
     const result = parseTemplateSchema({
       title: 'exportable',

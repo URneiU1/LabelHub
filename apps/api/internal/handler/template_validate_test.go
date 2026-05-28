@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -115,9 +116,75 @@ func TestValidateTemplateSchema(t *testing.T) {
 		{
 			name: "llm trigger external target must be explicit",
 			raw: `{"title":"t","layout":"single_page","fields":[
-				{"name":"ai","widget":"LLMTrigger","target_field":"external.score","x-allow-external-target":true}
-			]}`,
+					{"name":"ai","widget":"LLMTrigger","target_field":"external.score","x-allow-external-target":true}
+				]}`,
 			wantValid: true,
+		},
+		{
+			name: "regex and requiredWhen valid",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"decision","widget":"Radio","options":["pass","reject"]},
+					{"name":"reason","widget":"Input","regex":"^.{4,}$","requiredWhen":{"field":"decision","equals":"reject"}}
+				]}`,
+			wantValid: true,
+		},
+		{
+			name: "invalid regex rejected",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"summary","widget":"Input","regex":"["}
+				]}`,
+			wantValid: false, wantField: "fields[0].regex", wantMsg: "valid",
+		},
+		{
+			name: "requiredWhen dangling field rejected",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"reason","widget":"Input","requiredWhen":{"field":"missing","notEmpty":true}}
+				]}`,
+			wantValid: false, wantField: "fields[0].requiredWhen.field", wantMsg: "existing field",
+		},
+		{
+			name: "requiredWhen needs condition",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"reason","widget":"Input","requiredWhen":{"field":"reason"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].requiredWhen", wantMsg: "equals or notEmpty",
+		},
+		{
+			name: "group and tabs nested fields are valid",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"summary","widget":"Input"},
+					{"name":"group_1","widget":"Group","fields":[
+						{"name":"group_summary","widget":"TextArea"},
+						{"name":"group_decision","widget":"Radio","options":["pass","reject"]}
+					]},
+					{"name":"tabs_1","widget":"Tabs","tabs":[
+						{"label":"基础","fields":[{"name":"tabs_score","widget":"Input","minLength":1,"maxLength":10}]},
+						{"label":"复核","fields":[{"name":"tabs_ai","widget":"LLMTrigger","target_field":"group_summary"}]}
+					]}
+				]}`,
+			wantValid: true,
+		},
+		{
+			name: "nested duplicate name",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"summary","widget":"Input"},
+					{"name":"group_1","widget":"Group","fields":[{"name":"summary","widget":"TextArea"}]}
+				]}`,
+			wantValid: false, wantField: "fields[1].fields[0].name", wantMsg: "duplicate",
+		},
+		{
+			name: "tabs require fields",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"tabs_1","widget":"Tabs","tabs":[{"label":"Empty","fields":[]}]}
+				]}`,
+			wantValid: false, wantField: "fields[0].tabs[0].fields", wantMsg: "non-empty",
+		},
+		{
+			name: "nested llm trigger target must exist",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"group_1","widget":"Group","fields":[{"name":"ai","widget":"LLMTrigger","target_field":"missing"}]}
+				]}`,
+			wantValid: false, wantField: "fields[0].fields[0].target_field", wantMsg: "existing field",
 		},
 		{
 			name:      "malformed JSON",
@@ -156,6 +223,20 @@ func TestValidateTemplateSchemaLimits(t *testing.T) {
 	errs := validateTemplateSchema(string(raw))
 	if len(errs) == 0 || errs[0].Field != "fields" {
 		t.Fatalf("expected fields limit error, got %+v", errs)
+	}
+
+	fields = []map[string]any{{
+		"name":   "group",
+		"widget": "Group",
+		"fields": make([]map[string]any, maxTemplateFields),
+	}}
+	for i := range fields[0]["fields"].([]map[string]any) {
+		fields[0]["fields"].([]map[string]any)[i] = map[string]any{"name": fmt.Sprintf("nested_%d", i), "widget": "Input"}
+	}
+	raw, _ = json.Marshal(map[string]any{"fields": fields})
+	errs = validateTemplateSchema(string(raw))
+	if len(errs) == 0 || errs[0].Field != "fields" {
+		t.Fatalf("expected recursive fields limit error, got %+v", errs)
 	}
 
 	options := make([]any, maxTemplateOptions+1)

@@ -29,6 +29,8 @@ var (
 	ErrDraftAfterSubmit  = errors.New("submission: draft can only be saved before first submit")
 	ErrInvalidTransition = errors.New("submission: invalid state machine transition")
 	ErrItemNotClaimed    = errors.New("submission: item is not claimed by current user")
+	ErrInvalidAIPrompt   = errors.New("submission: active AI prompt is invalid")
+	ErrTaskTemplate      = errors.New("submission: task template is not available")
 )
 
 // SaveInput:Save 调用所需要的全部领域数据。
@@ -45,11 +47,15 @@ type SaveInput struct {
 func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 	var response model.Submission
 	err := db.Transaction(func(tx *gorm.DB) error {
-		item, err := lockClaimedItem(tx, input.Task.ID, input.Item.ID, input.UserID)
+		task, err := lockTask(tx, input.Task.ID)
 		if err != nil {
 			return err
 		}
-		sub, err := findOrCreateSubmission(tx, input.Task, item, input.UserID)
+		item, err := lockClaimedItem(tx, task.ID, input.Item.ID, input.UserID)
+		if err != nil {
+			return err
+		}
+		sub, err := findOrCreateSubmission(tx, task, item, input.UserID)
 		if err != nil {
 			return err
 		}
@@ -70,14 +76,14 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			return err
 		}
 		if !input.Draft {
-			if err := attachUploadedFiles(tx, input.Task, sub, revision, input.AnswerRaw, input.UserID); err != nil {
+			if err := attachUploadedFiles(tx, task, sub, revision, input.AnswerRaw, input.UserID); err != nil {
 				return err
 			}
 		}
 		aiPlan := aiReviewPlan{}
 		if !input.Draft {
 			var err error
-			aiPlan, err = buildAIReviewPlan(tx, input.Task, sub, revision)
+			aiPlan, err = buildAIReviewPlan(tx, task, sub, revision)
 			if err != nil {
 				return err
 			}
@@ -142,13 +148,15 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}); err != nil {
 				return err
 			}
+			// 派发(enqueue / skip_ai)是系统按任务配置自动决策,不是用户动作,
+			// 因此审计记为 system + 无 actor_id,避免审计轨迹误导。
 			if err := audit.Write(tx, audit.LogEntry{
 				EntityType: "submission",
 				EntityID:   sub.ID,
 				FromState:  statemachine.StateSubmitted,
 				ToState:    to,
-				ActorType:  "user",
-				ActorID:    &actorID,
+				ActorType:  "system",
+				ActorID:    nil,
 				Event:      dispatchEvent,
 			}); err != nil {
 				return err

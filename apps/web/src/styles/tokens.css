@@ -1,58 +1,204 @@
 /* ============================================================
-   LabelHub Editorial/Magazine Design Tokens
-   Editorial 风格:浅米色主背景 + 黑色主文字 + 暖红强调 +
-   IBM Plex Serif 标题 + Inter 正文 + 1px 黑色细线分隔
+   LabelHub Editorial Console Design Tokens
+   Dense work surfaces, quiet typography, stable status colors.
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
-
 :root {
-  /* — Color — */
-  --color-bg: #F5F1E8;
-  --color-surface: #FFFFFF;
-  --color-surface-hover: #F0EBE0;
-  --color-text: #1A1A1A;
-  --color-text-secondary: #5C5C5C;
-  --color-text-muted: #999999;
-  --color-accent: #C73E1D;
-  --color-accent-hover: #A83217;
-  --color-border: #1A1A1A;
-  --color-border-light: #D4CFC6;
-  --color-success: #2D6A4F;
-  --color-warning: #B8860B;
-  --color-danger: #C73E1D;
+  /* Color */
+  --color-bg: #f7f7f4;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #fbfaf7;
+  --color-surface-hover: #f1f1ec;
+  --color-text: #171713;
+  --color-text-secondary: #57564f;
+  --color-text-muted: #8a887f;
+  --color-accent: #1f5d99;
+  --color-accent-hover: #174977;
+  --color-border: #d8d6cd;
+  --color-border-light: #e7e4da;
+  --color-success: #20734b;
+  --color-warning: #9a6a10;
+  --color-danger: #b33a32;
 
-  /* — Typography — */
-  --font-heading: 'IBM Plex Serif', Georgia, serif;
-  --font-body: 'Inter', -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --text-hero: clamp(2rem, 1.5rem + 2vw, 3rem);
-  --text-h1: clamp(1.5rem, 1.2rem + 1vw, 2rem);
-  --text-h2: 1.25rem;
-  --text-base: 0.9375rem;
-  --text-sm: 0.8125rem;
+  /* Work surface */
+  --color-canvas: #fbfaf6;
+  --color-grid-line: rgba(0, 0, 0, 0.04);
+  --color-node-bg: #ffffff;
+  --color-node-border: #d5d1c4;
+  --color-panel-header: #efede6;
+  --color-info-bg: #eef5fb;
+  --color-accent-soft: #dbeaf7;
+  --color-rail: #7da8ca;
+  --color-port: #6c9ac0;
+  --color-code-bg: #f0eee7;
 
-  /* — Spacing — */
+  /* Status */
+  --status-draft-bg: #eeeeea;
+  --status-draft-fg: #56564f;
+  --status-submitted-bg: #e6f0fa;
+  --status-submitted-fg: #1f5d99;
+  --status-ai-bg: #eee8fb;
+  --status-ai-fg: #6545a5;
+  --status-human-bg: #fff0dc;
+  --status-human-fg: #9a5a12;
+  --status-approved-bg: #e4f5eb;
+  --status-approved-fg: #20734b;
+  --status-rejected-bg: #fde9e7;
+  --status-rejected-fg: #a8342d;
+  --status-revising-bg: #fff8d8;
+  --status-revising-fg: #7d6511;
+
+  --color-teal: #24706c;
+  --color-amber: #9a6a10;
+  --color-violet: #6545a5;
+  --color-success-soft: #e4f5eb;
+  --color-warning-soft: #fff8d8;
+  --color-danger-soft: #fde9e7;
+
+  /* Typography */
+  --font-heading: Georgia, 'Times New Roman', serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --text-hero: 2rem;
+  --text-h1: 1.25rem;
+  --text-h2: 1.125rem;
+  --text-base: 0.875rem;
+  --text-sm: 0.75rem;
+
+  /* Spacing */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
   --space-2xl: 48px;
-  --space-section: clamp(2rem, 1.5rem + 3vw, 4rem);
+  --space-section: 40px;
 
-  /* — Border — */
+  /* Border */
   --radius-sm: 2px;
   --radius-md: 4px;
+  --radius-lg: 8px;
   --border-width: 1px;
   --border-style: solid;
 
-  /* — Shadow — */
-  --shadow-sm: 1px 1px 0 rgba(0,0,0,0.08);
-  --shadow-md: 2px 2px 0 rgba(0,0,0,0.12);
+  /* Shadow */
+  --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.03);
+  --shadow-md: 0 4px 12px rgba(23,23,19,0.08);
+  --shadow-lg: 0 12px 24px rgba(23,23,19,0.12);
 
-  /* — Duration — */
-  --duration-fast: 120ms;
-  --duration-normal: 250ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Motion */
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+.semi-button {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+.semi-table,
+.semi-table-thead > .semi-table-row > .semi-table-row-head,
+.semi-table-tbody > .semi-table-row > .semi-table-row-cell {
+  font-size: var(--text-sm);
+}
+
+.semi-table-thead > .semi-table-row > .semi-table-row-head {
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}
+
+.semi-modal-content,
+.semi-card {
+  border-radius: var(--radius-lg);
+}
+
+.semi-tag {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+@keyframes lh-skeleton-pulse {
+  0% {
+    opacity: 0.52;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.52;
+  }
+}
+
+@keyframes lh-top-progress {
+  0% {
+    transform: translateX(-65%) scaleX(0.35);
+  }
+  55% {
+    transform: translateX(15%) scaleX(0.55);
+  }
+  100% {
+    transform: translateX(115%) scaleX(0.35);
+  }
+}
+
+.lh-skeleton-line {
+  height: 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-border-light), var(--color-surface-hover), var(--color-border-light));
+  animation: lh-skeleton-pulse 1.2s var(--ease-out) infinite;
+}
+
+.lh-top-progress {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.lh-top-progress[data-active='true'] {
+  opacity: 1;
+}
+
+.lh-top-progress::before {
+  content: '';
+  display: block;
+  width: 65%;
+  height: 100%;
+  transform-origin: left center;
+  background: var(--color-accent);
+  animation: lh-top-progress 1.25s var(--ease-out) infinite;
 }

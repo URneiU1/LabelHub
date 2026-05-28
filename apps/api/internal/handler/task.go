@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,8 @@ func (h TaskHandler) Register(api gin.IRouter) {
 	api.GET("/tasks", middleware.RequireRoles("owner", "admin"), h.ListTasks)
 	api.POST("/tasks", middleware.RequireRoles("owner", "admin"), h.CreateTask)
 	api.GET("/tasks/:taskId", middleware.RequireRoles("owner", "admin", "labeler", "reviewer"), h.GetTask)
+	api.POST("/tasks/:taskId/baseline", middleware.RequireRoles("owner", "admin"), h.UpdateBaseline)
+	api.GET("/tasks/:taskId/item-preview", middleware.RequireRoles("owner", "admin"), h.PreviewItem)
 	api.POST("/tasks/:taskId/items/import", middleware.RequireRoles("owner", "admin"), h.ImportItems)
 }
 
@@ -39,6 +42,16 @@ type createTaskRequest struct {
 
 type importItemsRequest struct {
 	Items []map[string]any `json:"items" binding:"required"`
+}
+
+type updateBaselineRequest struct {
+	BaselineDescription *string `json:"baselineDescription"`
+}
+
+type previewItemResponse struct {
+	ID         uint64          `json:"id"`
+	ExternalID *string         `json:"externalId"`
+	Payload    json.RawMessage `json:"payload"`
 }
 
 func (h TaskHandler) ListTasks(c *gin.Context) {
@@ -92,6 +105,52 @@ func (h TaskHandler) GetTask(c *gin.Context) {
 		"task":     task,
 		"template": template,
 	})
+}
+
+func (h TaskHandler) UpdateBaseline(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var req updateBaselineRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.BaselineDescription == nil {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "baselineDescription is required")
+		return
+	}
+	if err := h.db.Model(&model.Task{}).Where("id = ?", task.ID).Update("baseline_description", *req.BaselineDescription).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update baseline")
+		return
+	}
+	if err := h.db.First(&task, task.ID).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to reload task")
+		return
+	}
+	httpx.OK(c, gin.H{"task": task})
+}
+
+func (h TaskHandler) PreviewItem(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var item model.TaskItem
+	if err := h.db.Where("task_id = ? AND status = ?", task.ID, itemStatusAvailable).Order("id ASC").First(&item).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.OK(c, gin.H{"item": nil})
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load preview item")
+		return
+	}
+	var externalID *string
+	if item.ExternalID.Valid {
+		externalID = &item.ExternalID.String
+	}
+	httpx.OK(c, gin.H{"item": previewItemResponse{
+		ID:         item.ID,
+		ExternalID: externalID,
+		Payload:    json.RawMessage(item.Payload),
+	}})
 }
 
 func (h TaskHandler) ImportItems(c *gin.Context) {

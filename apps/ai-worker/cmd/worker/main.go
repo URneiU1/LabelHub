@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -24,6 +26,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "flush logger: %v\n", err)
 		}
 	}()
+	mustAbsExportDir()
 	database, err := openDB()
 	if err != nil {
 		logger.Fatal("connect database", zap.Error(err))
@@ -35,9 +38,15 @@ func main() {
 		asynq.Config{Concurrency: 2},
 	)
 
-	handlers := workerHandlers{logger: logger, db: database, evaluator: deterministicEvaluator{}}
+	evaluator, err := newEvaluatorFromEnv()
+	if err != nil {
+		logger.Fatal("configure llm provider", zap.Error(err))
+	}
+	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator, circuit: newAIWorkerCircuitFromEnv()}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("ai:review", handlers.handleAIReview)
+	mux.HandleFunc("ai:dry-run", handlers.handleAIDryRun)
+	mux.HandleFunc("export", handlers.handleExport)
 	mux.HandleFunc("noop:ping", handlers.handleNoop)
 
 	logger.Info("AI Worker started", zap.String("redis_addr", redisAddr()))
@@ -50,6 +59,7 @@ type workerHandlers struct {
 	logger    *zap.Logger
 	db        *sql.DB
 	evaluator aiEvaluator
+	circuit   *aiWorkerCircuit
 }
 
 func (h workerHandlers) handleNoop(_ context.Context, t *asynq.Task) error {
@@ -76,9 +86,14 @@ func openDB() (*sql.DB, error) {
 }
 
 func mysqlDSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC&multiStatements=true",
+	// worker 不跑 migration,无需 multiStatements;DB_PASSWORD 必须显式提供,缺失即 fatal。
+	password := os.Getenv("DB_PASSWORD")
+	if password == "" {
+		log.Fatal("DB_PASSWORD must be set")
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC",
 		envOrDefault("DB_USER", "labelhub"),
-		envOrDefault("DB_PASSWORD", "labelhub_dev"),
+		password,
 		envOrDefault("DB_HOST", "127.0.0.1"),
 		envOrDefault("DB_PORT", "13306"),
 		envOrDefault("DB_NAME", "labelhub"),
@@ -98,6 +113,19 @@ func redisAddr() string {
 	host := envOrDefault("REDIS_HOST", "localhost")
 	port := envOrDefault("REDIS_PORT", "6379")
 	return net.JoinHostPort(host, port)
+}
+
+// mustAbsExportDir 校验 EXPORT_DIR 为绝对路径。worker 与 api 从不同工作目录启动,
+// 相对路径会各自解析到不同目录,导致 worker 写入的文件 api 下载时找不到/校验失败。
+func mustAbsExportDir() string {
+	dir := os.Getenv("EXPORT_DIR")
+	if dir == "" {
+		log.Fatal("EXPORT_DIR must be set to an absolute path")
+	}
+	if !filepath.IsAbs(dir) {
+		log.Fatalf("EXPORT_DIR must be an absolute path (api and worker run from different working dirs), got %q", dir)
+	}
+	return dir
 }
 
 func envOrDefault(key string, fallback string) string {

@@ -42,8 +42,27 @@ services:
       mysql:
         condition: service_healthy
 
-  # asynqmon: 无 arm64 官方镜像,Sprint 3 前手动 build
-  # go install github.com/hibiken/asynqmon@latest && asynqmon --redis-addr=localhost:6379
+  asynqmon:
+    profiles: ["ops"]
+    build:
+      context: ./asynqmon
+    container_name: labelhub-asynqmon
+    command: ["--redis-addr=redis:6379", "--port=8080"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  asynqmon-nginx:
+    profiles: ["ops"]
+    image: nginx:1.29-alpine
+    container_name: labelhub-asynqmon-nginx
+    ports:
+      - "18081:8080"
+    volumes:
+      - ./nginx/asynqmon.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/asynqmon.htpasswd.example:/etc/nginx/conf.d/asynqmon.htpasswd:ro
+    depends_on:
+      - asynqmon
 
 volumes:
   mysql_data:

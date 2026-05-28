@@ -35,7 +35,7 @@ func attachUploadedFiles(tx *gorm.DB, task model.Task, sub model.Submission, rev
 	for _, key := range keys {
 		var file model.UploadedFile
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("storage_key = ?", key).
+			Where("storage_key = ? AND task_id = ?", key, task.ID).
 			First(&file).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

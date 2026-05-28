@@ -97,7 +97,7 @@ func TestClaimItem_HappyPath(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "template_version", "labeler_id", "status"}).
 			AddRow(42, 1, 11, 2, 7, "draft"))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+version`).
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 2, `{}`))
 
@@ -200,6 +200,10 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 			AddRow(11, 1, claimedBy, itemStatusClaimed))
 
 	mock.ExpectBegin()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled"}).
+			AddRow(1, 1, "published", false, true))
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).

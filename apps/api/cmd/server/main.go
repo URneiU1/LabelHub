@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -14,11 +15,13 @@ import (
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"labelhub-api/internal/auth"
 	"labelhub-api/internal/db"
 	"labelhub-api/internal/handler"
 	"labelhub-api/internal/middleware"
+	"labelhub-api/internal/model"
 	"labelhub-api/internal/service/aireview"
 	"labelhub-api/internal/service/outbox"
 )
@@ -34,6 +37,7 @@ func main() {
 		}
 	}()
 
+	mustAbsExportDir()
 	database := db.Init()
 	db.RunMigrations()
 	authService := auth.NewServiceFromEnv()
@@ -41,8 +45,15 @@ func main() {
 	defer stopOutbox()
 	startOutboxPublisher(outboxCtx, database, logger)
 	startAIReviewSweeper(outboxCtx, database, logger)
+	startOrphanTempFileCleaner(outboxCtx, database, logger)
+
+	// 默认 release 模式(不打印调试路由/警告);本地调试可显式设 GIN_MODE=debug。
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	r := gin.Default()
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS())
 	r.Use(middleware.RequestID())
 	r.GET("/", healthResponse)
@@ -62,8 +73,14 @@ func main() {
 	handler.NewReviewerHandler(database).Register(authedAPI)
 	handler.NewUploadHandler(database).Register(authedAPI)
 	handler.NewLLMHandler().Register(authedAPI)
-	handler.NewExportHandler(database).Register(authedAPI)
+	exportHandler := handler.NewExportHandler(database, exportDownloadSecret(), exportDownloadTTL())
+	exportHandler.Register(authedAPI)
+	exportHandler.RegisterPublic(api) // 公开下载路由, 签名 token 即鉴权
+	handler.NewStatsHandler(database).Register(authedAPI)
 	handler.NewTemplateHandler(database).Register(authedAPI)
+	handler.NewAIPromptHandler(database).Register(authedAPI)
+	handler.NewGoldenSampleHandler(database).Register(authedAPI)
+	handler.NewAIDryRunHandler(database).Register(authedAPI)
 
 	port := serverPort()
 	logger.Info("API server starting", zap.String("port", port))
@@ -89,6 +106,30 @@ func serverPort() string {
 		return port
 	}
 	return ":" + port
+}
+
+// mustAbsExportDir 校验 EXPORT_DIR 为绝对路径并返回它。
+// api 与 worker 从不同工作目录启动(见 Makefile),相对路径会各自解析到不同目录,
+// 导致 worker 写入的文件 api 下载时 base 不匹配,safeExportPath 永远 403。
+func mustAbsExportDir() string {
+	dir := os.Getenv("EXPORT_DIR")
+	if dir == "" {
+		log.Fatal("EXPORT_DIR must be set to an absolute path")
+	}
+	if !filepath.IsAbs(dir) {
+		log.Fatalf("EXPORT_DIR must be an absolute path (api and worker run from different working dirs), got %q", dir)
+	}
+	return dir
+}
+
+func exportDownloadSecret() string { return os.Getenv("EXPORT_DOWNLOAD_SECRET") }
+
+func exportDownloadTTL() time.Duration {
+	seconds, err := strconv.Atoi(os.Getenv("EXPORT_DOWNLOAD_TTL"))
+	if err != nil || seconds <= 0 {
+		seconds = 600
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
@@ -165,6 +206,88 @@ func aiReviewSweeperBatch() int {
 	batch, err := strconv.Atoi(envOrDefault("AI_REVIEW_SWEEPER_BATCH", "20"))
 	if err != nil || batch <= 0 {
 		return 20
+	}
+	return batch
+}
+
+func startOrphanTempFileCleaner(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
+	if envOrDefault("ORPHAN_TEMP_FILE_CLEANER_ENABLED", "true") == "false" {
+		logger.Info("orphan temp file cleaner disabled")
+		return
+	}
+	interval := orphanTempFileCleanerInterval()
+	ticker := time.NewTicker(interval)
+	logger.Info("orphan temp file cleaner started", zap.Duration("interval", interval))
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				cutoff := time.Now().Add(-24 * time.Hour)
+				orphans, err := claimOrphanTempFiles(ctx, database, cutoff, orphanTempFileCleanerBatch())
+				if err != nil {
+					logger.Warn("failed to query orphan temp files", zap.Error(err))
+					continue
+				}
+				uploadDir := envOrDefault("UPLOAD_DIR", "./data/uploads")
+				for _, f := range orphans {
+					dest := filepath.Join(uploadDir, strconv.FormatUint(f.TaskID, 10), f.StorageKey)
+					if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+						logger.Warn("failed to remove orphan temp file", zap.Uint64("id", f.ID), zap.String("path", dest), zap.Error(err))
+						continue
+					}
+					logger.Info("cleaned up orphan temp file", zap.Uint64("id", f.ID), zap.String("storage_key", f.StorageKey))
+				}
+			}
+		}
+	}()
+}
+
+func claimOrphanTempFiles(ctx context.Context, database *gorm.DB, cutoff time.Time, batch int) ([]model.UploadedFile, error) {
+	var orphans []model.UploadedFile
+	err := database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("status = ? AND created_at < ?", "temp", cutoff).
+			Order("id ASC").
+			Limit(batch).
+			Find(&orphans).Error; err != nil {
+			return err
+		}
+		if len(orphans) == 0 {
+			return nil
+		}
+		ids := make([]uint64, 0, len(orphans))
+		for _, f := range orphans {
+			ids = append(ids, f.ID)
+		}
+		res := tx.Model(&model.UploadedFile{}).
+			Where("id IN ? AND status = ?", ids, "temp").
+			Update("status", "deleted")
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != int64(len(orphans)) {
+			return fmt.Errorf("orphan temp file claim lost update race")
+		}
+		return nil
+	})
+	return orphans, err
+}
+
+func orphanTempFileCleanerInterval() time.Duration {
+	ms, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_INTERVAL_MS", "3600000"))
+	if err != nil || ms <= 0 {
+		return time.Hour
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func orphanTempFileCleanerBatch() int {
+	batch, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_BATCH", "100"))
+	if err != nil || batch <= 0 {
+		return 100
 	}
 	return batch
 }

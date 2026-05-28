@@ -63,6 +63,7 @@ func NewUploadHandler(db *gorm.DB) UploadHandler {
 
 func (h UploadHandler) Register(api gin.IRouter) {
 	api.POST("/uploads", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.Upload)
+	api.GET("/uploads/:id", middleware.RequireRoles("labeler", "owner", "reviewer", "admin"), h.Download)
 }
 
 func (h UploadHandler) Upload(c *gin.Context) {
@@ -71,9 +72,9 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "file is required")
 		return
 	}
-	taskID, _ := strconv.ParseUint(c.PostForm("task_id"), 10, 64)
-	if taskID == 0 {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "task_id is required")
+	taskID, err := strconv.ParseUint(c.PostForm("task_id"), 10, 64)
+	if err != nil || taskID == 0 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "task_id must be a positive integer")
 		return
 	}
 
@@ -82,7 +83,11 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
 		return
 	}
-	claims, _ := middleware.Claims(c)
+	claims, ok := middleware.Claims(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing auth context")
+		return
+	}
 	allowed, err := h.canUploadToTask(claims, task)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check upload access")
@@ -229,6 +234,69 @@ func isWebPSample(sample []byte) bool {
 	return len(sample) >= 12 &&
 		string(sample[0:4]) == "RIFF" &&
 		string(sample[8:12]) == "WEBP"
+}
+
+func (h UploadHandler) Download(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid upload id")
+		return
+	}
+
+	var uploaded model.UploadedFile
+	if err := h.db.Where("id = ? AND status <> ?", id, "deleted").First(&uploaded).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "upload not found")
+		return
+	}
+
+	var task model.Task
+	if err := h.db.First(&task, uploaded.TaskID).Error; err != nil {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+		return
+	}
+
+	claims, ok := middleware.Claims(c)
+	if !ok {
+		httpx.Error(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing auth context")
+		return
+	}
+	allowed, err := h.canDownloadUpload(claims, task, uploaded)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check download access")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "download is not allowed for this task")
+		return
+	}
+
+	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
+	dest := filepath.Join(uploadDir, strconv.FormatUint(uploaded.TaskID, 10), uploaded.StorageKey)
+	c.FileAttachment(dest, uploaded.OriginalName)
+}
+
+func (h UploadHandler) canDownloadUpload(claims *auth.Claims, task model.Task, uploaded model.UploadedFile) (bool, error) {
+	if policy.HasRole(claims, policy.RoleAdmin) || policy.IsTaskOwner(claims, task) || uploaded.CreatedBy == claims.UserID {
+		return true, nil
+	}
+	if !policy.HasRole(claims, policy.RoleReviewer) || uploaded.SubmissionRevisionID == nil {
+		return false, nil
+	}
+	allowed, err := canReviewTask(h.db, claims, task)
+	if err != nil || !allowed {
+		return false, err
+	}
+	var count int64
+	err = h.db.Model(&model.SubmissionRevision{}).
+		Joins("JOIN submissions ON submissions.id = submission_revisions.submission_id").
+		Where("submission_revisions.id = ? AND submissions.task_id = ? AND submissions.status IN ?",
+			*uploaded.SubmissionRevisionID,
+			task.ID,
+			[]string{statemachine.StateHumanReviewing, statemachine.StateApproved, statemachine.StateRejected},
+		).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func storageKey(name string) string {

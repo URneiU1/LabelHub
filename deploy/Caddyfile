@@ -1,0 +1,23 @@
+{$CADDY_SITE_ADDRESS} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	handle /health {
+		reverse_proxy api:8080
+	}
+
+	redir /asynqmon /asynqmon/
+	handle_path /asynqmon/* {
+		basic_auth {
+			{$ASYNQMON_USER} {$ASYNQMON_PASSWORD_HASH}
+		}
+		reverse_proxy asynqmon:8080
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

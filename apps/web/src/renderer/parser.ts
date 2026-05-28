@@ -1,4 +1,4 @@
-import { showItemModes, widgetTypes, type AnswerValue, type FieldSchema, type ParseResult, type TemplateSchema, type WidgetType } from './types'
+import { showItemModes, widgetTypes, type AnswerValue, type FieldSchema, type ParseResult, type TabSchema, type TemplateSchema, type WidgetType } from './types'
 
 const widgetSet = new Set<string>(widgetTypes)
 const showItemModeSet = new Set<string>(showItemModes)
@@ -22,108 +22,16 @@ export function parseTemplateSchema(raw: string | unknown): ParseResult<Template
     return parseError('layout', 'layout must be single_page')
   }
 
-  const fields: FieldSchema[] = []
   const names = new Set<string>()
-  for (let index = 0; index < parsed.fields.length; index += 1) {
-    const rawField = parsed.fields[index]
-    const path = `fields[${index}]`
-    if (!isRecord(rawField)) {
-      return parseError(path, 'field must be an object')
-    }
-    const name = stringProp(rawField.name)
-    if (!name) {
-      return parseError(`${path}.name`, 'name is required')
-    }
-    if (names.has(name)) {
-      return parseError(`${path}.name`, `duplicate name ${name}`)
-    }
-    names.add(name)
-
-    const widget = stringProp(rawField.widget)
-    if (!widgetSet.has(widget)) {
-      return parseError(`${path}.widget`, `widget not in enum: ${widget}`)
-    }
-
-    const field: FieldSchema = {
-      name,
-      widget: widget as WidgetType,
-      label: stringProp(rawField.label) || name,
-    }
-    if (typeof rawField.required === 'boolean') {
-      field.required = rawField.required
-    } else if ('required' in rawField) {
-      return parseError(`${path}.required`, 'required must be boolean')
-    }
-    if ('options' in rawField) {
-      const optionsResult = parseOptions(rawField.options, path)
-      if (!optionsResult.ok) {
-        return optionsResult
-      }
-      field.options = optionsResult.value
-    } else if (widget === 'Radio' || widget === 'Tags') {
-      return parseError(`${path}.options`, 'options must be non-empty')
-    }
-    const minLength = numberProp(rawField.minLength)
-    const maxLength = numberProp(rawField.maxLength)
-    if (minLength !== undefined) {
-      field.minLength = minLength
-    } else if ('minLength' in rawField) {
-      return parseError(`${path}.minLength`, 'minLength must be number')
-    }
-    if (maxLength !== undefined) {
-      field.maxLength = maxLength
-    } else if ('maxLength' in rawField) {
-      return parseError(`${path}.maxLength`, 'maxLength must be number')
-    }
-    if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {
-      return parseError(`${path}.maxLength`, 'minLength cannot exceed maxLength')
-    }
-    if (typeof rawField.path === 'string') {
-      field.path = rawField.path
-    }
-    if (typeof rawField.mode === 'string') {
-      if (!showItemModeSet.has(rawField.mode)) {
-        return parseError(`${path}.mode`, `mode not in enum: ${rawField.mode}`)
-      }
-      field.mode = rawField.mode as FieldSchema['mode']
-    }
-    const maxFiles = positiveIntegerProp(rawField.maxFiles)
-    if (maxFiles !== undefined) {
-      field.maxFiles = maxFiles
-    } else if ('maxFiles' in rawField) {
-      return parseError(`${path}.maxFiles`, 'maxFiles must be > 0')
-    }
-    if (typeof rawField.prompt === 'string') {
-      field.prompt = rawField.prompt
-    }
-    if (typeof rawField.target_field === 'string') {
-      field.target_field = rawField.target_field.trim()
-    } else if ('target_field' in rawField) {
-      return parseError(`${path}.target_field`, 'target_field must be string')
-    }
-    for (const [key, value] of Object.entries(rawField)) {
-      if (key.startsWith('x-')) {
-        field[key as `x-${string}`] = value
-      }
-    }
-    fields.push(field)
+  const fieldsResult = parseFields(parsed.fields, 'fields', names)
+  if (!fieldsResult.ok) {
+    return fieldsResult
   }
+  const fields = fieldsResult.value
 
-  for (let index = 0; index < fields.length; index += 1) {
-    const field = fields[index]
-    if (field.widget !== 'LLMTrigger') {
-      continue
-    }
-    const allowExternal = field['x-allow-external-target'] === true
-    if (!field.target_field) {
-      if (!allowExternal) {
-        return parseError(`fields[${index}].target_field`, 'target_field is required')
-      }
-      continue
-    }
-    if (!allowExternal && !names.has(field.target_field)) {
-      return parseError(`fields[${index}].target_field`, 'target_field must reference an existing field')
-    }
+  const targetResult = validateLLMTargets(fields, 'fields', names)
+  if (!targetResult.ok) {
+    return targetResult
   }
 
   const schema: TemplateSchema = {
@@ -145,6 +53,225 @@ export function parseTemplateSchema(raw: string | unknown): ParseResult<Template
     ok: true,
     value: schema,
   }
+}
+
+function parseFields(rawFields: unknown, path: string, names: Set<string>): ParseResult<FieldSchema[]> {
+  if (!Array.isArray(rawFields)) {
+    return parseError(path, 'fields must be an array')
+  }
+  if (rawFields.length === 0) {
+    return parseError(path, 'fields must be non-empty')
+  }
+
+  const fields: FieldSchema[] = []
+  for (let index = 0; index < rawFields.length; index += 1) {
+    const rawField = rawFields[index]
+    const fieldPath = `${path}[${index}]`
+    if (!isRecord(rawField)) {
+      return parseError(fieldPath, 'field must be an object')
+    }
+    const fieldResult = parseField(rawField, fieldPath, names)
+    if (!fieldResult.ok) {
+      return fieldResult
+    }
+    fields.push(fieldResult.value)
+  }
+  return { ok: true, value: fields }
+}
+
+function parseField(rawField: Record<string, unknown>, path: string, names: Set<string>): ParseResult<FieldSchema> {
+  const name = stringProp(rawField.name)
+  if (!name) {
+    return parseError(`${path}.name`, 'name is required')
+  }
+  if (names.has(name)) {
+    return parseError(`${path}.name`, `duplicate name ${name}`)
+  }
+  names.add(name)
+
+  const widget = stringProp(rawField.widget)
+  if (!widgetSet.has(widget)) {
+    return parseError(`${path}.widget`, `widget not in enum: ${widget}`)
+  }
+
+  const field: FieldSchema = {
+    name,
+    widget: widget as WidgetType,
+    label: stringProp(rawField.label) || name,
+  }
+  if (typeof rawField.required === 'boolean') {
+    field.required = rawField.required
+  } else if ('required' in rawField) {
+    return parseError(`${path}.required`, 'required must be boolean')
+  }
+  if ('requiredWhen' in rawField) {
+    const requiredWhenResult = parseRequiredWhen(rawField.requiredWhen, `${path}.requiredWhen`)
+    if (!requiredWhenResult.ok) {
+      return requiredWhenResult
+    }
+    field.requiredWhen = requiredWhenResult.value
+  }
+  if (widget === 'Group') {
+    const childrenResult = parseFields(rawField.fields, `${path}.fields`, names)
+    if (!childrenResult.ok) {
+      return childrenResult
+    }
+    field.fields = childrenResult.value
+  }
+  if (widget === 'Tabs') {
+    const tabsResult = parseTabs(rawField.tabs, `${path}.tabs`, names)
+    if (!tabsResult.ok) {
+      return tabsResult
+    }
+    field.tabs = tabsResult.value
+  }
+  if ('options' in rawField) {
+    const optionsResult = parseOptions(rawField.options, path)
+    if (!optionsResult.ok) {
+      return optionsResult
+    }
+    field.options = optionsResult.value
+  } else if (widget === 'Radio' || widget === 'Tags') {
+    return parseError(`${path}.options`, 'options must be non-empty')
+  }
+  const minLength = numberProp(rawField.minLength)
+  const maxLength = numberProp(rawField.maxLength)
+  if (minLength !== undefined) {
+    field.minLength = minLength
+  } else if ('minLength' in rawField) {
+    return parseError(`${path}.minLength`, 'minLength must be number')
+  }
+  if (maxLength !== undefined) {
+    field.maxLength = maxLength
+  } else if ('maxLength' in rawField) {
+    return parseError(`${path}.maxLength`, 'maxLength must be number')
+  }
+  if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {
+    return parseError(`${path}.maxLength`, 'minLength cannot exceed maxLength')
+  }
+  if (typeof rawField.regex === 'string') {
+    try {
+      new RegExp(rawField.regex)
+    } catch {
+      return parseError(`${path}.regex`, 'regex must be valid')
+    }
+    field.regex = rawField.regex
+  } else if ('regex' in rawField) {
+    return parseError(`${path}.regex`, 'regex must be string')
+  }
+  if (typeof rawField.path === 'string') {
+    field.path = rawField.path
+  }
+  if (typeof rawField.mode === 'string') {
+    if (!showItemModeSet.has(rawField.mode)) {
+      return parseError(`${path}.mode`, `mode not in enum: ${rawField.mode}`)
+    }
+    field.mode = rawField.mode as FieldSchema['mode']
+  }
+  const maxFiles = positiveIntegerProp(rawField.maxFiles)
+  if (maxFiles !== undefined) {
+    field.maxFiles = maxFiles
+  } else if ('maxFiles' in rawField) {
+    return parseError(`${path}.maxFiles`, 'maxFiles must be > 0')
+  }
+  if (typeof rawField.prompt === 'string') {
+    field.prompt = rawField.prompt
+  }
+  if (typeof rawField.target_field === 'string') {
+    field.target_field = rawField.target_field.trim()
+  } else if ('target_field' in rawField) {
+    return parseError(`${path}.target_field`, 'target_field must be string')
+  }
+  for (const [key, value] of Object.entries(rawField)) {
+    if (key.startsWith('x-')) {
+      field[key as `x-${string}`] = value
+    }
+  }
+  return { ok: true, value: field }
+}
+
+function parseTabs(rawTabs: unknown, path: string, names: Set<string>): ParseResult<TabSchema[]> {
+  if (!Array.isArray(rawTabs)) {
+    return parseError(path, 'tabs must be an array')
+  }
+  if (rawTabs.length === 0) {
+    return parseError(path, 'tabs must be non-empty')
+  }
+  const tabs: TabSchema[] = []
+  for (let index = 0; index < rawTabs.length; index += 1) {
+    const rawTab = rawTabs[index]
+    const tabPath = `${path}[${index}]`
+    if (!isRecord(rawTab)) {
+      return parseError(tabPath, 'tab must be an object')
+    }
+    const label = stringProp(rawTab.label)
+    if (!label) {
+      return parseError(`${tabPath}.label`, 'label is required')
+    }
+    const fieldsResult = parseFields(rawTab.fields, `${tabPath}.fields`, names)
+    if (!fieldsResult.ok) {
+      return fieldsResult
+    }
+    tabs.push({ label, fields: fieldsResult.value })
+  }
+  return { ok: true, value: tabs }
+}
+
+function validateLLMTargets(fields: FieldSchema[], path: string, names: Set<string>): ParseResult<true> {
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]
+    const fieldPath = `${path}[${index}]`
+    if (field.widget === 'LLMTrigger') {
+      const allowExternal = field['x-allow-external-target'] === true
+      if (!field.target_field) {
+        if (!allowExternal) {
+          return parseError(`${fieldPath}.target_field`, 'target_field is required')
+        }
+      } else if (!allowExternal && !names.has(field.target_field)) {
+        return parseError(`${fieldPath}.target_field`, 'target_field must reference an existing field')
+      }
+    }
+    if (field.requiredWhen && !names.has(field.requiredWhen.field)) {
+      return parseError(`${fieldPath}.requiredWhen.field`, 'requiredWhen.field must reference an existing field')
+    }
+    if (field.fields) {
+      const result = validateLLMTargets(field.fields, `${fieldPath}.fields`, names)
+      if (!result.ok) return result
+    }
+    if (field.tabs) {
+      for (let tabIndex = 0; tabIndex < field.tabs.length; tabIndex += 1) {
+        const result = validateLLMTargets(field.tabs[tabIndex].fields, `${fieldPath}.tabs[${tabIndex}].fields`, names)
+        if (!result.ok) return result
+      }
+    }
+  }
+  return { ok: true, value: true }
+}
+
+function parseRequiredWhen(raw: unknown, path: string): ParseResult<FieldSchema['requiredWhen']> {
+  if (!isRecord(raw)) {
+    return parseError(path, 'requiredWhen must be an object')
+  }
+  const field = stringProp(raw.field)
+  if (!field) {
+    return parseError(`${path}.field`, 'field is required')
+  }
+  const hasEquals = 'equals' in raw
+  const notEmpty = raw.notEmpty
+  if ('notEmpty' in raw && typeof notEmpty !== 'boolean') {
+    return parseError(`${path}.notEmpty`, 'notEmpty must be boolean')
+  }
+  if (!hasEquals && notEmpty !== true) {
+    return parseError(path, 'requiredWhen must set equals or notEmpty=true')
+  }
+  const result: FieldSchema['requiredWhen'] = { field }
+  if (hasEquals) {
+    result.equals = raw.equals
+  }
+  if (typeof notEmpty === 'boolean') {
+    result.notEmpty = notEmpty
+  }
+  return { ok: true, value: result }
 }
 
 export function parseAnswer(raw?: string | null): AnswerValue {

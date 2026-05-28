@@ -1,11 +1,13 @@
 import type { CSSProperties } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
 import { apiGet, apiPost, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
+import StatusBadge from '../../shared/components/StatusBadge'
 
 type ParsedSchema =
   | { ok: true, schema: TemplateSchema }
@@ -13,10 +15,14 @@ type ParsedSchema =
 
 export default function LabelerPlaza() {
   const [tasks, setTasks] = useState<Task[]>([])
+  const [mySubmissions, setMySubmissions] = useState<Submission[]>([])
   const [bundle, setBundle] = useState<TaskBundle | null>(null)
   const [answer, setAnswer] = useState<AnswerValue>({})
   const [errors, setErrors] = useState<ValidationError[]>([])
   const [loading, setLoading] = useState(false)
+  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+  const lastSavedDraftKey = useRef('')
+  const autoSaveSeq = useRef(0)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -27,10 +33,20 @@ export default function LabelerPlaza() {
     }
   }, [])
 
+  const loadMySubmissions = useCallback(async () => {
+    try {
+      const data = await apiGet<Submission[]>('/me/submissions')
+      setMySubmissions(data)
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载我的提交失败')
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
-  }, [loadTasks])
+    void loadMySubmissions()
+  }, [loadMySubmissions, loadTasks])
 
   const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
@@ -40,11 +56,33 @@ export default function LabelerPlaza() {
     try {
       const data = await apiPost<TaskBundle>(`/tasks/${taskId}/claim`, {})
       setBundle(data)
-      setAnswer(parseAnswer(data.revision?.answer))
+      const nextAnswer = parseAnswer(data.revision?.answer)
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(nextAnswer)
+      setAnswer(nextAnswer)
       setErrors([])
+      setAutoSaveState('idle')
       Toast.success('已领取题目')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '领取失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function openSubmission(submission: Submission) {
+    setLoading(true)
+    try {
+      const data = await apiGet<TaskBundle>(`/tasks/${submission.taskId}/items/${submission.itemId}`)
+      setBundle(data)
+      const nextAnswer = parseAnswer(data.revision?.answer)
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(nextAnswer)
+      setAnswer(nextAnswer)
+      setErrors([])
+      setAutoSaveState('idle')
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载待修改任务失败')
     } finally {
       setLoading(false)
     }
@@ -55,8 +93,11 @@ export default function LabelerPlaza() {
       return
     }
     try {
+      autoSaveSeq.current += 1
       const data = await apiPost<Submission>(`/tasks/${bundle.task.id}/items/${bundle.item.id}/draft`, { answer })
       setBundle({ ...bundle, submission: data })
+      lastSavedDraftKey.current = answerDraftKey(answer)
+      setAutoSaveState('saved')
       Toast.success('草稿已保存')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '保存失败')
@@ -81,71 +122,184 @@ export default function LabelerPlaza() {
     try {
       const data = await apiPost<Submission>(`/tasks/${bundle.task.id}/items/${bundle.item.id}/submit`, { answer })
       setBundle({ ...bundle, submission: data })
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(answer)
+      setAutoSaveState('idle')
+      void loadMySubmissions()
       Toast.success(`已提交，状态 ${data.status}`)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '提交失败')
     }
   }
 
+  // Ctrl/Cmd+Enter 提交:用 ref 持有最新 submit,只注册一次监听,避免随 answer 频繁重挂。
+  // submit 内部已对无 bundle / schema 错误 / 校验失败兜底,这里无需重复判断。
+  const submitRef = useRef(submit)
+  useEffect(() => {
+    submitRef.current = submit
+  })
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault()
+        void submitRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const answerKey = useMemo(() => answerDraftKey(answer), [answer])
+
+  useEffect(() => {
+    if (!bundle?.task || !bundle.item || !schema.ok || answerKey === lastSavedDraftKey.current) {
+      return
+    }
+    const taskId = bundle.task.id
+    const itemId = bundle.item.id
+    const timer = window.setTimeout(() => {
+      // 在触发时捕获当前活动序号(已由最近一次 onChange / 手动保存推进),且不在定时器里改写它;
+      // 任何更晚的改动或保存都会推进序号,使本次 autosave 的回调因序号不等而作废,
+      // 杜绝旧闭包里的 answer 覆盖更新的 lastSavedDraftKey。
+      const requestSeq = autoSaveSeq.current
+      setAutoSaveState('saving')
+      void apiPost<Submission>(`/tasks/${taskId}/items/${itemId}/draft`, { answer })
+        .then((submission) => {
+          if (autoSaveSeq.current !== requestSeq) {
+            return
+          }
+          lastSavedDraftKey.current = answerKey
+          setBundle((current) => current && current.task.id === taskId && current.item?.id === itemId ? { ...current, submission } : current)
+          setAutoSaveState('saved')
+        })
+        .catch(() => {
+          if (autoSaveSeq.current === requestSeq) {
+            setAutoSaveState('failed')
+          }
+        })
+    }, 3000)
+    return () => window.clearTimeout(timer)
+  }, [answer, answerKey, bundle?.item, bundle?.task, schema])
+
   return (
     <div>
-      <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)' }}>标注员工作台</h1>
-      <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)' }}>任务广场 · 领取 · 作答 · 草稿 · 提交</p>
+      <div style={{ marginBottom: 'var(--space-xl)' }}>
+        <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', margin: 0, fontWeight: 700 }}>标注工作台</h1>
+        <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务领取 · 在线作答 · AI 辅助 · 结果提交</p>
+      </div>
 
       <div style={layoutStyle}>
         <section style={panelStyle}>
-          <h2 style={headingStyle}>任务广场</h2>
-          {tasks.map((task) => (
-            <div key={task.id} style={taskCardStyle}>
-              <strong>{task.title}</strong>
-              <span style={mutedStyle}>{task.finishedItems}/{task.totalItems} · {task.status}</span>
-              <Button loading={loading} onClick={() => void claim(task.id)} style={{ marginTop: 'var(--space-sm)' }}>
-                领取题目
-              </Button>
+          <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+            <h2 style={headingStyle}>任务广场</h2>
+          </div>
+          <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
+            {tasks.map((task) => (
+              <div key={task.id} style={taskCardStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <strong style={{ fontSize: 'var(--text-base)' }}>{task.title}</strong>
+                </div>
+                <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 4 }}>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>完成: {task.finishedItems}/{task.totalItems}</span>
+                  <StatusBadge status={task.status} />
+                </div>
+                <ProgressBar value={task.finishedItems} total={task.totalItems} />
+                <Button aria-label="领取题目" loading={loading} onClick={() => void claim(task.id)} theme="solid" style={{ marginTop: 'var(--space-md)' }}>
+                  领取新题目
+                </Button>
+              </div>
+            ))}
+            {tasks.length === 0 ? (
+              <EmptyState title="暂无可领取任务" body="当前没有可领取的题目,稍后刷新任务广场。" variant="queue" />
+            ) : null}
+          </div>
+          {mySubmissions.some((submission) => submission.status === 'revising') ? (
+            <div style={revisionListStyle}>
+              <h3 style={revisionHeadingStyle}>待修改</h3>
+              {mySubmissions.filter((submission) => submission.status === 'revising').map((submission) => (
+                <button
+                  key={submission.id}
+                  aria-label={`修改 Submission #${submission.id}`}
+                  onClick={() => void openSubmission(submission)}
+                  style={revisionButtonStyle}
+                >
+                  <strong>Submission #{submission.id}</strong>
+                  <span>Task #{submission.taskId} · Item #{submission.itemId}</span>
+                  <StatusBadge status={submission.status} />
+                </button>
+              ))}
             </div>
-          ))}
-          {tasks.length === 0 ? <p style={mutedStyle}>暂无可领取任务</p> : null}
+          ) : null}
         </section>
 
-        <main style={{ display: 'grid', gap: 'var(--space-lg)' }}>
+        <main style={{ display: 'grid', gap: 'var(--space-lg)', alignContent: 'start' }}>
           {bundle?.item ? (
-            <section style={panelStyle}>
+            <section style={{ ...panelStyle, minHeight: 600 }}>
               <div style={formHeaderStyle}>
-                <h2 style={headingStyle}>{schema.ok ? schema.schema.title : '标注表单'}</h2>
-                <span style={mutedStyle}>提交状态: {bundle.submission?.status || '未提交'}</span>
+                <div>
+                  <h2 style={{ ...headingStyle, fontSize: 'var(--text-h1)' }}>{schema.ok ? schema.schema.title : '标注表单'}</h2>
+                  <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-xs)' }}>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>任务 ID: {bundle.task.id}</span>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>题目 ID: {bundle.item.id}</span>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <StatusBadge status={bundle.submission?.status || 'draft'} label={bundle.submission ? undefined : '新题'} />
+                </div>
               </div>
 
-              {schema.ok ? (
-                <SchemaRenderer
-                  schema={schema.schema}
-                  payload={payload}
-                  value={answer}
-                  errors={errors}
-                  runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
-                  onChange={(next) => {
-                    setAnswer(next)
-                    if (errors.length > 0) {
-                      setErrors(validateAnswer(schema.schema, next))
-                    }
-                  }}
-                />
-              ) : (
-                <div role="alert" style={errorBannerStyle}>{schema.message}</div>
-              )}
+              <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-xl)', marginTop: 'var(--space-md)' }}>
+                {bundle.latestHumanReview?.reason ? (
+                  <div style={revisionReasonStyle}>
+                    <strong>上一轮打回意见</strong>
+                    <div>{bundle.latestHumanReview.reason}</div>
+                  </div>
+                ) : null}
+                {schema.ok ? (
+                  <SchemaRenderer
+                    schema={schema.schema}
+                    payload={payload}
+                    value={answer}
+                    errors={errors}
+                    runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
+                    onChange={(next) => {
+                      autoSaveSeq.current += 1
+                      setAnswer(next)
+                      if (answerDraftKey(next) !== lastSavedDraftKey.current) {
+                        setAutoSaveState('idle')
+                      }
+                      if (errors.length > 0) {
+                        setErrors(validateAnswer(schema.schema, next))
+                      }
+                    }}
+                  />
+                ) : (
+                  <div role="alert" style={errorBannerStyle}>{schema.message}</div>
+                )}
+              </div>
 
-              <div style={actionRowStyle}>
-                <Button disabled={!schema.ok} onClick={() => void saveDraft()}>保存草稿</Button>
-                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()}>提交审核</Button>
+              <div style={{ ...actionRowStyle, borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)', marginTop: 'var(--space-2xl)' }}>
+                <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light" style={{ width: 120 }}>保存草稿</Button>
+                <span style={autoSaveTextStyle}>{autoSaveText(autoSaveState)}</span>
+                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} style={{ width: 120 }} title="提交审核 (Ctrl/Cmd + Enter)">提交审核</Button>
               </div>
             </section>
           ) : (
-            <section style={panelStyle}>
-              <h2 style={headingStyle}>当前题目</h2>
-              <p style={mutedStyle}>从左侧领取一条任务数据后开始标注。</p>
+            <section style={{ ...panelStyle, border: '1px dashed var(--color-border-light)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+              <EmptyState title="准备开始标注" body="请在左侧任务广场选择并领取一个任务开始工作。" variant="empty" />
             </section>
           )}
         </main>
       </div>
+    </div>
+  )
+}
+
+function ProgressBar({ value, total }: { value: number, total: number }) {
+  const width = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
+  return (
+    <div style={progressTrackStyle} aria-hidden="true">
+      <div style={{ ...progressFillStyle, width: `${width}%` }} />
     </div>
   )
 }
@@ -161,55 +315,131 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
   return { ok: true, schema: result.value }
 }
 
+function answerDraftKey(answer: AnswerValue) {
+  return JSON.stringify(answer)
+}
+
+function autoSaveText(state: 'idle' | 'saving' | 'saved' | 'failed') {
+  switch (state) {
+    case 'saving':
+      return '自动保存中...'
+    case 'saved':
+      return '已自动保存'
+    case 'failed':
+      return '自动保存失败'
+    default:
+      return '3s 自动保存'
+  }
+}
+
 const layoutStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '280px minmax(0, 1fr)',
-  gap: 'var(--space-lg)',
-  marginTop: 'var(--space-lg)',
+  gridTemplateColumns: '320px minmax(0, 1fr)',
+  gap: 'var(--space-xl)',
+  alignItems: 'start',
 }
 
 const panelStyle: CSSProperties = {
   background: 'var(--color-surface)',
-  border: '1px solid var(--color-border)',
-  padding: 'var(--space-lg)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-lg)',
+  padding: 'var(--space-xl)',
+  boxShadow: 'var(--shadow-md)',
 }
 
 const headingStyle: CSSProperties = {
   fontFamily: 'var(--font-heading)',
   fontSize: 'var(--text-h2)',
   margin: 0,
-}
-
-const mutedStyle: CSSProperties = {
-  color: 'var(--color-text-secondary)',
+  fontWeight: 600,
+  color: 'var(--color-text)',
 }
 
 const taskCardStyle: CSSProperties = {
   display: 'grid',
-  gap: 4,
-  marginTop: 'var(--space-md)',
-  padding: 'var(--space-md)',
+  gap: 'var(--space-xs)',
+  padding: 'var(--space-lg)',
+  background: 'var(--color-bg)',
   border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  transition: 'transform var(--duration-fast)',
+  borderLeft: '3px solid var(--color-rail)',
+}
+
+const revisionListStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  marginTop: 'var(--space-xl)',
+  paddingTop: 'var(--space-lg)',
+  borderTop: '1px solid var(--color-border-light)',
+}
+
+const revisionHeadingStyle: CSSProperties = {
+  ...headingStyle,
+  fontSize: 'var(--text-base)',
+}
+
+const revisionButtonStyle: CSSProperties = {
+  display: 'grid',
+  gap: 4,
+  width: '100%',
+  padding: 'var(--space-md)',
+  textAlign: 'left',
+  border: '1px solid var(--color-warning-soft)',
+  borderRadius: 'var(--radius-md)',
+  background: '#fff8e1',
+  color: 'var(--color-text)',
+  cursor: 'pointer',
+}
+
+const revisionReasonStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-xs)',
+  marginBottom: 'var(--space-lg)',
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-warning-soft)',
+  borderRadius: 'var(--radius-md)',
+  background: '#fff8e1',
+  color: 'var(--color-text)',
+}
+
+const progressTrackStyle: CSSProperties = {
+  height: 4,
+  marginTop: 'var(--space-xs)',
+  background: 'var(--color-border-light)',
+  borderRadius: 99,
+  overflow: 'hidden',
+}
+
+const progressFillStyle: CSSProperties = {
+  height: '100%',
+  background: 'var(--color-accent)',
 }
 
 const formHeaderStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   gap: 'var(--space-md)',
-  alignItems: 'center',
-  marginBottom: 'var(--space-lg)',
+  alignItems: 'flex-start',
 }
 
 const errorBannerStyle: CSSProperties = {
-  padding: 'var(--space-md)',
-  border: '1px solid var(--color-danger, #b42318)',
-  color: 'var(--color-danger, #b42318)',
-  background: 'var(--color-bg)',
+  padding: 'var(--space-lg)',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-danger)',
+  color: 'var(--color-danger)',
+  background: '#fff1f0',
 }
 
 const actionRowStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-lg)',
+  gap: 'var(--space-md)',
+}
+
+const autoSaveTextStyle: CSSProperties = {
+  alignSelf: 'center',
+  marginRight: 'auto',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
 }

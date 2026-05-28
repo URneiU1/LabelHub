@@ -35,4 +35,36 @@ describe('validateAnswer', () => {
       issue_tags: ['无明显问题'],
     })).toEqual([])
   })
+
+  it('checks nested fields, regex, and requiredWhen conditions', () => {
+    const advancedSchema: TemplateSchema = {
+      title: 'advanced',
+      layout: 'single_page',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] },
+        {
+          name: 'detail_group',
+          widget: 'Group',
+          label: '详情',
+          fields: [
+            {
+              name: 'reject_reason',
+              widget: 'Input',
+              label: '打回原因',
+              regex: '^.{4,}$',
+              requiredWhen: { field: 'decision', equals: 'reject' },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(validateAnswer(advancedSchema, { decision: 'reject', reject_reason: '' })).toEqual([
+      { field: 'reject_reason', message: '打回原因 is required' },
+    ])
+    expect(validateAnswer(advancedSchema, { decision: 'reject', reject_reason: '短' })).toEqual([
+      { field: 'reject_reason', message: '打回原因 format is invalid' },
+    ])
+    expect(validateAnswer(advancedSchema, { decision: 'pass', reject_reason: '' })).toEqual([])
+  })
 })

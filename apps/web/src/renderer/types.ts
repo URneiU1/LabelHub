@@ -1,5 +1,7 @@
 export const widgetTypes = [
   'ShowItem',
+  'Group',
+  'Tabs',
   'Input',
   'TextArea',
   'Radio',
@@ -18,11 +20,26 @@ export type ShowItemMode = typeof showItemModes[number]
 
 export type FieldOption = string | number
 
+export type TabSchema = {
+  label: string
+  fields: FieldSchema[]
+}
+
+export type RequiredWhen = {
+  field: string
+  equals?: unknown
+  notEmpty?: boolean
+}
+
 export type FieldSchema = {
   name: string
   widget: WidgetType
   label: string
   required?: boolean
+  requiredWhen?: RequiredWhen
+  regex?: string
+  fields?: FieldSchema[]
+  tabs?: TabSchema[]
   options?: FieldOption[]
   minLength?: number
   maxLength?: number

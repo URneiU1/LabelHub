@@ -3,12 +3,13 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-// allowedWidgets: S2 v1 锁定的 9 个核心物料,与 spec §3.5 widgetPrefixMap 严格一致。
+// allowedWidgets: S2 v1 锁定的核心物料,与前端 renderer/types.ts 保持一致。
 var allowedWidgets = map[string]struct{}{
-	"ShowItem": {}, "Input": {}, "TextArea": {}, "Radio": {}, "Tags": {},
+	"ShowItem": {}, "Group": {}, "Tabs": {}, "Input": {}, "TextArea": {}, "Radio": {}, "Tags": {},
 	"RichText": {}, "JSONEditor": {}, "FileUpload": {}, "LLMTrigger": {},
 }
 
@@ -25,11 +26,9 @@ type ValidationError struct {
 //   - widget ∈ allowedWidgets
 //   - required 必须是 bool(或缺省)
 //   - 同字段 minLength 和 maxLength 都必须是非负整数 且 min <= max(若两者都给)
-//
-// requiredWhen / regex 等高级校验推到 S3(spec §12)。
 func validateTemplateSchema(raw string) []ValidationError {
 	var parsed struct {
-		Fields []map[string]any `json:"fields"`
+		Fields []any `json:"fields"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return []ValidationError{{Field: "$", Message: "invalid JSON: " + err.Error()}}
@@ -43,77 +42,211 @@ func validateTemplateSchema(raw string) []ValidationError {
 		errs = append(errs, ValidationError{Field: "fields", Message: fmt.Sprintf("fields must be <= %d", maxTemplateFields)})
 		return errs
 	}
-	seenNames := make(map[string]int, len(parsed.Fields))
-	fieldNames := make(map[string]struct{}, len(parsed.Fields))
-	type llmTarget struct {
-		path          string
-		target        string
-		allowExternal bool
-	}
-	var llmTargets []llmTarget
-	for i, f := range parsed.Fields {
-		path := fmt.Sprintf("fields[%d]", i)
-		nameRaw, _ := f["name"].(string)
-		name := strings.TrimSpace(nameRaw)
-		if name == "" {
-			errs = append(errs, ValidationError{Field: path + ".name", Message: "name is required"})
-		} else if _, dup := seenNames[name]; dup {
-			errs = append(errs, ValidationError{Field: path + ".name", Message: "duplicate name " + name})
-		} else {
-			seenNames[name] = i
-			fieldNames[name] = struct{}{}
-		}
-		widgetRaw, _ := f["widget"].(string)
-		widget := strings.TrimSpace(widgetRaw)
-		if _, ok := allowedWidgets[widget]; !ok {
-			errs = append(errs, ValidationError{Field: path + ".widget", Message: "widget not in enum: " + widget})
-		}
-		errs = append(errs, validateTemplateFieldLimits(path, f, widget)...)
-		if reqRaw, has := f["required"]; has {
-			if _, ok := reqRaw.(bool); !ok {
-				errs = append(errs, ValidationError{Field: path + ".required", Message: "required must be bool"})
-			}
-		}
-		minLen, hasMin, minOK := numericField(f, "minLength")
-		maxLen, hasMax, maxOK := numericField(f, "maxLength")
-		if hasMin && !minOK {
-			errs = append(errs, ValidationError{Field: path + ".minLength", Message: "minLength must be number"})
-		}
-		if hasMax && !maxOK {
-			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "maxLength must be number"})
-		}
-		if hasMin && minOK && minLen < 0 {
-			errs = append(errs, ValidationError{Field: path + ".minLength", Message: "minLength must be >= 0"})
-		}
-		if hasMax && maxOK && maxLen < 0 {
-			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "maxLength must be >= 0"})
-		}
-		if hasMin && hasMax && minOK && maxOK && minLen > maxLen {
-			errs = append(errs, ValidationError{Field: path + ".maxLength", Message: "min > max"})
-		}
-		if widget == "LLMTrigger" {
-			targetRaw, hasTarget := f["target_field"]
-			allowExternal, _ := f["x-allow-external-target"].(bool)
-			target, targetOK := targetRaw.(string)
-			target = strings.TrimSpace(target)
-			if !hasTarget || !targetOK || target == "" {
-				if !allowExternal {
-					errs = append(errs, ValidationError{Field: path + ".target_field", Message: "target_field is required"})
-				}
-			} else {
-				llmTargets = append(llmTargets, llmTarget{path: path, target: target, allowExternal: allowExternal})
-			}
-		}
-	}
-	for _, target := range llmTargets {
+
+	state := newTemplateValidationState()
+	state.validateFields("fields", parsed.Fields)
+	for _, target := range state.llmTargets {
 		if target.allowExternal {
 			continue
 		}
-		if _, ok := fieldNames[target.target]; !ok {
-			errs = append(errs, ValidationError{Field: target.path + ".target_field", Message: "target_field must reference an existing field"})
+		if _, ok := state.fieldNames[target.target]; !ok {
+			state.errs = append(state.errs, ValidationError{Field: target.path + ".target_field", Message: "target_field must reference an existing field"})
 		}
 	}
-	return errs
+	for _, condition := range state.requiredWhenRefs {
+		if _, ok := state.fieldNames[condition.field]; !ok {
+			state.errs = append(state.errs, ValidationError{Field: condition.path + ".requiredWhen.field", Message: "requiredWhen.field must reference an existing field"})
+		}
+	}
+	return state.errs
+}
+
+type templateValidationState struct {
+	errs             []ValidationError
+	seenNames        map[string]int
+	fieldNames       map[string]struct{}
+	fieldCount       int
+	llmTargets       []templateLLMTarget
+	requiredWhenRefs []templateRequiredWhenRef
+}
+
+type templateLLMTarget struct {
+	path          string
+	target        string
+	allowExternal bool
+}
+
+type templateRequiredWhenRef struct {
+	path  string
+	field string
+}
+
+func newTemplateValidationState() *templateValidationState {
+	return &templateValidationState{
+		seenNames:  make(map[string]int),
+		fieldNames: make(map[string]struct{}),
+	}
+}
+
+func (state *templateValidationState) validateFields(path string, rawFields []any) {
+	if len(rawFields) == 0 {
+		state.errs = append(state.errs, ValidationError{Field: path, Message: "fields must be non-empty"})
+		return
+	}
+	for i, raw := range rawFields {
+		fieldPath := fmt.Sprintf("%s[%d]", path, i)
+		field, ok := raw.(map[string]any)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: fieldPath, Message: "field must be an object"})
+			continue
+		}
+		state.validateField(fieldPath, field)
+	}
+}
+
+func (state *templateValidationState) validateField(path string, f map[string]any) {
+	state.fieldCount++
+	if state.fieldCount > maxTemplateFields {
+		state.errs = append(state.errs, ValidationError{Field: "fields", Message: fmt.Sprintf("fields must be <= %d", maxTemplateFields)})
+		return
+	}
+	nameRaw, _ := f["name"].(string)
+	name := strings.TrimSpace(nameRaw)
+	if name == "" {
+		state.errs = append(state.errs, ValidationError{Field: path + ".name", Message: "name is required"})
+	} else if _, dup := state.seenNames[name]; dup {
+		state.errs = append(state.errs, ValidationError{Field: path + ".name", Message: "duplicate name " + name})
+	} else {
+		state.seenNames[name] = state.fieldCount
+		state.fieldNames[name] = struct{}{}
+	}
+	widgetRaw, _ := f["widget"].(string)
+	widget := strings.TrimSpace(widgetRaw)
+	if _, ok := allowedWidgets[widget]; !ok {
+		state.errs = append(state.errs, ValidationError{Field: path + ".widget", Message: "widget not in enum: " + widget})
+	}
+	state.errs = append(state.errs, validateTemplateFieldLimits(path, f, widget)...)
+	if reqRaw, has := f["required"]; has {
+		if _, ok := reqRaw.(bool); !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".required", Message: "required must be bool"})
+		}
+	}
+	if regexRaw, has := f["regex"]; has {
+		regex, ok := regexRaw.(string)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".regex", Message: "regex must be string"})
+		} else if _, err := regexp.Compile(regex); err != nil {
+			state.errs = append(state.errs, ValidationError{Field: path + ".regex", Message: "regex must be valid"})
+		}
+	}
+	if requiredWhenRaw, has := f["requiredWhen"]; has {
+		condition, ok := requiredWhenRaw.(map[string]any)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen", Message: "requiredWhen must be an object"})
+		} else {
+			state.validateRequiredWhen(path, condition)
+		}
+	}
+	minLen, hasMin, minOK := numericField(f, "minLength")
+	maxLen, hasMax, maxOK := numericField(f, "maxLength")
+	if hasMin && !minOK {
+		state.errs = append(state.errs, ValidationError{Field: path + ".minLength", Message: "minLength must be number"})
+	}
+	if hasMax && !maxOK {
+		state.errs = append(state.errs, ValidationError{Field: path + ".maxLength", Message: "maxLength must be number"})
+	}
+	if hasMin && minOK && minLen < 0 {
+		state.errs = append(state.errs, ValidationError{Field: path + ".minLength", Message: "minLength must be >= 0"})
+	}
+	if hasMax && maxOK && maxLen < 0 {
+		state.errs = append(state.errs, ValidationError{Field: path + ".maxLength", Message: "maxLength must be >= 0"})
+	}
+	if hasMin && hasMax && minOK && maxOK && minLen > maxLen {
+		state.errs = append(state.errs, ValidationError{Field: path + ".maxLength", Message: "min > max"})
+	}
+	if widget == "LLMTrigger" {
+		targetRaw, hasTarget := f["target_field"]
+		allowExternal, _ := f["x-allow-external-target"].(bool)
+		target, targetOK := targetRaw.(string)
+		target = strings.TrimSpace(target)
+		if !hasTarget || !targetOK || target == "" {
+			if !allowExternal {
+				state.errs = append(state.errs, ValidationError{Field: path + ".target_field", Message: "target_field is required"})
+			}
+		} else {
+			state.llmTargets = append(state.llmTargets, templateLLMTarget{path: path, target: target, allowExternal: allowExternal})
+		}
+	}
+	if widget == "Group" {
+		children, ok := fieldArrayProp(f, "fields")
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".fields", Message: "fields must be an array"})
+		} else {
+			state.validateFields(path+".fields", children)
+		}
+	}
+	if widget == "Tabs" {
+		tabs, ok := fieldArrayProp(f, "tabs")
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".tabs", Message: "tabs must be an array"})
+		} else {
+			state.validateTabs(path+".tabs", tabs)
+		}
+	}
+}
+
+func (state *templateValidationState) validateRequiredWhen(path string, condition map[string]any) {
+	fieldRaw, hasField := condition["field"]
+	field, fieldOK := fieldRaw.(string)
+	field = strings.TrimSpace(field)
+	if !hasField || !fieldOK || field == "" {
+		state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen.field", Message: "field is required"})
+	} else {
+		state.requiredWhenRefs = append(state.requiredWhenRefs, templateRequiredWhenRef{path: path, field: field})
+	}
+	if notEmptyRaw, hasNotEmpty := condition["notEmpty"]; hasNotEmpty {
+		if _, ok := notEmptyRaw.(bool); !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen.notEmpty", Message: "notEmpty must be bool"})
+		}
+	}
+	if _, hasEquals := condition["equals"]; !hasEquals {
+		notEmpty, _ := condition["notEmpty"].(bool)
+		if !notEmpty {
+			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen", Message: "requiredWhen must set equals or notEmpty=true"})
+		}
+	}
+}
+
+func (state *templateValidationState) validateTabs(path string, rawTabs []any) {
+	if len(rawTabs) == 0 {
+		state.errs = append(state.errs, ValidationError{Field: path, Message: "tabs must be non-empty"})
+		return
+	}
+	for i, raw := range rawTabs {
+		tabPath := fmt.Sprintf("%s[%d]", path, i)
+		tab, ok := raw.(map[string]any)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: tabPath, Message: "tab must be an object"})
+			continue
+		}
+		label, _ := tab["label"].(string)
+		if strings.TrimSpace(label) == "" {
+			state.errs = append(state.errs, ValidationError{Field: tabPath + ".label", Message: "label is required"})
+		} else if len(label) > maxTemplateStringBytes {
+			state.errs = append(state.errs, ValidationError{Field: tabPath + ".label", Message: fmt.Sprintf("label must be <= %d bytes", maxTemplateStringBytes)})
+		}
+		fields, ok := fieldArrayProp(tab, "fields")
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: tabPath + ".fields", Message: "fields must be an array"})
+		} else {
+			state.validateFields(tabPath+".fields", fields)
+		}
+	}
+}
+
+func fieldArrayProp(raw map[string]any, key string) ([]any, bool) {
+	values, ok := raw[key].([]any)
+	return values, ok
 }
 
 func validateTemplateFieldLimits(path string, f map[string]any, widget string) []ValidationError {

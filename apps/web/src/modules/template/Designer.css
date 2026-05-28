@@ -1,0 +1,33 @@
+/* Template Designer responsive shell.
+   1920: full three columns (palette | canvas | property).
+   1280: palette + canvas, property panel wraps full-width below the canvas.
+   narrow: single column stack. */
+
+.template-designer-grid {
+  display: grid;
+  grid-template-columns: 200px minmax(420px, 1fr) 320px;
+  gap: var(--space-md);
+  align-items: start;
+}
+
+@media (max-width: 1599px) {
+  .template-designer-grid {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+
+  .template-designer-property {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 768px) {
+  .template-designer-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .template-designer-palette,
+  .template-designer-canvas,
+  .template-designer-property {
+    grid-column: auto;
+  }
+}
