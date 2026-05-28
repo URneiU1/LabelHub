@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OwnerDashboard from './Dashboard'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON } from '../../shared/api/client'
 
+const mockModalConfirm = vi.hoisted(() => vi.fn())
+
 vi.mock('../../shared/api/client', () => ({
   apiDelete: vi.fn(),
   apiGet: vi.fn(),
@@ -17,6 +19,9 @@ vi.mock('@douyinfe/semi-ui', () => ({
     void loading
     void theme
     return <button type="button" {...props}>{children}</button>
+  },
+  Modal: {
+    confirm: mockModalConfirm,
   },
   Toast: {
     error: vi.fn(),
@@ -48,6 +53,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     mockApiPost.mockReset()
     mockApiPostRawJSON.mockReset()
     mockApiDelete.mockReset()
+    mockModalConfirm.mockReset()
     window.history.pushState({}, '', '/')
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
@@ -1111,7 +1117,6 @@ describe('OwnerDashboard AI prompt flow', () => {
 
   it('deletes a golden sample from the current task list', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]
@@ -1143,12 +1148,19 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByText('delete me')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '删除 golden sample 11' }))
+    expect(mockModalConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      title: '删除 golden sample',
+      content: '确认删除 golden sample #11?',
+    }))
+    const confirmConfig = mockModalConfirm.mock.calls[0][0]
+    await act(async () => {
+      await confirmConfig.onOk()
+    })
 
     await waitFor(() => {
       expect(mockApiDelete).toHaveBeenCalledWith('/tasks/1/golden-samples/11')
     })
     expect(screen.queryByText('delete me')).not.toBeInTheDocument()
-    confirmSpy.mockRestore()
   })
 
   it('runs a golden sample and displays the result row', async () => {

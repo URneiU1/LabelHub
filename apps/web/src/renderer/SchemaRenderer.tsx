@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import type { AnswerValue, FieldSchema, RenderPayload, RenderRuntime, TemplateSchema, ValidationError } from './types'
 import { widgetRegistry } from './widgets'
 import FieldFrame from './widgets/FieldFrame'
@@ -109,6 +109,17 @@ function TabsField({
   const [activeIndex, setActiveIndex] = useState(0)
   const safeIndex = tabs.length === 0 ? 0 : Math.min(activeIndex, tabs.length - 1)
   const activeTab = tabs[safeIndex]
+  const tabErrorCounts = tabs.map((tab) => countFieldErrors(tab.fields, errors))
+  const firstErrorTabIndex = tabErrorCounts.findIndex((count) => count > 0)
+
+  useEffect(() => {
+    // Validation errors are passed in from the parent submit flow; jump to the first errored tab
+    // so the inline message is visible instead of leaving it hidden on an inactive tab.
+    if (firstErrorTabIndex >= 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveIndex(firstErrorTabIndex)
+    }
+  }, [firstErrorTabIndex])
 
   return (
     <div style={fieldBlockStyle} data-widget={field.widget}>
@@ -132,6 +143,9 @@ function TabsField({
                     style={selected ? tabButtonActiveStyle : tabButtonStyle}
                   >
                     {tab.label}
+                    {tabErrorCounts[index] > 0 ? (
+                      <span aria-hidden="true" style={tabErrorBadgeStyle}>{tabErrorCounts[index]}</span>
+                    ) : null}
                   </button>
                 )
               })}
@@ -191,6 +205,9 @@ const tabListStyle: CSSProperties = {
 }
 
 const tabButtonStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 'var(--space-xs)',
   minHeight: 32,
   padding: '0 var(--space-md)',
   border: '1px solid var(--color-border-light)',
@@ -221,4 +238,38 @@ const errorStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 4,
+}
+
+const tabErrorBadgeStyle: CSSProperties = {
+  minWidth: 18,
+  height: 18,
+  padding: '0 6px',
+  borderRadius: 999,
+  background: 'var(--color-danger-soft)',
+  color: 'var(--color-danger)',
+  fontSize: 'var(--text-sm)',
+  lineHeight: '18px',
+  textAlign: 'center',
+}
+
+function countFieldErrors(fields: FieldSchema[], errors: ValidationError[]) {
+  const fieldNames = collectLeafFieldNames(fields)
+  return errors.reduce((count, error) => count + (fieldNames.has(error.field) ? 1 : 0), 0)
+}
+
+function collectLeafFieldNames(fields: FieldSchema[], names = new Set<string>()) {
+  for (const field of fields) {
+    if (field.widget === 'Group' && field.fields) {
+      collectLeafFieldNames(field.fields, names)
+      continue
+    }
+    if (field.widget === 'Tabs' && field.tabs) {
+      for (const tab of field.tabs) {
+        collectLeafFieldNames(tab.fields, names)
+      }
+      continue
+    }
+    names.add(field.name)
+  }
+  return names
 }

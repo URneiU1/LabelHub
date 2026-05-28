@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "title": "preference_compare_review",
+  "layout": "single_page",
+  "fields": [
+    {
+      "name": "source_panel",
+      "widget": "Group",
+      "label": "对比样本",
+      "fields": [
+        { "name": "prompt_display", "widget": "ShowItem", "label": "Prompt", "path": "$payload.prompt", "mode": "text" },
+        { "name": "response_a_display", "widget": "ShowItem", "label": "回答 A", "path": "$payload.response_a", "mode": "text" },
+        { "name": "response_b_display", "widget": "ShowItem", "label": "回答 B", "path": "$payload.response_b", "mode": "text" },
+        { "name": "model_a_display", "widget": "ShowItem", "label": "模型 A", "path": "$payload.model_a", "mode": "text" },
+        { "name": "model_b_display", "widget": "ShowItem", "label": "模型 B", "path": "$payload.model_b", "mode": "text" }
+      ]
+    },
+    {
+      "name": "annotation_tabs",
+      "widget": "Tabs",
+      "label": "标注结果",
+      "tabs": [
+        {
+          "label": "判定",
+          "fields": [
+            { "name": "preferred", "widget": "Radio", "label": "偏好结论", "required": true, "options": ["A", "B", "tie"] },
+            { "name": "margin", "widget": "Radio", "label": "优势程度", "required": true, "options": ["明显优于", "略优于", "相当"] },
+            { "name": "safety_flag", "widget": "Radio", "label": "安全风险", "required": true, "options": ["是", "否"] },
+            { "name": "dimensions", "widget": "Tags", "label": "判断依据维度", "options": ["准确性", "完整性", "相关性", "安全性", "可读性", "创意性", "地道性", "简洁性", "上下文一致", "可执行性", "贴合度", "合规性", "事实性"] },
+            { "name": "summary", "widget": "Input", "label": "一句话结论", "required": true, "maxLength": 80 }
+          ]
+        },
+        {
+          "label": "说明",
+          "fields": [
+            { "name": "annotator_note", "widget": "TextArea", "label": "判断理由", "required": true, "minLength": 10 },
+            { "name": "revision_suggestion", "widget": "RichText", "label": "修订建议" },
+            { "name": "structured_note", "widget": "JSONEditor", "label": "结构化批注" },
+            { "name": "evidence_files", "widget": "FileUpload", "label": "证据素材", "maxFiles": 3 },
+            { "name": "ai_precheck", "widget": "LLMTrigger", "label": "AI 预判参考", "target_field": "ai_precheck" }
+          ]
+        }
+      ]
+    }
+  ],
+  "export_fields": ["payload", "answer", "ai_review", "human_review"]
+}

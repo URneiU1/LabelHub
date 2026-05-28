@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
-import { Button, Toast } from '@douyinfe/semi-ui'
+import { Button, Modal, Toast } from '@douyinfe/semi-ui'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import LoadingBlock from '../../shared/components/LoadingBlock'
@@ -167,6 +167,7 @@ export default function OwnerDashboard() {
   const [savingPrompt, setSavingPrompt] = useState(false)
   const [runningDryRun, setRunningDryRun] = useState(false)
   const [savingAIReviewSettings, setSavingAIReviewSettings] = useState(false)
+  const goldenSamplePollTimers = useRef<Set<number>>(new Set())
   const promptLoadSeq = useRef(0)
   const goldenSampleLoadSeq = useRef(0)
   const selectedTaskIdRef = useRef<number | null>(null)
@@ -315,6 +316,13 @@ export default function OwnerDashboard() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
   }, [loadTasks])
+
+  useEffect(() => () => {
+    for (const timer of goldenSamplePollTimers.current) {
+      window.clearTimeout(timer)
+    }
+    goldenSamplePollTimers.current.clear()
+  }, [selected?.id])
 
   useEffect(() => {
     if (selected) {
@@ -515,7 +523,16 @@ export default function OwnerDashboard() {
 
   async function deleteGoldenSample(sample: GoldenSample) {
     if (!selected || goldenSampleLoading || goldenSampleLoadFailed) return
-    if (!window.confirm(`删除 golden sample #${sample.id}?`)) return
+    Modal.confirm({
+      title: '删除 golden sample',
+      content: `确认删除 golden sample #${sample.id}?`,
+      okText: '删除',
+      cancelText: '取消',
+      onOk: () => confirmDeleteGoldenSample(sample),
+    })
+  }
+
+  async function confirmDeleteGoldenSample(sample: GoldenSample) {
     const guard = beginTaskAction(selected.id, deleteGoldenSampleSeq)
     setDeletingGoldenSampleId(sample.id)
     setGoldenSampleError('')
@@ -729,7 +746,11 @@ export default function OwnerDashboard() {
     } catch {
       // 下一轮继续轮询,最终由 history 刷新兜底。
     }
-    window.setTimeout(() => void pollGoldenSampleRun(taskId, sample, dryRunId, guard, attempt + 1), 1000)
+    const timer = window.setTimeout(() => {
+      goldenSamplePollTimers.current.delete(timer)
+      void pollGoldenSampleRun(taskId, sample, dryRunId, guard, attempt + 1)
+    }, 1000)
+    goldenSamplePollTimers.current.add(timer)
   }
 
   function resolveGoldenPromptId() {

@@ -229,7 +229,7 @@ export type AuditLog = {
   id: number
   entityType: string
   entityId: number
-  fromState?: { String?: string, Valid?: boolean } | null
+  fromState?: string | null
   toState: string
   actorType: string
   actorId?: number | null

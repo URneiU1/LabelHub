@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SchemaRenderer from './SchemaRenderer'
 import { parseTemplateSchema } from './parser'
-import type { AnswerValue, TemplateSchema } from './types'
+import type { AnswerValue, TemplateSchema, ValidationError } from './types'
 import { apiPost } from '../shared/api/client'
 
 vi.mock('../shared/api/client', () => ({
@@ -21,6 +21,11 @@ const qaQualitySchema = JSON.parse(readFileSync(
   'utf8',
 )) as unknown
 
+const preferenceCompareSchema = JSON.parse(readFileSync(
+  resolve(cwd(), '../../tools/seed/templates/preference_compare_review.json'),
+  'utf8',
+)) as unknown
+
 const qaPayload = {
   id: 'Q0001',
   category: '知识问答',
@@ -31,8 +36,27 @@ const qaPayload = {
   expected_dimensions: ['相关性', '准确性'],
 }
 
+const preferencePayload = {
+  id: 'P0001',
+  task_type: '知识问答',
+  lang: 'zh',
+  prompt: '解释什么是过拟合，并给一个通俗例子。',
+  response_a: '过拟合指模型在训练集表现很好但泛化差。比如学生死记答案，考原题满分，换题就不会。',
+  model_a: 'doubao-pro',
+  response_b: '过拟合就是模型训练得太好了。',
+  model_b: 'baseline-7b',
+}
+
 function parsedSchema(): TemplateSchema {
   const result = parseTemplateSchema(qaQualitySchema)
+  if (!result.ok) {
+    throw new Error(result.error.message)
+  }
+  return result.value
+}
+
+function parsedPreferenceSchema(): TemplateSchema {
+  const result = parseTemplateSchema(preferenceCompareSchema)
   if (!result.ok) {
     throw new Error(result.error.message)
   }
@@ -62,6 +86,22 @@ describe('SchemaRenderer', () => {
     expect(screen.getByLabelText('详细评语')).toBeInTheDocument()
     expect(screen.getByText('修订建议')).toBeInTheDocument()
     expect(document.querySelectorAll('[data-widget]')).toHaveLength(12)
+  })
+
+  it('renders preference_compare fixture with grouped source data and tabbed annotation fields', async () => {
+    const user = userEvent.setup()
+    render(<SchemaRenderer schema={parsedPreferenceSchema()} payload={preferencePayload} />)
+
+    expect(screen.getByText('解释什么是过拟合，并给一个通俗例子。')).toBeInTheDocument()
+    expect(screen.getByText('过拟合指模型在训练集表现很好但泛化差。比如学生死记答案，考原题满分，换题就不会。')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '判定' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('radiogroup', { name: '偏好结论' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('判断理由')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: '说明' }))
+
+    expect(screen.getByLabelText('判断理由')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '运行 AI 预审' })).toBeInTheDocument()
   })
 
   it('updates radio, tags, input, and textarea values', async () => {
@@ -161,6 +201,49 @@ describe('SchemaRenderer', () => {
     })
     expect(document.querySelectorAll('[data-widget="Group"]')).toHaveLength(1)
     expect(document.querySelectorAll('[data-widget="Tabs"]')).toHaveLength(1)
+  })
+
+  it('switches to the first tab with validation errors', async () => {
+    const user = userEvent.setup()
+    const result = parseTemplateSchema({
+      title: 'structured',
+      fields: [
+        {
+          name: 'review_tabs',
+          widget: 'Tabs',
+          label: '分步审核',
+          tabs: [
+            { label: '基础', fields: [{ name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] }] },
+            { label: '备注', fields: [{ name: 'comment', widget: 'TextArea', label: '备注', required: true }] },
+          ],
+        },
+      ],
+    })
+    if (!result.ok) {
+      throw new Error(result.error.message)
+    }
+
+    function StructuredRenderer() {
+      const [answer, setAnswer] = useState<AnswerValue>({ decision: 'pass' })
+      const [errors, setErrors] = useState<ValidationError[]>([])
+      return (
+        <>
+          <button type="button" onClick={() => setErrors([{ field: 'comment', message: '备注 is required' }])}>
+            inject errors
+          </button>
+          <SchemaRenderer schema={result.value} value={answer} errors={errors} onChange={setAnswer} />
+        </>
+      )
+    }
+
+    render(<StructuredRenderer />)
+
+    await user.click(screen.getByRole('button', { name: 'inject errors' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '备注' })).toHaveAttribute('aria-selected', 'true')
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('备注 is required')
   })
 
   it('renders ShowItem media modes from path', () => {

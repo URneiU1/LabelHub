@@ -74,7 +74,7 @@ func (h AIDryRunHandler) List(c *gin.Context) {
 	}
 	guard, err := dryRunGuardStatusForTask(h.db, task.ID)
 	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
 		return
 	}
 	httpx.OK(c, gin.H{"dryRuns": responses, "guard": guard})

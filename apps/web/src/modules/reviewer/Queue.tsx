@@ -333,9 +333,9 @@ export default function ReviewerQueue() {
       <div style={layoutStyle}>
         <aside style={leftPanelStyle}>
           <div style={tabRowStyle}>
-            <button style={activeTabStyle}>AI 已建议通过 <strong>128</strong></button>
-            <button style={tabStyle}>AI 已建议打回 <strong>47</strong></button>
-            <button style={tabStyle}>转人工 <strong>9</strong></button>
+            <div style={activeTabStyle}>AI 已建议通过 <strong>128</strong></div>
+            <div style={tabStyle}>AI 已建议打回 <strong>47</strong></div>
+            <div style={tabStyle}>转人工 <strong>9</strong></div>
           </div>
           <div style={bulkBarStyle}>
             <input
@@ -388,15 +388,15 @@ export default function ReviewerQueue() {
           )}
 
           <div style={decisionGridStyle}>
-            <button style={rejectDecisionStyle} onClick={() => void review('revise')} disabled={!showingDemo && !schema.ok}>
+            <button style={rejectDecisionStyle} onClick={() => void review('revise')} disabled={loading || (!showingDemo && !schema.ok)}>
               <strong>↩ 打回</strong>
               <span>返回标注员修改 · 第 3 轮</span>
             </button>
-            <button style={fixDecisionStyle} onClick={() => void review('reject')} disabled={!showingDemo && !schema.ok}>
+            <button style={fixDecisionStyle} onClick={() => void review('reject')} disabled={loading || (!showingDemo && !schema.ok)}>
               <strong>✎ 拒绝</strong>
               <span>终止本条提交 · 记录拒绝原因</span>
             </button>
-            <button style={passDecisionStyle} onClick={() => void review('approve')} disabled={!showingDemo && !schema.ok}>
+            <button style={passDecisionStyle} onClick={() => void review('approve')} disabled={loading || (!showingDemo && !schema.ok)}>
               <strong>✓ 通过 · 入库</strong>
               <span>本条进入终审 / 可导出</span>
             </button>
@@ -404,9 +404,9 @@ export default function ReviewerQueue() {
 
           {selected ? (
             <div style={legacyActionRowStyle}>
-              <Button aria-label="打回修改" disabled={!schema.ok} loading={loading} onClick={() => void review('revise')} theme="light">打回修改</Button>
-              <Button aria-label="拒绝" disabled={!schema.ok} loading={loading} onClick={() => void review('reject')} theme="light" type="danger">拒绝</Button>
-              <Button aria-label="通过" disabled={!schema.ok} loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
+              <Button aria-label="打回修改" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('revise')} theme="light">打回修改</Button>
+              <Button aria-label="拒绝" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('reject')} theme="light" type="danger">拒绝</Button>
+              <Button aria-label="通过" disabled={loading || !schema.ok} loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
             </div>
           ) : null}
         </main>
@@ -996,7 +996,7 @@ function formatRuleDimensions(raw: unknown) {
 }
 
 function auditStateText(log: AuditLog) {
-  const fromState = log.fromState && 'Valid' in log.fromState && log.fromState.Valid ? log.fromState.String : ''
+  const fromState = log.fromState ?? ''
   return fromState ? `${fromState} → ${log.toState}` : log.toState
 }
 

@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	logger, err := zap.NewDevelopment()
+	logger, err := newLogger()
 	if err != nil {
 		panic(err)
 	}
@@ -53,6 +53,13 @@ func main() {
 	if err := srv.Run(mux); err != nil {
 		logger.Fatal("AI Worker stopped", zap.Error(err))
 	}
+}
+
+func newLogger() (*zap.Logger, error) {
+	if os.Getenv("GIN_MODE") == "debug" {
+		return zap.NewDevelopment()
+	}
+	return zap.NewProduction()
 }
 
 type workerHandlers struct {

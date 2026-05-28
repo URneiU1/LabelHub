@@ -391,7 +391,7 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 			return
 		}
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
 		return
 	}
 
@@ -456,7 +456,7 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 			return
 		}
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
 		return
 	}
 

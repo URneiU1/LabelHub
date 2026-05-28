@@ -2,6 +2,7 @@
 
 # 自动加载 .env(若存在);CI / prod 通过显式 env vars 注入
 ENV_LOAD := if [ -f .env ]; then set -a; . ./.env; set +a; fi
+EXPORT_DIR := $(CURDIR)/data/exports
 
 up:
 	docker compose -f deploy/docker-compose.yml up -d
@@ -25,14 +26,14 @@ dev: up install
 	@printf "  make web\n\n"
 
 api:
-	$(ENV_LOAD); cd apps/api && go run ./cmd/server
+	$(ENV_LOAD); export EXPORT_DIR="$(EXPORT_DIR)"; cd apps/api && go run ./cmd/server
 
 # 用包路径 ./cmd/worker:worker 包是多文件,go run cmd/worker/main.go 只编单文件会编译失败。
 worker:
-	$(ENV_LOAD); cd apps/ai-worker && go run ./cmd/worker
+	$(ENV_LOAD); export EXPORT_DIR="$(EXPORT_DIR)"; cd apps/ai-worker && go run ./cmd/worker
 
 web:
 	cd apps/web && pnpm dev
 
 seed:
-	$(ENV_LOAD); cd apps/api && go run ./cmd/seed
+	$(ENV_LOAD); export EXPORT_DIR="$(EXPORT_DIR)"; cd apps/api && go run ./cmd/seed

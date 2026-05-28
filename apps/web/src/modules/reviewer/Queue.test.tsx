@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -144,7 +144,7 @@ describe('ReviewerQueue schema runtime flow', () => {
             id: 71,
             entityType: 'submission',
             entityId: 501,
-            fromState: { String: 'ai_reviewing', Valid: true },
+            fromState: 'ai_reviewing',
             toState: 'human_reviewing',
             actorType: 'ai_worker',
             actorId: null,
@@ -238,6 +238,52 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+  })
+
+  it('disables review actions while a review request is pending', async () => {
+    const user = userEvent.setup()
+    const reviewResult = deferred<ReviewResponse>()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions/501') {
+        return {
+          task,
+          item,
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission,
+          revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+          aiReview: null,
+          auditLogs: [],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockReturnValue(reviewResult.promise)
+
+    render(<ReviewerQueue />)
+
+    await user.click(await screen.findByText('Submission #501'))
+    await user.click(screen.getByRole('button', { name: '通过' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+    })
+
+    await act(async () => {
+      reviewResult.resolve({ submission_id: 501, status: 'approved' })
+      await reviewResult.promise
+    })
   })
 
   it('opens real rule selector and links to owner prompt editing', async () => {
@@ -523,3 +569,13 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
   })
 })
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}

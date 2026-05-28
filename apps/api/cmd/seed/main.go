@@ -48,6 +48,9 @@ func main() {
 	if err := seedQAQuality(database); err != nil {
 		log.Fatalf("seed qa_quality: %v", err)
 	}
+	if err := seedPreferenceCompare(database); err != nil {
+		log.Fatalf("seed preference_compare: %v", err)
+	}
 
 	log.Println("seed ready; demo password is pass")
 }
@@ -97,7 +100,35 @@ func upsertUser(database *gorm.DB, seed seedUser) error {
 	})
 }
 
+type officialSeedConfig struct {
+	TaskTitle       string
+	TaskDescription string
+	BaselinePath    string
+	TemplatePath    string
+	DatasetPath     string
+}
+
 func seedQAQuality(database *gorm.DB) error {
+	return seedOfficialTask(database, officialSeedConfig{
+		TaskTitle:       "官方 qa_quality 质检标注",
+		TaskDescription: "基于官方 qa_quality 数据集的问答质量标注任务。",
+		BaselinePath:    "tools/seed/datasets/qa_quality/标注要求.md",
+		TemplatePath:    "tools/seed/templates/qa_quality_review.json",
+		DatasetPath:     "tools/seed/datasets/qa_quality/json/qa_quality.json",
+	})
+}
+
+func seedPreferenceCompare(database *gorm.DB) error {
+	return seedOfficialTask(database, officialSeedConfig{
+		TaskTitle:       "官方 preference_compare 偏好对比标注",
+		TaskDescription: "基于官方 preference_compare 数据集的偏好对比标注任务。",
+		BaselinePath:    "tools/seed/datasets/preference_compare/标注要求.md",
+		TemplatePath:    "tools/seed/templates/preference_compare_review.json",
+		DatasetPath:     "tools/seed/datasets/preference_compare/json/preference_compare.json",
+	})
+}
+
+func seedOfficialTask(database *gorm.DB, config officialSeedConfig) error {
 	return database.Transaction(func(tx *gorm.DB) error {
 		var owner model.User
 		if err := tx.Where("username = ?", "owner1").First(&owner).Error; err != nil {
@@ -108,14 +139,14 @@ func seedQAQuality(database *gorm.DB) error {
 			return err
 		}
 
-		baseline, err := os.ReadFile(projectFile("tools/seed/datasets/qa_quality/标注要求.md"))
+		baseline, err := os.ReadFile(projectFile(config.BaselinePath))
 		if err != nil {
 			return err
 		}
 		task := model.Task{
 			OwnerID:             owner.ID,
-			Title:               "官方 qa_quality 质检标注",
-			Description:         model.StringFrom("基于官方 qa_quality 数据集的问答质量标注任务。"),
+			Title:               config.TaskTitle,
+			Description:         model.StringFrom(config.TaskDescription),
 			BaselineDescription: model.StringFrom(string(baseline)),
 			Status:              "published",
 			Distribution:        "first_come",
@@ -136,7 +167,7 @@ func seedQAQuality(database *gorm.DB) error {
 			return err
 		}
 
-		schema, err := os.ReadFile(projectFile("tools/seed/templates/qa_quality_review.json"))
+		schema, err := os.ReadFile(projectFile(config.TemplatePath))
 		if err != nil {
 			return err
 		}
@@ -191,7 +222,7 @@ func seedQAQuality(database *gorm.DB) error {
 			}
 		}
 
-		items, err := loadQAQualityItems()
+		items, err := loadSeedItems(config.DatasetPath)
 		if err != nil {
 			return err
 		}
@@ -233,8 +264,8 @@ func seedTemplateActions(task model.Task, existing *model.TaskTemplate, nextHash
 	}
 }
 
-func loadQAQualityItems() ([]map[string]any, error) {
-	raw, err := os.ReadFile(projectFile("tools/seed/datasets/qa_quality/json/qa_quality.json"))
+func loadSeedItems(datasetPath string) ([]map[string]any, error) {
+	raw, err := os.ReadFile(projectFile(datasetPath))
 	if err != nil {
 		return nil, err
 	}

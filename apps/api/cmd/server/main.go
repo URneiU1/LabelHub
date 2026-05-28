@@ -27,7 +27,7 @@ import (
 )
 
 func main() {
-	logger, err := zap.NewDevelopment()
+	logger, err := newLogger()
 	if err != nil {
 		panic(err)
 	}
@@ -50,9 +50,12 @@ func main() {
 	// 默认 release 模式(不打印调试路由/警告);本地调试可显式设 GIN_MODE=debug。
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
+	} else {
+		gin.SetMode(os.Getenv("GIN_MODE"))
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS())
 	r.Use(middleware.RequestID())
@@ -95,6 +98,13 @@ func healthResponse(c *gin.Context) {
 		},
 		"request_id": c.GetString(middleware.RequestIDContextKey),
 	})
+}
+
+func newLogger() (*zap.Logger, error) {
+	if os.Getenv("GIN_MODE") == "debug" {
+		return zap.NewDevelopment()
+	}
+	return zap.NewProduction()
 }
 
 func serverPort() string {

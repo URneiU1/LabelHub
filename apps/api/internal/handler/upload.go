@@ -67,6 +67,7 @@ func (h UploadHandler) Register(api gin.IRouter) {
 }
 
 func (h UploadHandler) Upload(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, uploadMaxBytes+4096)
 	file, err := c.FormFile("file")
 	if err != nil {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "file is required")

@@ -5,7 +5,7 @@ import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
 import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
 import { parseTemplateSchema } from '../../renderer/parser'
 import { widgetRegistry } from '../../renderer/widgets'
-import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TemplateSchema, type WidgetType } from '../../renderer/types'
+import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type WidgetType } from '../../renderer/types'
 import './Designer.css'
 
 type TemplateDetailResponse = {
@@ -141,10 +141,7 @@ export default function TemplateDesigner() {
         setSchemaError(parsed.error)
         return
       }
-      const draftFields = parsed.value.fields.map((field, index) => ({
-        ...field,
-        _draftId: `${field.name}-${index}`,
-      }))
+      const draftFields = parsed.value.fields.map((field, index) => attachDraftIdsToField(field, `${field.name}-${index}`))
       setSchema(parsed.value)
       setTitle(parsed.value.title)
       setFields(draftFields)
@@ -267,10 +264,7 @@ export default function TemplateDesigner() {
 
   function discardChanges() {
     if (!schema) return
-    const draftFields = schema.fields.map((field, index) => ({
-      ...field,
-      _draftId: `${field.name}-${index}`,
-    }))
+    const draftFields = schema.fields.map((field, index) => attachDraftIdsToField(field, `${field.name}-${index}`))
     setTitle(schema.title)
     setFields(draftFields)
     setSelectedId(draftFields[0]?._draftId ?? null)
@@ -784,6 +778,7 @@ function TabsControls({ field, fields, disabled, onChange }: {
     onChange({
       tabs: [...tabs, {
         label: `Tab ${nextIndex}`,
+        _draftId: createDraftId(),
         fields: [createNestedDefaultField(nextNestedFieldName(fields, `${field.name}_tab${nextIndex}`, 'Input'), 'Input')],
       }],
     })
@@ -795,7 +790,7 @@ function TabsControls({ field, fields, disabled, onChange }: {
     <div style={nestedEditorStyle}>
       <span style={nestedEditorLabelStyle}>tabs</span>
       {tabs.map((tab, index) => (
-        <div key={`${field.name}-tab-${index}`} style={nestedPanelStyle}>
+        <div key={tab._draftId} style={nestedPanelStyle}>
           <label style={fieldStyle}>
             tab_label
             <input
@@ -814,10 +809,10 @@ function TabsControls({ field, fields, disabled, onChange }: {
             parentName={`${field.name}_tab${index + 1}`}
             onChange={(nextFields) => updateTab(index, { fields: nextFields })}
           />
-          <Button disabled={disabled || tabs.length <= 1} onClick={() => deleteTab(index)} aria-label={`delete tab ${index + 1}`}>Delete tab</Button>
+          <Button disabled={disabled || tabs.length <= 1} onClick={() => deleteTab(index)} aria-label={`delete tab ${index + 1}`}>删除分页</Button>
         </div>
       ))}
-      <Button disabled={disabled} onClick={addTab} aria-label="add tab">Add tab</Button>
+      <Button disabled={disabled} onClick={addTab} aria-label="add tab">新增分页</Button>
     </div>
   )
 }
@@ -837,7 +832,7 @@ function NestedFieldsEditor({ label, fields, allFields, parentName, disabled, on
   }
   function changeChildWidget(index: number, widget: WidgetType) {
     onChange(fields.map((child, currentIndex) => (
-      currentIndex === index ? createNestedFieldForWidget(child.name, widget, child.label) : child
+      currentIndex === index ? createNestedFieldForWidget(child.name, widget, child.label, child._draftId) : child
     )))
   }
   function addChild(widget: WidgetType) {
@@ -859,7 +854,7 @@ function NestedFieldsEditor({ label, fields, allFields, parentName, disabled, on
     <div style={nestedEditorStyle}>
       <span style={nestedEditorLabelStyle}>{label}</span>
       {fields.map((child, index) => (
-        <div key={`${label}-child-${index}`} style={nestedFieldRowStyle}>
+        <div key={child._draftId} style={nestedFieldRowStyle}>
           <div style={twoColumnStyle}>
             <label style={fieldStyle}>
               child_name
@@ -917,15 +912,15 @@ function NestedFieldsEditor({ label, fields, allFields, parentName, disabled, on
             </label>
           ) : null}
           <div style={fieldActionsStyle}>
-            <Button disabled={disabled || index === 0} onClick={() => moveChild(index, -1)} aria-label={`move up ${label} child ${index + 1}`}>Up</Button>
-            <Button disabled={disabled || index === fields.length - 1} onClick={() => moveChild(index, 1)} aria-label={`move down ${label} child ${index + 1}`}>Down</Button>
-            <Button disabled={disabled || fields.length <= 1} onClick={() => deleteChild(index)} aria-label={`delete ${label} child ${index + 1}`}>Delete</Button>
+            <Button disabled={disabled || index === 0} onClick={() => moveChild(index, -1)} aria-label={`move up ${label} child ${index + 1}`}>上移</Button>
+            <Button disabled={disabled || index === fields.length - 1} onClick={() => moveChild(index, 1)} aria-label={`move down ${label} child ${index + 1}`}>下移</Button>
+            <Button disabled={disabled || fields.length <= 1} onClick={() => deleteChild(index)} aria-label={`delete ${label} child ${index + 1}`}>删除</Button>
           </div>
         </div>
       ))}
       <div style={fieldActionsStyle}>
         {nestedWidgetTypes.map((widget) => (
-          <Button key={widget} disabled={disabled} onClick={() => addChild(widget)} aria-label={`add ${label} ${widget}`}>Add {widget}</Button>
+          <Button key={widget} disabled={disabled} onClick={() => addChild(widget)} aria-label={`add ${label} ${widget}`}>添加 {widget}</Button>
         ))}
       </div>
     </div>
@@ -956,8 +951,7 @@ function LLMTriggerControls({ field, fields, disabled, onChange }: {
 
 function createDefaultField(widget: WidgetType, current: DraftField[]): DraftField {
   const name = nextFieldName(widget, current)
-  return normalizeDraftField({
-    _draftId: createDraftId(),
+  return attachDraftIdsToField({
     name,
     widget,
     label: widgetLabels[widget],
@@ -971,15 +965,15 @@ function createDefaultField(widget: WidgetType, current: DraftField[]): DraftFie
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
     ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
-  })
+  }, createDraftId())
 }
 
 function createNestedDefaultField(name: string, widget: WidgetType): FieldSchema {
   return createNestedFieldForWidget(name, widget, widgetLabels[widget])
 }
 
-function createNestedFieldForWidget(name: string, widget: WidgetType, label: string): FieldSchema {
-  return normalizeFieldSchema({
+function createNestedFieldForWidget(name: string, widget: WidgetType, label: string, draftId?: string): FieldSchema {
+  return attachDraftIdsToField({
     name,
     widget,
     label,
@@ -988,7 +982,7 @@ function createNestedFieldForWidget(name: string, widget: WidgetType, label: str
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
     ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
-  })
+  }, draftId)
 }
 
 function nextFieldName(widget: WidgetType, current: DraftField[]) {
@@ -1002,11 +996,10 @@ function nextFieldName(widget: WidgetType, current: DraftField[]) {
 }
 
 function cloneDraftField(field: DraftField, current: DraftField[]): DraftField {
-  return normalizeDraftField({
+  return attachDraftIdsToField(stripDraftField({
     ...field,
-    _draftId: createDraftId(),
     name: nextCopyFieldName(field.name, current),
-  })
+  }), createDraftId())
 }
 
 function reorderFieldsToTarget(current: DraftField[], fieldId: string, targetFieldId: string) {
@@ -1047,6 +1040,24 @@ function createDraftId() {
 
 function normalizeDraftField(field: DraftField): DraftField {
   return normalizeFieldSchema(field) as DraftField
+}
+
+function attachDraftIdsToField(field: FieldSchema, draftId = createDraftId()): DraftField {
+  const normalized = normalizeFieldSchema(field)
+  return {
+    ...normalized,
+    _draftId: draftId,
+    ...(normalized.fields ? { fields: normalized.fields.map((child) => attachDraftIdsToField(child)) } : {}),
+    ...(normalized.tabs ? { tabs: normalized.tabs.map((tab) => attachDraftIdsToTab(tab)) } : {}),
+  }
+}
+
+function attachDraftIdsToTab(tab: TabSchema): TabSchema {
+  return {
+    ...tab,
+    _draftId: tab._draftId ?? createDraftId(),
+    fields: tab.fields.map((child) => attachDraftIdsToField(child)),
+  }
 }
 
 function normalizeFieldSchema(field: FieldSchema): FieldSchema {

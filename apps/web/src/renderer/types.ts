@@ -21,6 +21,7 @@ export type ShowItemMode = typeof showItemModes[number]
 export type FieldOption = string | number
 
 export type TabSchema = {
+  _draftId?: string
   label: string
   fields: FieldSchema[]
 }
@@ -32,6 +33,7 @@ export type RequiredWhen = {
 }
 
 export type FieldSchema = {
+  _draftId?: string
   name: string
   widget: WidgetType
   label: string
