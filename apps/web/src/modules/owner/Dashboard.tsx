@@ -533,6 +533,7 @@ export default function OwnerDashboard() {
   }
 
   async function confirmDeleteGoldenSample(sample: GoldenSample) {
+    if (!selected) return
     const guard = beginTaskAction(selected.id, deleteGoldenSampleSeq)
     setDeletingGoldenSampleId(sample.id)
     setGoldenSampleError('')

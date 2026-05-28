@@ -1034,7 +1034,7 @@ function nextCopyFieldName(name: string, current: DraftField[]) {
   return candidate
 }
 
-function createDraftId() {
+function createDraftId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
