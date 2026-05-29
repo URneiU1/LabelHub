@@ -549,13 +549,13 @@ export default function ReviewerQueue() {
 
   return (
     <div style={pageStyle}>
-      <header style={topBarStyle}>
-        <div>
+      <header className="lh-page-header" style={topBarStyle}>
+        <div className="lh-page-header-title">
           <div style={breadcrumbStyle}>审核与质检 / <strong>{showingDemo ? 'AI 预审规则 · 队列' : (detail?.task.title ?? '人工审核工作台')}</strong></div>
           <h1 style={pageTitleStyle}>{showingDemo ? 'AI 自动预审队列' : '人工审核工作台'}</h1>
           <p style={pageSubTitleStyle}>异步消费提交数据 → 按评分维度调用 LLM 结构化输出 → 通过 / 打回 / 转人工复核</p>
         </div>
-        <div style={headerActionsStyle}>
+        <div className="lh-page-header-actions" style={headerActionsStyle}>
           {showingDemo ? <span style={modelPillStyle}>Agent v2.3 · 模型 doubao-pro-32k</span> : null}
           <Button loading={ruleLoading} onClick={() => void openRuleConfig()} theme="light">规则配置</Button>
           <Button disabled={retryDisabled} loading={retryingAI} onClick={() => void retryAIReview()} theme="light">失败重跑</Button>
