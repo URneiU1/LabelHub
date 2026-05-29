@@ -45,6 +45,25 @@ type DemoReviewItem = {
   selected?: boolean
 }
 
+type DemoTimelineEvent = {
+  time: string
+  actor: string
+  action: string
+  tone: 'green' | 'red' | 'blue'
+}
+
+type DemoReviewSnapshot = {
+  reason: string
+  beforeRows: Array<[string, string]>
+  afterRows: Array<[string, string]>
+  scoreRows: Array<{ label: string, value: number, color?: string }>
+  promptLabel: string
+  promptTemplate: string
+  summary: string
+  jsonPreview: string
+  timeline: DemoTimelineEvent[]
+}
+
 type QueueItem =
   | { kind: 'real', submission: Submission }
   | { kind: 'demo', item: DemoReviewItem }
@@ -98,6 +117,205 @@ const demoItems: DemoReviewItem[] = [
   },
 ]
 
+const demoReviewDetails: Record<string, DemoReviewSnapshot> = {
+  'SUB-00606': {
+    reason: '护眼屏参数、适用年龄和配件信息都补齐了，家长能直接判断是否匹配。',
+    beforeRows: [
+      ['cleaned_title', '儿童学习平板电脑 8 英寸护眼大屏'],
+      ['category', '3C 数码'],
+      ['keywords', '平板, 学习, 护眼'],
+    ],
+    afterRows: [
+      ['cleaned_title', '儿童学习平板电脑 8 英寸护眼版'],
+      ['category', '学习平板'],
+      ['keywords', '护眼, 8 英寸, 学习, 教育'],
+    ],
+    scoreRows: [
+      { label: '相关性', value: 94, color: 'var(--color-success)' },
+      { label: '准确性', value: 90, color: 'var(--color-success)' },
+      { label: '格式合规', value: 88, color: '#f97316' },
+      { label: '安全性', value: 99, color: 'var(--color-success)' },
+      { label: '综合', value: 93, color: 'var(--color-success)' },
+    ],
+    promptLabel: '规则：学习用品 v1',
+    promptTemplate: `请基于以下维度给提交内容打分（0-100）：
+[相关性] 标注结果是否与学习平板场景对齐
+[准确性] 规格、年龄和功能是否与商品一致
+[格式合规] 是否满足模板字段与命名规则
+[安全性] 是否包含敏感或违规信息`,
+    summary: '护眼屏、学习场景和规格字段都对齐，建议通过。',
+    jsonPreview: JSON.stringify({
+      cleaned_title: '儿童学习平板电脑 8 英寸护眼版',
+      category: '学习平板',
+      keywords: ['护眼', '8 英寸', '学习', '教育'],
+    }, null, 2),
+    timeline: [
+      { time: '18:00:48', actor: '王芳', action: '第 1 轮提交', tone: 'green' },
+      { time: '18:00:49', actor: 'AI Agent', action: '预审 91 分 → 建议通过', tone: 'green' },
+      { time: '18:00:50', actor: '王芳 · 复审', action: '确认字段完整，直接放行', tone: 'green' },
+      { time: '18:00:52', actor: '系统', action: '写入可导出队列', tone: 'blue' },
+    ],
+  },
+  'SUB-00607': {
+    reason: '关键词丰富度和类目都已经覆盖到位，和上一轮的打回意见对齐。',
+    beforeRows: [
+      ['cleaned_title', '户外便携野营折叠桌椅套装 5 件套'],
+      ['category', '家居用品'],
+      ['keywords', '折叠, 户外'],
+    ],
+    afterRows: [
+      ['cleaned_title', '户外野营便携折叠桌椅 5 件套'],
+      ['category', '户外运动'],
+      ['keywords', '折叠, 户外, 5 件套, 便携, 野营'],
+    ],
+    scoreRows: [
+      { label: '相关性', value: 92, color: 'var(--color-success)' },
+      { label: '准确性', value: 84, color: '#f97316' },
+      { label: '格式合规', value: 88, color: '#f97316' },
+      { label: '安全性', value: 99, color: 'var(--color-success)' },
+      { label: '综合', value: 86, color: '#f97316' },
+    ],
+    promptLabel: '规则：电商相关性 v2',
+    promptTemplate: `请基于以下维度给提交内容打分（0-100）：
+[相关性] 标注结果与原始数据是否对齐
+[准确性] 类目 / 关键词与商品事实是否一致
+[格式合规] 是否满足模板字段与正则规则
+[安全性] 是否包含敏感 / 违规词`,
+    summary: '关键词较第 1 轮已补充至 5 个并覆盖品类核心卖点；类目改为「户外运动」更贴合事实。建议通过。',
+    jsonPreview: JSON.stringify({
+      cleaned_title: '户外野营便携折叠桌椅 5 件套',
+      category: '户外运动',
+      keywords: ['折叠', '户外', '5 件套', '便携', '野营'],
+    }, null, 2),
+    timeline: [
+      { time: '18:01:02', actor: '李雷', action: '第 1 轮提交', tone: 'green' },
+      { time: '18:01:03', actor: 'AI Agent', action: '预审 62 分 → 建议打回', tone: 'red' },
+      { time: '18:01:04', actor: '王芳 · 复审', action: '采纳 AI 结论 → 打回', tone: 'red' },
+      { time: '18:01:05', actor: '李雷', action: '查看打回意见并修改', tone: 'green' },
+      { time: '18:01:06', actor: 'AI Agent', action: '重跑 86 分 → 建议通过', tone: 'green' },
+      { time: '18:01:07', actor: '王芳 · 复审', action: '本次决策写入终审待办', tone: 'blue' },
+    ],
+  },
+  'SUB-00604': {
+    reason: '耳机型号、蓝牙版本和降噪关键词都齐了，信息完整度更高。',
+    beforeRows: [
+      ['cleaned_title', '真无线主动降噪耳机 Pro Max 2026 款'],
+      ['category', '3C 数码'],
+      ['keywords', '耳机, 降噪'],
+    ],
+    afterRows: [
+      ['cleaned_title', '真无线主动降噪耳机 Pro Max 2026 款'],
+      ['category', '蓝牙耳机'],
+      ['keywords', '主动降噪, 蓝牙, 低延迟, 续航'],
+    ],
+    scoreRows: [
+      { label: '相关性', value: 90, color: 'var(--color-success)' },
+      { label: '准确性', value: 88, color: '#f97316' },
+      { label: '格式合规', value: 92, color: 'var(--color-success)' },
+      { label: '安全性', value: 98, color: 'var(--color-success)' },
+      { label: '综合', value: 89, color: '#f97316' },
+    ],
+    promptLabel: '规则：数码配件 v3',
+    promptTemplate: `请基于以下维度给提交内容打分（0-100）：
+[相关性] 耳机场景和商品型号是否一致
+[准确性] 主动降噪、蓝牙和续航字段是否准确
+[格式合规] 是否满足模板字段与命名规则
+[安全性] 是否包含敏感或违规信息`,
+    summary: '型号、蓝牙和降噪字段明确，结构完整，建议通过。',
+    jsonPreview: JSON.stringify({
+      cleaned_title: '真无线主动降噪耳机 Pro Max 2026 款',
+      category: '蓝牙耳机',
+      keywords: ['主动降噪', '蓝牙', '低延迟', '续航'],
+    }, null, 2),
+    timeline: [
+      { time: '17:58:11', actor: '张敏', action: '第 1 轮提交', tone: 'green' },
+      { time: '17:58:12', actor: 'AI Agent', action: '预审 88 分 → 建议通过', tone: 'green' },
+      { time: '17:58:13', actor: '张敏 · 复审', action: '确认规格字段无误', tone: 'green' },
+      { time: '17:58:14', actor: '系统', action: '待终审排队', tone: 'blue' },
+    ],
+  },
+  'SUB-00605': {
+    reason: '蓝牙功能项存在歧义，已转人工核对，避免把异常字段直接放行。',
+    beforeRows: [
+      ['cleaned_title', '加厚熟蓝牙智能保温杯'],
+      ['category', '家居用品'],
+      ['keywords', '保温杯, 蓝牙'],
+    ],
+    afterRows: [
+      ['cleaned_title', '加厚蓝牙智能保温杯'],
+      ['category', '家居日用'],
+      ['keywords', '保温杯, 304 不锈钢, 蓝牙'],
+    ],
+    scoreRows: [
+      { label: '相关性', value: 58, color: 'var(--color-danger)' },
+      { label: '准确性', value: 52, color: 'var(--color-danger)' },
+      { label: '格式合规', value: 86, color: '#f97316' },
+      { label: '安全性', value: 61, color: '#f97316' },
+      { label: '综合', value: 57, color: 'var(--color-danger)' },
+    ],
+    promptLabel: '规则：安全词审查 v1',
+    promptTemplate: `请基于以下维度给提交内容打分（0-100）：
+[相关性] 商品标题是否和目标类目一致
+[准确性] 功能词和材质词是否存在歧义
+[格式合规] 是否满足模板字段与正则规则
+[安全性] 是否包含敏感、夸大或歧义描述`,
+    summary: '蓝牙功能词存在歧义，优先转人工核对，不直接通过。',
+    jsonPreview: JSON.stringify({
+      cleaned_title: '加厚蓝牙智能保温杯',
+      category: '家居日用',
+      keywords: ['保温杯', '304 不锈钢', '蓝牙'],
+    }, null, 2),
+    timeline: [
+      { time: '18:00:31', actor: '王芳', action: '第 1 轮提交', tone: 'green' },
+      { time: '18:00:32', actor: 'AI Agent', action: '预审 57 分 → 转人工', tone: 'red' },
+      { time: '18:00:33', actor: '王芳 · 复审', action: '保留人工复核意见', tone: 'blue' },
+      { time: '18:00:34', actor: '系统', action: '进入人工审核队列', tone: 'blue' },
+    ],
+  },
+  'SUB-00603': {
+    reason: '上一轮重试后仍未稳定，当前记录保留失败态，等模型重跑后再继续。',
+    beforeRows: [
+      ['cleaned_title', '春季新款女装 5 色可选'],
+      ['category', '服饰'],
+      ['keywords', '春装, 女装'],
+    ],
+    afterRows: [
+      ['cleaned_title', '春季新款女装 5 色可选'],
+      ['category', '女装'],
+      ['keywords', '春装, 轻薄, 5 色可选'],
+    ],
+    scoreRows: [
+      { label: '相关性', value: 0, color: 'var(--color-danger)' },
+      { label: '准确性', value: 0, color: 'var(--color-danger)' },
+      { label: '格式合规', value: 0, color: 'var(--color-danger)' },
+      { label: '安全性', value: 0, color: 'var(--color-danger)' },
+      { label: '综合', value: 0, color: 'var(--color-danger)' },
+    ],
+    promptLabel: '规则：女装上新 v4',
+    promptTemplate: `请基于以下维度给提交内容打分（0-100）：
+[相关性] 女装类目是否明确
+[准确性] 颜色、季节和版型是否完整
+[格式合规] 是否满足模板字段和命名规则
+[安全性] 是否包含敏感或违规词`,
+    summary: '当前轮次 AI 预审失败，先保留失败态等待重跑结果。',
+    jsonPreview: JSON.stringify({
+      cleaned_title: '春季新款女装 5 色可选',
+      category: '女装',
+      keywords: ['春装', '轻薄', '5 色可选'],
+    }, null, 2),
+    timeline: [
+      { time: '17:48:00', actor: '张敏', action: '第 1 轮提交', tone: 'green' },
+      { time: '17:48:01', actor: 'AI Agent', action: '预审失败，等待重跑', tone: 'red' },
+      { time: '17:48:02', actor: '张敏 · 复审', action: '记录失败原因', tone: 'red' },
+      { time: '17:48:03', actor: '系统', action: '标记为 failed', tone: 'red' },
+    ],
+  },
+}
+
+function getDemoReviewDetail(id: string) {
+  return demoReviewDetails[id] ?? demoReviewDetails['SUB-00607']
+}
+
 const demoRuleConfigs: AIPromptSummary[] = [{
   id: 2041,
   version: 2,
@@ -123,7 +341,7 @@ export default function ReviewerQueue() {
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<number[]>([])
   const [selectedDemoId, setSelectedDemoId] = useState('SUB-00607')
   const [detail, setDetail] = useState<TaskBundle | null>(null)
-  const [reason, setReason] = useState('本轮修改已覆盖第 1 轮打回意见，关键词丰富度与类目准确性均达标。')
+  const [reason, setReason] = useState(() => getDemoReviewDetail('SUB-00607').reason)
   const [loading, setLoading] = useState(false)
   const [retryingAI, setRetryingAI] = useState(false)
   const [rulePanelOpen, setRulePanelOpen] = useState(false)
@@ -134,6 +352,8 @@ export default function ReviewerQueue() {
   const [ruleLoading, setRuleLoading] = useState(false)
   const [ruleError, setRuleError] = useState('')
   const ruleLoadSeq = useRef(0)
+  // 详情加载用独立序号,和规则面板的 ruleLoadSeq 解耦:开关「规则配置」不应误失效正在加载的详情。
+  const detailLoadSeq = useRef(0)
 
   const loadQueue = useCallback(async () => {
     try {
@@ -142,6 +362,7 @@ export default function ReviewerQueue() {
       setSelectedSubmissionIds((current) => current.filter((id) => data.some((submission) => submission.id === id)))
       if (data.length === 0) {
         ruleLoadSeq.current += 1
+        detailLoadSeq.current += 1
         setSelected(null)
         setDetail(null)
         setRulePanelOpen(false)
@@ -164,6 +385,7 @@ export default function ReviewerQueue() {
   }, [submissions])
 
   const selectedDemo = demoItems.find((item) => item.id === selectedDemoId) ?? demoItems[1]
+  const selectedDemoDetail = useMemo(() => getDemoReviewDetail(selectedDemo.id), [selectedDemo.id])
   const schema = useMemo(() => parseBundleSchema(detail), [detail])
   const payload = useMemo(() => parsePayload(detail?.item?.payload), [detail?.item?.payload])
   const answer = useMemo<AnswerValue>(() => parseAnswer(detail?.revision?.answer), [detail?.revision?.answer])
@@ -177,23 +399,31 @@ export default function ReviewerQueue() {
   }, [detail?.aiReview?.prompt, ruleConfigs, selectedRuleId])
 
   async function openQueueItem(item: QueueItem) {
+    // 切换队列项:bump ruleLoadSeq 取消正在加载的规则面板请求;另用独立的 detailLoadSeq
+    // 守护本次详情加载——只有最新一次选择的响应才允许落详情(避免快速连点张冠李戴),
+    // 且不会被「规则配置」开关(只动 ruleLoadSeq)误失效。
     ruleLoadSeq.current += 1
+    const requestSeq = detailLoadSeq.current + 1
+    detailLoadSeq.current = requestSeq
     setRulePanelOpen(false)
     setRuleLoading(false)
     if (item.kind === 'demo') {
+      const demoDetail = getDemoReviewDetail(item.item.id)
       setSelected(null)
       setDetail(null)
       setSelectedDemoId(item.item.id)
-      setReason('本轮修改已覆盖第 1 轮打回意见，关键词丰富度与类目准确性均达标。')
+      setReason(demoDetail.reason)
       return
     }
     const submission = item.submission
     setSelected(submission)
     try {
       const data = await apiGet<TaskBundle>(`/reviewer/submissions/${submission.id}`)
+      if (detailLoadSeq.current !== requestSeq) return
       setDetail(data)
       setReason('')
     } catch (error) {
+      if (detailLoadSeq.current !== requestSeq) return
       Toast.error(error instanceof Error ? error.message : '加载详情失败')
     }
   }
@@ -213,6 +443,7 @@ export default function ReviewerQueue() {
       Toast.success(`审核完成，状态 ${data.status}`)
       await loadQueue()
       ruleLoadSeq.current += 1
+      detailLoadSeq.current += 1
       setSelected(null)
       setDetail(null)
       setRulePanelOpen(false)
@@ -261,6 +492,7 @@ export default function ReviewerQueue() {
       Toast.success(`AI 重跑已入队，状态 ${data.status}`)
       await loadQueue()
       ruleLoadSeq.current += 1
+      detailLoadSeq.current += 1
       setSelected(null)
       setDetail(null)
       setRulePanelOpen(false)
@@ -330,7 +562,7 @@ export default function ReviewerQueue() {
         </div>
       </header>
 
-      <div style={layoutStyle}>
+      <div className="lh-shell-3col">
         <aside style={leftPanelStyle}>
           {showingDemo ? (
             <div style={tabRowStyle}>
@@ -378,7 +610,7 @@ export default function ReviewerQueue() {
 
         <main style={centerPanelStyle}>
           {showingDemo ? (
-            <DemoReviewDetail item={selectedDemo} reason={reason} setReason={setReason} />
+            <DemoReviewDetail item={selectedDemo} detail={selectedDemoDetail} reason={reason} setReason={setReason} />
           ) : (
             <RealReviewDetail
               detail={detail}
@@ -419,7 +651,6 @@ export default function ReviewerQueue() {
           {showingDemo ? <MetricGrid /> : null}
           {rulePanelOpen ? (
             <RuleConfigPanel
-              taskId={showingDemo ? null : detail?.task.id}
               prompts={ruleConfigs}
               selectedRule={selectedRule}
               selectedRuleId={selectedRuleId}
@@ -436,7 +667,12 @@ export default function ReviewerQueue() {
               }}
             />
           ) : null}
-          <Timeline auditLogs={showingDemo ? undefined : detail?.auditLogs} submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id} demoMode={showingDemo} />
+          <Timeline
+            auditLogs={showingDemo ? undefined : detail?.auditLogs}
+            submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id}
+            demoEvents={showingDemo ? selectedDemoDetail.timeline : undefined}
+            demoMode={showingDemo}
+          />
         </aside>
       </div>
     </div>
@@ -492,7 +728,18 @@ function QueueCard({
   )
 }
 
-function DemoReviewDetail({ item, reason, setReason }: { item: DemoReviewItem, reason: string, setReason: (value: string) => void }) {
+function DemoReviewDetail({
+  item,
+  detail,
+  reason,
+  setReason,
+}: {
+  item: DemoReviewItem
+  detail: DemoReviewSnapshot
+  reason: string
+  setReason: (value: string) => void
+}) {
+  const headlineScore = detail.scoreRows.find((row) => row.label === '综合')?.value ?? item.score
   return (
     <section style={detailShellStyle}>
       <div style={detailHeaderStyle}>
@@ -504,38 +751,32 @@ function DemoReviewDetail({ item, reason, setReason }: { item: DemoReviewItem, r
       </div>
 
       <div style={compareGridStyle}>
-        <CompareBox title="第 1 轮提交（已打回）" rows={[
-          ['cleaned_title', '户外便携野营折叠桌椅套装 5 件套'],
-          ['category', '家居用品'],
-          ['keywords', '折叠, 户外'],
-        ]} />
-        <CompareBox title="第 2 轮提交（本轮 · 修改后）" rows={[
-          ['cleaned_title', '户外野营便携折叠桌椅 5 件套'],
-          ['category', '户外运动'],
-          ['keywords', '折叠, 户外, 5 件套, 便携, 野营'],
-        ]} highlight />
+        <CompareBox title="第 1 轮提交（已打回）" rows={detail.beforeRows} />
+        <CompareBox title="第 2 轮提交（本轮 · 修改后）" rows={detail.afterRows} highlight />
       </div>
 
       <section style={aiResultStyle}>
         <div style={sectionTitleRowStyle}>
           <h3 style={sectionTitleStyle}>✦ AI 预审 · 本轮重跑结果</h3>
-          <span style={modelPillStyle}>v2.3 · doubao-pro-32k</span>
+          <span style={modelPillStyle}>{detail.promptLabel}</span>
         </div>
         <div style={scoreLineStyle}>
-          <strong>综合 <span>86</span></strong>
-          <span>相关性 92</span>
-          <span>准确性 84</span>
-          <span>格式合规 88</span>
-          <span>安全 99</span>
+          <strong>综合 <span>{headlineScore}</span></strong>
+          {detail.scoreRows.filter((row) => row.label !== '综合').map((row) => (
+            <span key={row.label}>{row.label} {row.value}</span>
+          ))}
         </div>
-        <ScoreBars />
-        <p style={resultReasonStyle}>关键词较第 1 轮已补充至 5 个并覆盖品类核心卖点；类目改为「户外运动」更贴合事实。建议通过。</p>
+        <ScoreBars rows={detail.scoreRows} />
+        <p style={resultReasonStyle}>{detail.summary}</p>
       </section>
 
       <label style={labelStyle}>审核意见（打回时必填）</label>
       <textarea value={reason} onChange={(event) => setReason(event.target.value)} style={textareaStyle} />
       <div style={tagRowStyle}>
-        {['# 关键词缺失', '# 类目错误', '# 标题超长', '# 包含违禁词', '# 格式不规范'].map((tag) => <span key={tag} style={neutralPillStyle}>{tag}</span>)}
+        {[
+          detail.afterRows.find(([key]) => key === 'category')?.[1] ?? '未分类',
+          ...((detail.afterRows.find(([key]) => key === 'keywords')?.[1] ?? '').split(',').map((value) => value.trim()).filter(Boolean)),
+        ].map((tag) => <span key={tag} style={neutralPillStyle}>{tag}</span>)}
       </div>
 
       <div style={diagnosticGridStyle}>
@@ -544,40 +785,25 @@ function DemoReviewDetail({ item, reason, setReason }: { item: DemoReviewItem, r
             <h3 style={sectionTitleStyle}>提交内容</h3>
             <span style={neutralPillStyle}>JSON 字段视图</span>
           </div>
-          <pre style={codeBlockStyle}>{`{
-  "cleaned_title": "户外便携野营折叠桌椅套装 5 件套",
-  "category": "户外运动",
-  "keywords": ["折叠", "户外", "5 件套", "便携", "野营"]
-}`}</pre>
+          <pre style={codeBlockStyle}>{detail.jsonPreview}</pre>
         </section>
         <section style={diagnosticPanelStyle}>
           <div style={sectionTitleRowStyle}>
             <h3 style={sectionTitleStyle}>审核 Prompt 模板</h3>
-            <span style={modelPillStyle}>规则：电商相关性 v2</span>
+            <span style={modelPillStyle}>{detail.promptLabel}</span>
           </div>
-          <pre style={codeBlockStyle}>{`请基于以下维度给提交内容打分（0-100）：
-[相关性] 标注结果与原始数据是否对齐
-[准确性] 类目 / 关键词与商品事实是否一致
-[格式合规] 是否满足模板字段与正则规则
-[安全性] 是否包含敏感 / 违规词
-
-通过 function_call 返回 JSON:
-{ "scores": {...}, "verdict": "pass|reject|manual" }`}</pre>
+          <pre style={codeBlockStyle}>{detail.promptTemplate}</pre>
         </section>
       </div>
 
       <section style={diagnosticPanelStyle}>
         <h3 style={sectionTitleStyle}>处理日志 / 审计</h3>
         <div style={processLogStyle}>
-          {[
-            ['18:01:02', 'queue', '进入 BullMQ 队列 ai-prereview · 优先级 5'],
-            ['18:01:03', 'llm', '调用 doubao-pro-32k · tokens 1342 · 1.42s'],
-            ['18:01:03', 'verdict', '结构化输出：pass (86)'],
-          ].map(([time, label, text]) => (
-            <div key={`${time}-${label}`} style={processLogRowStyle}>
-              <span>{time}</span>
-              <span style={neutralPillStyle}>{label}</span>
-              <strong>{text}</strong>
+          {detail.timeline.map((log) => (
+            <div key={`${log.time}-${log.actor}`} style={processLogRowStyle}>
+              <span>{log.time}</span>
+              <span style={neutralPillStyle}>{log.actor}</span>
+              <strong>{log.action}</strong>
             </div>
           ))}
         </div>
@@ -796,7 +1022,17 @@ function Metric({ label, value, tone }: { label: string, value: string, tone: 'b
   )
 }
 
-function Timeline({ auditLogs, submissionId, demoMode = false }: { auditLogs?: AuditLog[], submissionId?: number | string, demoMode?: boolean }) {
+function Timeline({
+  auditLogs,
+  submissionId,
+  demoMode = false,
+  demoEvents,
+}: {
+  auditLogs?: AuditLog[]
+  submissionId?: number | string
+  demoMode?: boolean
+  demoEvents?: DemoTimelineEvent[]
+}) {
   if (auditLogs && auditLogs.length > 0) {
     return (
       <section style={timelineStyle}>
@@ -821,23 +1057,15 @@ function Timeline({ auditLogs, submissionId, demoMode = false }: { auditLogs?: A
       </section>
     )
   }
-  const events = [
-    ['李雷', '第 1 轮提交', 'green'],
-    ['AI Agent', '预审 62 分 → 建议打回', 'red'],
-    ['王芳 · 复审', '采纳 AI 结论 → 打回', 'red'],
-    ['李雷', '查看打回意见，开始修改', 'green'],
-    ['AI Agent', '重审 86 分 → 建议通过', 'green'],
-    ['王芳 · 复审中', '本次决策将写入终审待办', 'blue'],
-  ]
   return (
     <section style={timelineStyle}>
       <h3 style={sectionTitleStyle}>审计时间线（{submissionId ?? 'SUB-00607'}）</h3>
-      {events.map(([actor, action, tone]) => (
-        <div key={`${actor}-${action}`} style={timelineRowStyle}>
-          <span style={{ ...timelineDotStyle, background: tone === 'green' ? 'var(--color-success)' : tone === 'red' ? 'var(--color-danger)' : 'var(--color-accent)' }} />
+      {(demoEvents ?? []).map((event) => (
+        <div key={`${event.time}-${event.actor}`} style={timelineRowStyle}>
+          <span style={{ ...timelineDotStyle, background: event.tone === 'green' ? 'var(--color-success)' : event.tone === 'red' ? 'var(--color-danger)' : 'var(--color-accent)' }} />
           <div>
-            <strong>{actor}</strong>
-            <p>{action}</p>
+            <strong>{event.actor}</strong>
+            <p>{event.action}</p>
           </div>
         </div>
       ))}
@@ -846,7 +1074,6 @@ function Timeline({ auditLogs, submissionId, demoMode = false }: { auditLogs?: A
 }
 
 function RuleConfigPanel({
-  taskId,
   prompts,
   selectedRule,
   selectedRuleId,
@@ -858,7 +1085,6 @@ function RuleConfigPanel({
   onSelectRule,
   onClose,
 }: {
-  taskId?: number | null
   prompts: AIPromptSummary[]
   selectedRule: AIPromptSummary | null
   selectedRuleId: number | null
@@ -870,9 +1096,6 @@ function RuleConfigPanel({
   onSelectRule: (id: number | null) => void
   onClose: () => void
 }) {
-  const editHref = taskId
-    ? `/owner?taskId=${taskId}${selectedRule ? `&aiPromptId=${selectedRule.id}` : ''}#ai-prompts`
-    : '/owner#ai-prompts'
   return (
     <section style={rulePanelStyle}>
       <div style={sectionTitleRowStyle}>
@@ -912,10 +1135,7 @@ function RuleConfigPanel({
           </div>
           <pre style={ruleCodeBlockStyle}>{selectedRule.promptTemplate}</pre>
           <pre style={ruleCodeBlockStyle}>{formatRuleDimensions(selectedRule.dimensions)}</pre>
-          <div style={ruleActionRowStyle}>
-            <span style={mutedTextStyle}>规则切换请在 Owner 配置页完成。</span>
-            <a href={editHref} style={editRuleLinkStyle}>跳转 Owner 编辑</a>
-          </div>
+          <p style={mutedTextStyle}>规则仅供查看。</p>
         </>
       ) : (
         <p style={mutedTextStyle}>当前任务还没有 AI Prompt 规则。</p>
@@ -1059,13 +1279,6 @@ const headerActionsStyle: CSSProperties = {
   display: 'flex',
   gap: 'var(--space-md)',
   alignItems: 'center',
-}
-
-const layoutStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '300px minmax(0, 1fr) 240px',
-  gap: 'var(--space-sm)',
-  alignItems: 'start',
 }
 
 const leftPanelStyle: CSSProperties = {
@@ -1573,25 +1786,6 @@ const ruleCodeBlockStyle: CSSProperties = {
   maxHeight: 180,
   overflow: 'auto',
   background: 'var(--color-surface)',
-}
-
-const ruleActionRowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: 'var(--space-sm)',
-}
-
-const editRuleLinkStyle: CSSProperties = {
-  display: 'inline-flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-  minHeight: 32,
-  borderRadius: 'var(--radius-sm)',
-  background: 'var(--color-accent)',
-  color: '#fff',
-  textDecoration: 'none',
-  fontSize: 'var(--text-sm)',
-  fontWeight: 700,
 }
 
 const timelineStyle: CSSProperties = {

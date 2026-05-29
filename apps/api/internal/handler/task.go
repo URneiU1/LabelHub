@@ -159,8 +159,12 @@ func (h TaskHandler) ImportItems(c *gin.Context) {
 		return
 	}
 	var req importItemsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "items are required")
+	// 批量导入限制请求体大小,避免无界 JSON 撑爆内存;再卡单批条数上限。
+	if !bindLimitedJSON(c, &req, maxImportItemsBytes) {
+		return
+	}
+	if len(req.Items) > maxImportItems {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "too many items in a single import")
 		return
 	}
 

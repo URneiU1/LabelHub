@@ -24,12 +24,19 @@ type seedUser struct {
 	roles       []string
 }
 
+const demoPassword = "123456"
+
 func main() {
+	// 生产环境(GIN_MODE=release,见 deploy compose)默认拒绝运行,避免把 demo 账号和
+	// 共享弱口令灌进真实库;确需在 release 下重置 demo 数据时显式 SEED_ALLOW_IN_PROD=true。
+	if os.Getenv("GIN_MODE") == "release" && os.Getenv("SEED_ALLOW_IN_PROD") != "true" {
+		log.Fatal("refusing to seed in release mode (GIN_MODE=release); set SEED_ALLOW_IN_PROD=true to override")
+	}
 	database := db.Init()
 	db.RunMigrations()
 
 	users := []seedUser{
-		{username: "owner1", displayName: "任务负责人一号", email: "owner1@example.com", roles: []string{"owner", "reviewer"}},
+		{username: "owner1", displayName: "任务负责人一号", email: "owner1@example.com", roles: []string{"owner"}},
 		{username: "owner2", displayName: "任务负责人二号", email: "owner2@example.com", roles: []string{"owner"}},
 		{username: "labeler1", displayName: "标注员一号", email: "labeler1@example.com", roles: []string{"labeler"}},
 		{username: "labeler2", displayName: "标注员二号", email: "labeler2@example.com", roles: []string{"labeler"}},
@@ -52,11 +59,11 @@ func main() {
 		log.Fatalf("seed preference_compare: %v", err)
 	}
 
-	log.Println("seed ready; demo password is pass")
+	log.Print("seed ready; demo accounts share a fixed demo password (see seed source / docs, not logged)")
 }
 
 func upsertUser(database *gorm.DB, seed seedUser) error {
-	passwordHash, err := auth.HashPassword("pass")
+	passwordHash, err := auth.HashPassword(demoPassword)
 	if err != nil {
 		return err
 	}

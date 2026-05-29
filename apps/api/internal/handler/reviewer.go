@@ -35,12 +35,12 @@ func NewReviewerHandler(db *gorm.DB) ReviewerHandler {
 }
 
 func (h ReviewerHandler) Register(api gin.IRouter) {
-	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerQueue)
-	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerDetail)
-	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerAIPrompts)
-	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "owner", "admin"), h.RetryAIReview)
-	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
-	api.POST("/reviews/batch", middleware.RequireRoles("reviewer", "owner", "admin"), h.BatchReview)
+	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "admin"), h.ReviewerQueue)
+	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "admin"), h.ReviewerDetail)
+	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "admin"), h.ReviewerAIPrompts)
+	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "admin"), h.RetryAIReview)
+	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "admin"), h.ReviewSubmission)
+	api.POST("/reviews/batch", middleware.RequireRoles("reviewer", "admin"), h.BatchReview)
 }
 
 type reviewRequest struct {

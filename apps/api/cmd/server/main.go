@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,11 @@ func main() {
 	}
 
 	r := gin.New()
+	// 配置可信反向代理,使 c.ClientIP() 只在直连方为可信代理时才采信 X-Forwarded-For;
+	// 否则公网客户端可伪造 XFF 绕过按 IP 的登录限流。
+	if err := r.SetTrustedProxies(trustedProxies()); err != nil {
+		logger.Fatal("invalid TRUSTED_PROXIES", zap.Error(err))
+	}
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS())
@@ -161,6 +167,23 @@ func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Lo
 
 func redisAddr() string {
 	return net.JoinHostPort(envOrDefault("REDIS_HOST", "localhost"), envOrDefault("REDIS_PORT", "6379"))
+}
+
+// trustedProxies 返回 Gin 信任的反向代理网段。默认只信任回环 + 私有网段
+// (Caddy / 容器网络所在),从而忽略公网客户端伪造的 X-Forwarded-For,避免
+// 按 IP 的登录限流被绕过;部署在其它拓扑时用 TRUSTED_PROXIES(逗号分隔 CIDR/IP)覆盖。
+func trustedProxies() []string {
+	if raw := os.Getenv("TRUSTED_PROXIES"); raw != "" {
+		parts := strings.Split(raw, ",")
+		proxies := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				proxies = append(proxies, trimmed)
+			}
+		}
+		return proxies
+	}
+	return []string{"127.0.0.1/32", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
 }
 
 func envOrDefault(key string, fallback string) string {

@@ -163,8 +163,18 @@ func (h UploadHandler) canUploadToTask(claims *auth.Claims, task model.Task) (bo
 		return count > 0, err
 	}
 	if policy.HasRole(claims, policy.RoleReviewer) {
+		// Reviewer 必须先被指派到该 task(task_reviewers),否则任意 reviewer 都能
+		// 往任何处于 human_reviewing 的任务写文件(IDOR-write)。复用 canReviewTask
+		// 做绑定校验,再确认该任务确实有进行中的人工审核提交。
+		assigned, err := canReviewTask(h.db, claims, task)
+		if err != nil {
+			return false, err
+		}
+		if !assigned {
+			return false, nil
+		}
 		var count int64
-		err := h.db.Model(&model.Submission{}).
+		err = h.db.Model(&model.Submission{}).
 			Where("task_id = ? AND status = ?", task.ID, statemachine.StateHumanReviewing).
 			Count(&count).Error
 		return count > 0, err

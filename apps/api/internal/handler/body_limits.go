@@ -14,11 +14,13 @@ const (
 	maxTemplateSchemaBytes = int64(256 * 1024)
 	maxAnswerJSONBytes     = int64(128 * 1024)
 	maxAIPromptBytes       = int64(128 * 1024)
+	maxImportItemsBytes    = int64(8 * 1024 * 1024)
 
 	maxTemplateFields      = 80
 	maxTemplateOptions     = 50
 	maxTemplateStringBytes = 8 * 1024
 	maxAIPromptStringBytes = 8 * 1024
+	maxImportItems         = 10000
 )
 
 func bindLimitedJSON(c *gin.Context, dst any, maxBytes int64) bool {

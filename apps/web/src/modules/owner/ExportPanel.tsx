@@ -4,6 +4,7 @@ import { Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPostRawJSON } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import StatusBadge from '../../shared/components/StatusBadge'
+import { isSafeURL } from '../../shared/security/url'
 
 type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx'
 
@@ -93,7 +94,13 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
   async function download(id: number) {
     try {
       const data = await apiGet<DownloadURLResponse>(`/tasks/${taskId}/exports/${id}/download-url`)
-      window.open(data.url, '_blank')
+      // 后端返回的下载地址在打开前必须校验协议(http/https),并加 noopener,noreferrer
+      // 防止 javascript: 等恶意协议执行,以及新标签页反向操纵 opener。
+      if (!isSafeURL(data.url)) {
+        Toast.error('下载链接无效')
+        return
+      }
+      window.open(data.url, '_blank', 'noopener,noreferrer')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '获取下载链接失败')
     }

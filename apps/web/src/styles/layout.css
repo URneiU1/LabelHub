@@ -1,0 +1,26 @@
+/* ============================================================
+   多列工作台外壳的响应式收敛。
+   桌面保持各模块原有列宽不变;≤1024px(平板/窄屏)收成单列,
+   避免固定多列在窄视口横向溢出。与 Designer.css 的断点策略一致。
+   ============================================================ */
+
+.lh-shell-2col {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+.lh-shell-3col {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 240px;
+  gap: var(--space-sm);
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .lh-shell-2col,
+  .lh-shell-3col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -6,8 +6,10 @@ import { login } from '../../shared/api/client'
 const demoAccounts = [
   { username: 'owner1', label: '任务负责人', to: '/owner' },
   { username: 'labeler1', label: '标注员', to: '/labeler' },
-  { username: 'reviewer1', label: '审核员', to: '/reviewer' },
+  { username: 'reviewer1', label: '人工审核员', to: '/reviewer' },
 ]
+
+const demoPassword = '123456'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -16,7 +18,7 @@ export default function Login() {
   async function handleLogin(username: string, to: string) {
     setLoading(username)
     try {
-      await login(username, 'pass')
+      await login(username, demoPassword)
       navigate(to)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '登录失败')
@@ -41,7 +43,7 @@ export default function Login() {
           欢迎使用数据标注平台
         </p>
         <div style={{ borderTop: '1px solid var(--color-border-light)', marginTop: 'var(--space-xl)', paddingTop: 'var(--space-xl)' }}>
-          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-md)', fontWeight: 600, textTransform: 'uppercase' }}>选择角色进行演示</div>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-md)', fontWeight: 600, textTransform: 'uppercase' }}>选择角色登录</div>
           <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
             {demoAccounts.map((account) => (
               <Button

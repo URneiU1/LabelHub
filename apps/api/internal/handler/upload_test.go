@@ -89,6 +89,35 @@ func TestUploadOwnerCannotUploadToOtherTask(t *testing.T) {
 	}
 }
 
+// IDOR 回归守卫:未被指派到该 task 的 reviewer 不能上传文件,
+// 即使该 task 存在 human_reviewing 提交。canUploadToTask 的 reviewer 分支
+// 必须先过 canReviewTask(task_reviewers 绑定校验)。
+func TestUploadReviewerNotAssignedForbidden(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
+			AddRow(2, 99, "published"))
+	// canReviewTask 查 task_reviewers:未绑定 -> count 0 -> CanReviewTask 返回 false -> 403,
+	// 且不会再查 submissions(被 !assigned 提前 return)。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, multipartUploadRequest("/uploads", "2", "note.txt", "text/plain", []byte("hello")))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for reviewer not assigned to task, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestDownloadUploadRequiresTaskAccess(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()

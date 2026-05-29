@@ -12,8 +12,8 @@
   --color-text: #171713;
   --color-text-secondary: #57564f;
   --color-text-muted: #8a887f;
-  --color-accent: #1f5d99;
-  --color-accent-hover: #174977;
+  --color-accent: #b8442e;
+  --color-accent-hover: #97331f;
   --color-border: #d8d6cd;
   --color-border-light: #e7e4da;
   --color-success: #20734b;
@@ -27,8 +27,8 @@
   --color-node-border: #d5d1c4;
   --color-panel-header: #efede6;
   --color-info-bg: #eef5fb;
-  --color-accent-soft: #dbeaf7;
-  --color-rail: #7da8ca;
+  --color-accent-soft: #f5e4dd;
+  --color-rail: #cf9483;
   --color-port: #6c9ac0;
   --color-code-bg: #f0eee7;
 
@@ -111,7 +111,18 @@ body {
   box-sizing: border-box;
 }
 
-:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+/* 不用 :where()(零特异性会被 Semi 组件自带样式盖掉);用普通选择器列表 + 显式覆盖
+   常见 Semi 控件,保证键盘焦点环在原生元素与 Semi 组件上都可见。 */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible,
+.semi-button:focus-visible,
+.semi-input:focus-visible,
+.semi-select:focus-visible,
+.semi-input-textarea:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
@@ -202,4 +213,22 @@ body {
   transform-origin: left center;
   background: var(--color-accent);
   animation: lh-top-progress 1.25s var(--ease-out) infinite;
+}
+
+/* 尊重系统「减少动态效果」:停掉无限循环动画(skeleton 脉冲 / 顶部进度条),
+   并把其余装饰性动画/过渡降到近乎瞬时,避免前庭不适。 */
+@media (prefers-reduced-motion: reduce) {
+  .lh-skeleton-line,
+  .lh-top-progress::before {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

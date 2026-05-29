@@ -23,7 +23,7 @@ export default function App() {
             <Route path="/owner/tasks/:taskId/templates" element={<RequireRole roles={['owner', 'admin']}><TemplateList /></RequireRole>} />
             <Route path="/owner/tasks/:taskId/templates/:templateId" element={<RequireRole roles={['owner', 'admin']}><TemplateDesigner /></RequireRole>} />
             <Route path="/labeler" element={<RequireRole roles={['labeler']}><LabelerPlaza /></RequireRole>} />
-            <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'owner', 'admin']}><ReviewerQueue /></RequireRole>} />
+            <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue /></RequireRole>} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/auth/login" replace />} />

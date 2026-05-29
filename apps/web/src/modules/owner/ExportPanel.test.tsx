@@ -69,8 +69,26 @@ describe('ExportPanel', () => {
 
     await user.click(await screen.findByRole('button', { name: '下载导出 #5' }))
     await waitFor(() => {
-      expect(openSpy).toHaveBeenCalledWith('/api/v1/exports/download?token=abc', '_blank')
+      expect(openSpy).toHaveBeenCalledWith('/api/v1/exports/download?token=abc', '_blank', 'noopener,noreferrer')
     })
+  })
+
+  it('rejects an unsafe download url and does not open a window', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path: string) => {
+      if (path === '/tasks/1/exports') return { exports: [succeededRecord] }
+      if (path === '/tasks/1/exports/5/download-url') return { url: 'javascript:alert(1)', expiresIn: 600 }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    openSpy.mockClear() // 同一 spy 实例可能带着上一个测试的调用记录,清空后再断言本测试不应 open
+    render(<ExportPanel taskId={1} />)
+
+    await user.click(await screen.findByRole('button', { name: '下载导出 #5' }))
+    await waitFor(() => {
+      expect(Toast.error).toHaveBeenCalledWith('下载链接无效')
+    })
+    expect(openSpy).not.toHaveBeenCalled()
   })
 
   it('polls while there are queued or running rows', async () => {

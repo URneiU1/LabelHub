@@ -27,7 +27,7 @@ func NewLabelerHandler(db *gorm.DB) LabelerHandler {
 func (h LabelerHandler) Register(api gin.IRouter) {
 	api.GET("/labeler/tasks", middleware.RequireRoles("labeler"), h.ListPublishedTasks)
 	api.POST("/tasks/:taskId/claim", middleware.RequireRoles("labeler"), h.ClaimItem)
-	api.GET("/tasks/:taskId/items/:itemId", middleware.RequireRoles("labeler", "reviewer", "owner", "admin"), h.GetItem)
+	api.GET("/tasks/:taskId/items/:itemId", middleware.RequireRoles("labeler", "reviewer", "admin"), h.GetItem)
 	api.POST("/tasks/:taskId/items/:itemId/draft", middleware.RequireRoles("labeler"), h.SaveDraft)
 	api.POST("/tasks/:taskId/items/:itemId/submit", middleware.RequireRoles("labeler"), h.SubmitItem)
 	api.GET("/me/submissions", middleware.RequireRoles("labeler"), h.MySubmissions)

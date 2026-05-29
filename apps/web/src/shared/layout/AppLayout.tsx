@@ -8,7 +8,7 @@ const { Text } = Typography
 const navItems = [
   { to: '/owner', label: '任务负责人', roles: ['owner', 'admin'] },
   { to: '/labeler', label: '标注工作台', roles: ['labeler'] },
-  { to: '/reviewer', label: '审核中心', roles: ['reviewer', 'owner', 'admin'] },
+  { to: '/reviewer', label: '审核中心', roles: ['reviewer', 'admin'] },
 ]
 
 export default function AppLayout() {

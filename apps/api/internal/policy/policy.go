@@ -128,9 +128,6 @@ func CanReviewTask(claims *auth.Claims, task model.Task, reviewerAssigned bool) 
 	if HasRole(claims, RoleAdmin) {
 		return true
 	}
-	if HasRole(claims, RoleOwner) && task.OwnerID == claims.UserID {
-		return true
-	}
 	return HasRole(claims, RoleReviewer) && reviewerAssigned
 }
 

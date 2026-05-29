@@ -182,6 +182,24 @@ func TestGetItem_LabelerCannotReadPeerClaimedItem(t *testing.T) {
 	}
 }
 
+func TestGetItem_OwnerBlockedFromLabelerModule(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 10, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/items/11", nil))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // HIGH 2 配套:reviewer 在没有 submission 的 item 上拿不到 raw payload。
 func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
@@ -213,13 +231,9 @@ func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 	}
 }
 
-func TestReviewerQueueOwnerScopedToOwnTasks(t *testing.T) {
+func TestReviewerQueueRejectsOwnerRole(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
-
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. JOIN tasks ON tasks.id = submissions.task_id.+tasks.owner_id`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status"}).
-			AddRow(501, 1, 11, "human_reviewing"))
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)
@@ -227,8 +241,8 @@ func TestReviewerQueueOwnerScopedToOwnTasks(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions", nil))
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -250,6 +264,8 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
 			AddRow(1, 7, "商品标题清洗", "published"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "payload", "status"}).
 			AddRow(11, 1, `{"title":"raw"}`, "finished"))
@@ -272,7 +288,7 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "reviewer_id", "stage", "verdict", "reason", "created_at"}).
 			AddRow(81, 501, revisionID, 7, "first", "revise", "上一轮意见", now))
 
-	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
 	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
@@ -404,6 +420,8 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
 			AddRow(1, 7, "商品标题清洗", "published"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key", "prompt_version", "status", "retry_count"}).
 			AddRow(31, 501, revisionID, key, 2, "dead", 5))
@@ -420,7 +438,7 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(91, 1))
 	mock.ExpectCommit()
 
-	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
 	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
@@ -445,18 +463,6 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 func TestReviewSubmissionOwnerCannotReviewOtherTask(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
-
-	revisionID := uint64(901)
-	mock.ExpectBegin()
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
-			AddRow(501, 1, 11, "human_reviewing", revisionID))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 99))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
-			AddRow(501, 1, 11, "human_reviewing", revisionID))
-	mock.ExpectRollback()
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)

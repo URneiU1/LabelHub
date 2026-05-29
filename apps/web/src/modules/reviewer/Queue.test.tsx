@@ -92,6 +92,22 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
   })
 
+  it('switches demo detail content when selecting different demo submissions', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockResolvedValue([])
+
+    render(<ReviewerQueue />)
+
+    expect(await screen.findByText('AI 自动预审队列')).toBeInTheDocument()
+    expect(screen.getAllByText('重跑 86 分 → 建议通过').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByText('真无线主动降噪耳机 Pro Max 2026 款'))
+
+    expect(screen.getAllByText('预审 88 分 → 建议通过').length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('重跑 86 分 → 建议通过')).toHaveLength(0)
+    expect(screen.getByText(/AI 预审 · 本轮重跑结果/)).toBeInTheDocument()
+  })
+
   it('opens submission detail and renders historical template as read-only', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
@@ -286,7 +302,7 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
   })
 
-  it('opens real rule selector and links to owner prompt editing', async () => {
+  it('opens real rule selector and keeps prompt config read-only', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/reviewer/submissions') {
@@ -374,8 +390,8 @@ describe('ReviewerQueue schema runtime flow', () => {
 
     expect(await screen.findByText('历史规则模板')).toBeInTheDocument()
     expect(await screen.findByText('active #41')).toBeInTheDocument()
-    expect(screen.getByText('规则切换请在 Owner 配置页完成。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '跳转 Owner 编辑' })).toHaveAttribute('href', '/owner?taskId=1&aiPromptId=40#ai-prompts')
+    expect(screen.getByText('规则仅供查看。')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '跳转 Owner 编辑' })).not.toBeInTheDocument()
     expect(mockApiGet).toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts')
     expect(mockApiPost).not.toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts/40/activate', {})
   })
@@ -484,7 +500,8 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: '跳转 Owner 编辑' })).toHaveAttribute('href', '/owner?taskId=2&aiPromptId=51#ai-prompts')
+      expect(screen.getByText('规则仅供查看。')).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: '跳转 Owner 编辑' })).not.toBeInTheDocument()
     })
     expect(screen.queryByText('任务一晚到规则')).not.toBeInTheDocument()
   })

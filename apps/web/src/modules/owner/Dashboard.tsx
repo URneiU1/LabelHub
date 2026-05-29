@@ -667,6 +667,16 @@ export default function OwnerDashboard() {
         void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
         return
       }
+      if (typeof data.dryRunId !== 'number') {
+        // 入队响应缺少 dryRunId 则无可轮询的目标,直接置为失败而不是空转。
+        const message = 'dry-run 入队异常:响应缺少 dryRunId'
+        setGoldenRunRows((current) => ({
+          ...current,
+          [sample.id]: { sampleId: sample.id, expectedVerdict: sample.expectedVerdict, status: 'failed', error: message },
+        }))
+        setGoldenSampleError(message)
+        return
+      }
       setGoldenRunRows((current) => ({
         ...current,
         [sample.id]: {
@@ -781,7 +791,7 @@ export default function OwnerDashboard() {
         <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务发布 · 模板搭建 · 审核配置 · 数据导出</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: 'var(--space-xl)', alignItems: 'start' }}>
+      <div className="lh-shell-2col">
         <section style={panelStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
             <h2 style={headingStyle}>任务列表</h2>

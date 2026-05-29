@@ -108,6 +108,19 @@ func TestEncodeCSV_NeutralizesFormulaInjection(t *testing.T) {
 	}
 }
 
+func TestEncodeCSV_NeutralizesNewlinePrefixedFormula(t *testing.T) {
+	cols := []Column{{Source: "answer", Export: "答案"}}
+	rows := []Row{{{Key: "answer", Value: "\n=HYPERLINK(\"http://evil\",\"x\")"}}}
+	var buf bytes.Buffer
+	if _, err := EncodeCSV(&buf, cols, rows); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	// 换行开头再接公式同样必须被前导单引号中和(部分解析器会忽略前导换行后当公式执行)。
+	if !strings.Contains(buf.String(), "'\n=HYPERLINK") {
+		t.Fatalf("newline-prefixed formula not neutralized: %q", buf.String())
+	}
+}
+
 func TestCSVSafeCell(t *testing.T) {
 	cases := map[string]string{
 		"=cmd":   "'=cmd",
@@ -115,6 +128,8 @@ func TestCSVSafeCell(t *testing.T) {
 		"-1":     "'-1",
 		"@x":     "'@x",
 		"\tx":    "'\tx",
+		"\rx":    "'\rx",
+		"\nx":    "'\nx",
 		"normal": "normal",
 		"a=b":    "a=b",
 		"":       "",

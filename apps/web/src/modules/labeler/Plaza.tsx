@@ -188,7 +188,7 @@ export default function LabelerPlaza() {
         <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务领取 · 在线作答 · AI 辅助 · 结果提交</p>
       </div>
 
-      <div style={layoutStyle}>
+      <div className="lh-shell-2col">
         <section style={panelStyle}>
           <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
             <h2 style={headingStyle}>任务广场</h2>
@@ -330,13 +330,6 @@ function autoSaveText(state: 'idle' | 'saving' | 'saved' | 'failed') {
     default:
       return '3s 自动保存'
   }
-}
-
-const layoutStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '320px minmax(0, 1fr)',
-  gap: 'var(--space-xl)',
-  alignItems: 'start',
 }
 
 const panelStyle: CSSProperties = {
