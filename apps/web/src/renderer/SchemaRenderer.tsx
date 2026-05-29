@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import type { AnswerValue, FieldSchema, RenderPayload, RenderRuntime, TemplateSchema, ValidationError } from './types'
+import type { AnswerValue, FieldSchema, RenderPayload, RenderRuntime, TemplateSchema, ValidationError, VisibleWhen } from './types'
 import { widgetRegistry } from './widgets'
 import FieldFrame from './widgets/FieldFrame'
 
@@ -42,6 +42,9 @@ function renderField(
   runtime: RenderRuntime | undefined,
   updateField: (name: string, nextValue: unknown) => void,
 ) {
+  if (!visibleWhenMatches(field.visibleWhen, value)) {
+    return null
+  }
   if (field.widget === 'Group') {
     return (
       <div key={field.name} style={fieldBlockStyle} data-widget={field.widget}>
@@ -250,6 +253,30 @@ const tabErrorBadgeStyle: CSSProperties = {
   fontSize: 'var(--text-sm)',
   lineHeight: '18px',
   textAlign: 'center',
+}
+
+function visibleWhenMatches(condition: VisibleWhen | undefined, answer: AnswerValue) {
+  if (!condition) {
+    return true
+  }
+  const value = answer[condition.field]
+  if ('equals' in condition) {
+    return value === condition.equals
+  }
+  return condition.notEmpty === true && !isEmptyValue(value)
+}
+
+function isEmptyValue(value: unknown) {
+  if (value === undefined || value === null) {
+    return true
+  }
+  if (typeof value === 'string') {
+    return value.trim() === ''
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0
+  }
+  return false
 }
 
 function countFieldErrors(fields: FieldSchema[], errors: ValidationError[]) {

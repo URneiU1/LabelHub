@@ -204,21 +204,21 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
 }
 
 const panelStyle: CSSProperties = {
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
+  background: 'var(--lh-bg-card)',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-lg)',
   padding: 'var(--space-lg)',
   marginTop: 'var(--space-lg)',
 }
-const headingStyle: CSSProperties = { fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
-const hintStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }
+const headingStyle: CSSProperties = { fontFamily: 'var(--lh-font-sans)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
+const hintStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }
 const switchRowStyle: CSSProperties = { display: 'flex', gap: 'var(--space-xs)', alignItems: 'center', fontSize: 'var(--text-sm)' }
-const formatStyle: CSSProperties = { padding: '4px 14px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', cursor: 'pointer' }
-const formatActiveStyle: CSSProperties = { ...formatStyle, background: 'var(--color-accent)', color: '#fff', borderColor: 'var(--color-accent)' }
-const renameInputStyle: CSSProperties = { flex: 1, padding: '4px 8px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }
-const primaryButtonStyle: CSSProperties = { padding: '8px 20px', border: 'none', borderRadius: 'var(--radius-md)', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }
+const formatStyle: CSSProperties = { padding: '4px 14px', border: '1px solid var(--lh-border)', borderRadius: 'var(--radius-md)', background: 'var(--lh-bg)', cursor: 'pointer' }
+const formatActiveStyle: CSSProperties = { ...formatStyle, background: 'var(--lh-primary)', color: '#fff', borderColor: 'var(--lh-primary)' }
+const renameInputStyle: CSSProperties = { flex: 1, padding: '4px 8px', border: '1px solid var(--lh-border)', borderRadius: 'var(--radius-sm)' }
+const primaryButtonStyle: CSSProperties = { padding: '8px 20px', border: 'none', borderRadius: 'var(--radius-md)', background: 'var(--lh-primary)', color: '#fff', cursor: 'pointer', fontWeight: 600 }
 const tableStyle: CSSProperties = { width: '100%', marginTop: 'var(--space-lg)', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }
-const thStyle: CSSProperties = { textAlign: 'left', padding: '6px 8px', borderBottom: '2px solid var(--color-border-light)', color: 'var(--color-text-secondary)' }
-const tdStyle: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--color-border-light)' }
-const errorTextStyle: CSSProperties = { color: 'var(--color-danger)', fontSize: 'var(--text-xs)' }
-const linkButtonStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', textDecoration: 'underline', padding: 0 }
+const thStyle: CSSProperties = { textAlign: 'left', padding: '6px 8px', borderBottom: '2px solid var(--lh-border)', color: 'var(--lh-text-2)' }
+const tdStyle: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--lh-border)' }
+const errorTextStyle: CSSProperties = { color: 'var(--lh-danger)', fontSize: 'var(--text-xs)' }
+const linkButtonStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--lh-primary)', cursor: 'pointer', textDecoration: 'underline', padding: 0 }

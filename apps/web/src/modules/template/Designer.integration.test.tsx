@@ -657,6 +657,98 @@ describe('TemplateDesigner', () => {
     expect(mockApiGet).not.toHaveBeenCalledWith('/templates/11')
   })
 
+  it('configures visibleWhen and customRule and round-trips them through the saved schema', async () => {
+    const user = userEvent.setup()
+    const decisionSchema = {
+      title: 'QA template',
+      layout: 'single_page',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: 'Decision', required: true, options: ['pass', 'reject'] },
+        { name: 'reason', widget: 'TextArea', label: 'Reason', required: false },
+      ],
+    }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/40') {
+        return templateDetail(40, decisionSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 41, taskId: 1, version: 2, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/1/templates/40')
+
+    await screen.findByRole('button', { name: /select reason/ })
+    await user.click(screen.getByRole('button', { name: /select reason/ }))
+
+    // 联动 tab: only show "reason" when decision == reject.
+    await user.click(screen.getByLabelText('property_tab_logic'))
+    fireEvent.change(screen.getByLabelText('visible_when_field'), { target: { value: 'decision' } })
+    fireEvent.change(screen.getByLabelText('visible_when_equals'), { target: { value: 'reject' } })
+
+    // 校验 tab: reason must be at most 35 chars.
+    await user.click(screen.getByLabelText('property_tab_validation'))
+    fireEvent.change(screen.getByLabelText('custom_rule_expr'), { target: { value: 'len(value) <= 35' } })
+    fireEvent.change(screen.getByLabelText('custom_rule_message'), { target: { value: '不能超过 35 个字符' } })
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.any(Object))
+    })
+    const [, body] = mockApiPost.mock.calls[0]
+    expect(body).toMatchObject({
+      fields: [
+        { name: 'decision', widget: 'Radio' },
+        {
+          name: 'reason',
+          widget: 'TextArea',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+          customRule: { expr: 'len(value) <= 35', message: '不能超过 35 个字符' },
+        },
+      ],
+    })
+    expect(JSON.stringify(body)).not.toContain('_draftId')
+
+    const parsed = parseTemplateSchema(body)
+    if (!parsed.ok) {
+      throw new Error(parsed.error.message)
+    }
+    const reasonField = parsed.value.fields.find((item) => item.name === 'reason')
+    expect(reasonField?.visibleWhen).toEqual({ field: 'decision', equals: 'reject' })
+    expect(reasonField?.customRule).toEqual({ expr: 'len(value) <= 35', message: '不能超过 35 个字符' })
+  })
+
+  it('inserts a palette widget at the drop position via drag-to-place', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 11, taskId: 1, version: 2, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    await screen.findByRole('button', { name: /select summary/ })
+
+    // Drag the Radio palette widget onto the existing "summary" field => inserts before it.
+    const dataTransfer = dragDataTransfer()
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Add Radio' }), { dataTransfer })
+    fireEvent.dragOver(screen.getByLabelText('canvas field summary'), { dataTransfer })
+    fireEvent.drop(screen.getByLabelText('canvas field summary'), { dataTransfer })
+
+    expect(screen.getByRole('button', { name: /select radio_1/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        export_fields: ['radio_1', 'summary'],
+      }))
+    })
+  })
+
   it('fails closed for historical templates whose task does not match the route', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {

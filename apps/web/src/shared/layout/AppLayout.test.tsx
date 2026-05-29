@@ -1,26 +1,7 @@
 import { render, screen } from '@testing-library/react'
-import type React from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import AppLayout from './AppLayout'
-
-vi.mock('@douyinfe/semi-ui', () => ({
-  Layout: Object.assign(
-    ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>,
-    {
-      Header: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => <header {...props}>{children}</header>,
-      Sider: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => <aside {...props}>{children}</aside>,
-      Content: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => <main {...props}>{children}</main>,
-    },
-  ),
-  Nav: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => <nav {...props}>{children}</nav>,
-  Typography: {
-    Text: ({ children, strong, ...props }: React.HTMLAttributes<HTMLSpanElement> & { strong?: boolean }) => {
-      void strong
-      return <span {...props}>{children}</span>
-    },
-  },
-}))
 
 describe('AppLayout navigation', () => {
   beforeEach(() => {
@@ -44,7 +25,7 @@ describe('AppLayout navigation', () => {
     }))
   })
 
-  it('does not expose reviewer navigation to owner users', () => {
+  it('does not expose other roles navigation to owner users', () => {
     render(
       <MemoryRouter initialEntries={['/owner']}>
         <Routes>
@@ -55,7 +36,7 @@ describe('AppLayout navigation', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText('任务负责人')).toBeInTheDocument()
+    expect(screen.getAllByText('任务管理').length).toBeGreaterThan(0)
     expect(screen.queryByText('标注工作台')).not.toBeInTheDocument()
     expect(screen.queryByText('审核中心')).not.toBeInTheDocument()
   })

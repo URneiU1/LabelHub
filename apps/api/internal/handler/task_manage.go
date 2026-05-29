@@ -1,0 +1,165 @@
+package handler
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"labelhub-api/internal/httpx"
+	"labelhub-api/internal/model"
+)
+
+// --- 批量编辑 task_items 的 payload ---
+
+type batchUpdateItem struct {
+	ItemID  uint64          `json:"itemId" binding:"required"`
+	Payload json.RawMessage `json:"payload" binding:"required"`
+}
+
+type batchUpdateItemsRequest struct {
+	Items []batchUpdateItem `json:"items" binding:"required"`
+}
+
+// BatchUpdateItems 批量覆盖本任务下指定题目的 payload。只更新属于该任务的题目。
+func (h TaskHandler) BatchUpdateItems(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var req batchUpdateItemsRequest
+	if !bindLimitedJSON(c, &req, maxImportItemsBytes) {
+		return
+	}
+	if len(req.Items) == 0 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "items must not be empty")
+		return
+	}
+	if len(req.Items) > maxImportItems {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "too many items in a single batch")
+		return
+	}
+	for _, item := range req.Items {
+		if !json.Valid(item.Payload) {
+			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "payload must be valid JSON")
+			return
+		}
+	}
+
+	var updated int64
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range req.Items {
+			res := tx.Model(&model.TaskItem{}).
+				Where("id = ? AND task_id = ?", item.ItemID, task.ID).
+				Update("payload", string(item.Payload))
+			if res.Error != nil {
+				return res.Error
+			}
+			updated += res.RowsAffected
+		}
+		return nil
+	}); err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to batch update items")
+		return
+	}
+	httpx.OK(c, gin.H{"updated": updated, "requested": len(req.Items)})
+}
+
+// --- 任务指派(task_assignees)管理 ---
+
+type addAssigneesRequest struct {
+	UserIDs []uint64 `json:"userIds" binding:"required"`
+}
+
+type assigneeView struct {
+	UserID     uint64         `json:"userId"`
+	AssignedAt model.NullTime `json:"assignedAt"`
+}
+
+// ListAssignees 返回该任务的全部指派用户(task 级,item_id 为 NULL)。
+func (h TaskHandler) ListAssignees(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var assignees []model.TaskAssignee
+	if err := h.db.Where("task_id = ? AND item_id IS NULL", task.ID).Order("user_id ASC").Find(&assignees).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list assignees")
+		return
+	}
+	out := make([]assigneeView, 0, len(assignees))
+	for _, a := range assignees {
+		out = append(out, assigneeView{UserID: a.UserID, AssignedAt: a.AssignedAt})
+	}
+	httpx.OK(c, gin.H{"assignees": out})
+}
+
+// AddAssignees 把一组用户指派到任务(task 级)。重复指派幂等(FirstOrCreate)。
+func (h TaskHandler) AddAssignees(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	var req addAssigneesRequest
+	if !bindLimitedJSON(c, &req, maxTaskInfoBytes) {
+		return
+	}
+	if len(req.UserIDs) == 0 {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "userIds must not be empty")
+		return
+	}
+	if len(req.UserIDs) > maxAssigneesPerRequest {
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "too many userIds in a single request")
+		return
+	}
+	for _, uid := range req.UserIDs {
+		if uid == 0 {
+			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "userIds must be positive integers")
+			return
+		}
+	}
+
+	now := model.TimeFrom(taskNow())
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		for _, uid := range req.UserIDs {
+			assignee := model.TaskAssignee{
+				TaskID:     task.ID,
+				UserID:     uid,
+				AssignedAt: now,
+			}
+			if err := tx.Where("task_id = ? AND user_id = ? AND item_id IS NULL", task.ID, uid).
+				FirstOrCreate(&assignee).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to add assignees")
+		return
+	}
+	httpx.OK(c, gin.H{"added": len(req.UserIDs)})
+}
+
+// RemoveAssignee 取消某用户对任务的指派(task 级)。
+func (h TaskHandler) RemoveAssignee(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	userID, ok := parseIDParam(c, "userId")
+	if !ok {
+		return
+	}
+	res := h.db.Where("task_id = ? AND user_id = ? AND item_id IS NULL", task.ID, userID).
+		Delete(&model.TaskAssignee{})
+	if res.Error != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to remove assignee")
+		return
+	}
+	if res.RowsAffected == 0 {
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "assignee not found")
+		return
+	}
+	httpx.OK(c, gin.H{"removed": userID})
+}

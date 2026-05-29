@@ -3,10 +3,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema } from '../../renderer/types'
-import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type Submission, type TaskBundle } from '../../shared/api/client'
+import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type ReviewResult, type Submission, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
 import StatusBadge from '../../shared/components/StatusBadge'
+import AIVerdictPanel from './AIVerdictPanel'
+import ReviewResults from './ReviewResults'
+import { resolveStage } from './stage'
+import '../../styles/lh/humanreview.css'
+import '../../styles/lh/aireview.css'
+
+type ReviewerView = 'workbench' | 'results'
 
 type ReviewResponse = {
   submission_id: number
@@ -67,6 +74,9 @@ type DemoReviewSnapshot = {
 type QueueItem =
   | { kind: 'real', submission: Submission }
   | { kind: 'demo', item: DemoReviewItem }
+
+// 审核意见快捷标签:点击追加到审核意见文本框(复刻 ui-demo 的 quick-tags)。
+const QUICK_TAGS = ['# 关键词缺失', '# 类目错误', '# 标题超长', '# 包含违禁词', '# 格式不规范']
 
 const demoItems: DemoReviewItem[] = [
   {
@@ -354,6 +364,8 @@ export default function ReviewerQueue() {
   const ruleLoadSeq = useRef(0)
   // 详情加载用独立序号,和规则面板的 ruleLoadSeq 解耦:开关「规则配置」不应误失效正在加载的详情。
   const detailLoadSeq = useRef(0)
+  // 顶部视图切换:审核工作台 / 审核结果列表。
+  const [view, setView] = useState<ReviewerView>('workbench')
 
   const loadQueue = useCallback(async () => {
     try {
@@ -397,6 +409,12 @@ export default function ReviewerQueue() {
     }
     return detail?.aiReview?.prompt ?? null
   }, [detail?.aiReview?.prompt, ruleConfigs, selectedRuleId])
+  // 当前详情的人工审核阶段(初审/复审/终审),供详情头部与「通过」按钮文案使用。
+  const detailStage = useMemo(() => resolveStage({
+    reviewStage: detail?.reviewStage ?? detail?.submission?.reviewStage,
+    reviewLevel: detail?.reviewLevel ?? detail?.submission?.reviewLevel,
+    requiredLevels: detail?.requiredLevels ?? detail?.submission?.requiredLevels,
+  }), [detail?.reviewStage, detail?.reviewLevel, detail?.requiredLevels, detail?.submission?.reviewStage, detail?.submission?.reviewLevel, detail?.submission?.requiredLevels])
 
   async function openQueueItem(item: QueueItem) {
     // 切换队列项:bump ruleLoadSeq 取消正在加载的规则面板请求;另用独立的 detailLoadSeq
@@ -426,6 +444,22 @@ export default function ReviewerQueue() {
       if (detailLoadSeq.current !== requestSeq) return
       Toast.error(error instanceof Error ? error.message : '加载详情失败')
     }
+  }
+
+  // 从「审核结果」列表打开某条已定稿提交的只读详情:复用 openQueueItem 的详情加载与
+  // 序号守护,把结果行包装成一个最小的 real submission,并切回工作台视图展示。
+  async function openResultDetail(result: ReviewResult) {
+    setView('workbench')
+    await openQueueItem({
+      kind: 'real',
+      submission: {
+        id: result.id,
+        taskId: result.taskId,
+        itemId: result.itemId,
+        status: result.status,
+        aiScore: result.aiScore ?? null,
+      },
+    })
   }
 
   async function review(verdict: 'approve' | 'reject' | 'revise') {
@@ -547,6 +581,8 @@ export default function ReviewerQueue() {
     }
   }
 
+  const approveLabel = !showingDemo && selected ? `通过(${detailStage.label})` : '通过'
+
   return (
     <div style={pageStyle}>
       <header className="lh-page-header" style={topBarStyle}>
@@ -562,119 +598,148 @@ export default function ReviewerQueue() {
         </div>
       </header>
 
-      <div className="lh-shell-3col">
-        <aside style={leftPanelStyle}>
-          {showingDemo ? (
-            <div style={tabRowStyle}>
-              <div style={activeTabStyle}>AI 已建议通过 <strong>128</strong></div>
-              <div style={tabStyle}>AI 已建议打回 <strong>47</strong></div>
-              <div style={tabStyle}>转人工 <strong>9</strong></div>
-            </div>
-          ) : null}
-          <div style={bulkBarStyle}>
-            <input
-              aria-label="选择全部审核项"
-              type="checkbox"
-              checked={!showingDemo && submissions.length > 0 && selectedSubmissionIds.length === submissions.length}
-              onChange={(event) => setSelectedSubmissionIds(event.target.checked ? submissions.map((submission) => submission.id) : [])}
-            />
-            <span>已选 {showingDemo ? 3 : selectedSubmissionIds.length} 条</span>
-            <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('approve')} style={miniButtonStyle}>批量通过</button>
-            <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('revise')} style={miniButtonStyle}>批量打回</button>
-          </div>
-          {showingDemo ? (
-            <div style={slaCardStyle}>
-              <strong>38</strong>
-              <span>/ s · 平均耗时 1.4s · 重试率 1.2%</span>
-              <small>任务 T-2041 · 规则「电商相关性 v2」</small>
-            </div>
-          ) : null}
-          <div style={queueListStyle}>
-            {queueItems.map((item) => (
-              <QueueCard
-                key={item.kind === 'real' ? item.submission.id : item.item.id}
-                item={item}
-                active={isQueueItemActive(item, selected, selectedDemoId)}
-                selected={item.kind === 'real' ? selectedSubmissionIds.includes(item.submission.id) : false}
-                onToggleSelected={(checked) => {
-                  if (item.kind !== 'real') return
-                  setSelectedSubmissionIds((current) => checked
-                    ? Array.from(new Set([...current, item.submission.id]))
-                    : current.filter((id) => id !== item.submission.id))
-                }}
-                onClick={() => void openQueueItem(item)}
-              />
-            ))}
-          </div>
-        </aside>
-
-        <main style={centerPanelStyle}>
-          {showingDemo ? (
-            <DemoReviewDetail item={selectedDemo} detail={selectedDemoDetail} reason={reason} setReason={setReason} />
-          ) : (
-            <RealReviewDetail
-              detail={detail}
-              selected={selected}
-              schema={schema}
-              payload={payload}
-              answer={answer}
-              reason={reason}
-              setReason={setReason}
-            />
-          )}
-
-          <div style={decisionGridStyle}>
-            <button style={rejectDecisionStyle} onClick={() => void review('revise')} disabled={loading || (!showingDemo && !schema.ok)}>
-              <strong>↩ 打回</strong>
-              <span>返回标注员修改 · 第 3 轮</span>
-            </button>
-            <button style={fixDecisionStyle} onClick={() => void review('reject')} disabled={loading || (!showingDemo && !schema.ok)}>
-              <strong>✎ 拒绝</strong>
-              <span>终止本条提交 · 记录拒绝原因</span>
-            </button>
-            <button style={passDecisionStyle} onClick={() => void review('approve')} disabled={loading || (!showingDemo && !schema.ok)}>
-              <strong>✓ 通过 · 入库</strong>
-              <span>本条进入终审 / 可导出</span>
-            </button>
-          </div>
-
-          {selected ? (
-            <div style={legacyActionRowStyle}>
-              <Button aria-label="打回修改" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('revise')} theme="light">打回修改</Button>
-              <Button aria-label="拒绝" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('reject')} theme="light" type="danger">拒绝</Button>
-              <Button aria-label="通过" disabled={loading || !schema.ok} loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
-            </div>
-          ) : null}
-        </main>
-
-        <aside style={rightPanelStyle}>
-          {showingDemo ? <MetricGrid /> : null}
-          {rulePanelOpen ? (
-            <RuleConfigPanel
-              prompts={ruleConfigs}
-              selectedRule={selectedRule}
-              selectedRuleId={selectedRuleId}
-              activePromptId={ruleActivePromptId}
-              aiReviewEnabled={ruleAIReviewEnabled}
-              currentPromptId={detail?.aiReview?.prompt?.id ?? null}
-              loading={ruleLoading}
-              error={ruleError}
-              onSelectRule={setSelectedRuleId}
-              onClose={() => {
-                ruleLoadSeq.current += 1
-                setRulePanelOpen(false)
-                setRuleLoading(false)
-              }}
-            />
-          ) : null}
-          <Timeline
-            auditLogs={showingDemo ? undefined : detail?.auditLogs}
-            submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id}
-            demoEvents={showingDemo ? selectedDemoDetail.timeline : undefined}
-            demoMode={showingDemo}
-          />
-        </aside>
+      <div className="hr-side__tabs" role="tablist" style={viewTabsStyle}>
+        <span
+          role="tab"
+          aria-selected={view === 'workbench'}
+          className={`hr-side__tab${view === 'workbench' ? ' hr-side__tab--active' : ''}`}
+          onClick={() => setView('workbench')}
+        >
+          审核工作台
+        </span>
+        <span
+          role="tab"
+          aria-selected={view === 'results'}
+          className={`hr-side__tab${view === 'results' ? ' hr-side__tab--active' : ''}`}
+          onClick={() => setView('results')}
+        >
+          审核结果
+        </span>
       </div>
+
+      {view === 'results' ? (
+        <ReviewResults onOpenResult={(result) => { void openResultDetail(result) }} />
+      ) : (
+        <div className="hr-shell" style={shellStyle}>
+          <aside className="hr-side" style={hrSideStyle}>
+            {showingDemo ? (
+              <div className="hr-side__tabs">
+                <span className="hr-side__tab hr-side__tab--active">AI 已建议通过<span className="hr-side__tab-num">128</span></span>
+                <span className="hr-side__tab">AI 已建议打回<span className="hr-side__tab-num">47</span></span>
+                <span className="hr-side__tab">转人工<span className="hr-side__tab-num">9</span></span>
+              </div>
+            ) : null}
+            <div className="hr-batch">
+              <label className="hr-batch__check">
+                <input
+                  aria-label="选择全部审核项"
+                  type="checkbox"
+                  checked={!showingDemo && submissions.length > 0 && selectedSubmissionIds.length === submissions.length}
+                  onChange={(event) => setSelectedSubmissionIds(event.target.checked ? submissions.map((submission) => submission.id) : [])}
+                />
+                已选 {showingDemo ? 3 : selectedSubmissionIds.length} 条
+              </label>
+              <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('approve')}>批量通过</button>
+              <button disabled={!showingDemo && selectedSubmissionIds.length === 0} onClick={() => void batchReview('revise')}>批量打回</button>
+            </div>
+            {showingDemo ? (
+              <div className="ai-stat-card">
+                <div className="ai-stat-card__radial" />
+                <div>
+                  <div className="ai-stat-card__rate">38 / s</div>
+                  <div className="ai-stat-card__meta">平均耗时 1.4s · 重试率 1.2%<br />任务 T-2041 · 规则「电商相关性 v2」</div>
+                </div>
+              </div>
+            ) : null}
+            <div>
+              {queueItems.map((item) => (
+                <QueueCard
+                  key={item.kind === 'real' ? item.submission.id : item.item.id}
+                  item={item}
+                  active={isQueueItemActive(item, selected, selectedDemoId)}
+                  selected={item.kind === 'real' ? selectedSubmissionIds.includes(item.submission.id) : false}
+                  onToggleSelected={(checked) => {
+                    if (item.kind !== 'real') return
+                    setSelectedSubmissionIds((current) => checked
+                      ? Array.from(new Set([...current, item.submission.id]))
+                      : current.filter((id) => id !== item.submission.id))
+                  }}
+                  onClick={() => void openQueueItem(item)}
+                />
+              ))}
+            </div>
+          </aside>
+
+          <main className="hr-main" style={hrMainStyle}>
+            {showingDemo ? (
+              <DemoReviewDetail item={selectedDemo} detail={selectedDemoDetail} reason={reason} setReason={setReason} />
+            ) : (
+              <RealReviewDetail
+                detail={detail}
+                selected={selected}
+                schema={schema}
+                payload={payload}
+                answer={answer}
+                reason={reason}
+                setReason={setReason}
+                stageLabel={detailStage.label}
+                stageProgress={detailStage.progress}
+              />
+            )}
+
+            <div className="hr-decisions">
+              <button className="hr-decision hr-decision--reject" onClick={() => void review('revise')} disabled={loading || (!showingDemo && !schema.ok)}>
+                <div className="hr-decision__title">↩ 打回</div>
+                <div className="hr-decision__hint">返回标注员修改 · 重新提交</div>
+              </button>
+              <button className="hr-decision hr-decision--revise" onClick={() => void review('reject')} disabled={loading || (!showingDemo && !schema.ok)}>
+                <div className="hr-decision__title">✎ 拒绝</div>
+                <div className="hr-decision__hint">终止本条提交 · 记录拒绝原因</div>
+              </button>
+              <button className="hr-decision hr-decision--approve" onClick={() => void review('approve')} disabled={loading || (!showingDemo && !schema.ok)}>
+                <div className="hr-decision__title">✓ {approveLabel}</div>
+                <div className="hr-decision__hint">{showingDemo || !selected ? '本条进入终审 / 可导出' : `推进一级 · 审核进度 ${detailStage.progress}`}</div>
+              </button>
+            </div>
+
+            {selected ? (
+              <div style={legacyActionRowStyle}>
+                <Button aria-label="打回修改" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('revise')} theme="light">打回修改</Button>
+                <Button aria-label="拒绝" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('reject')} theme="light" type="danger">拒绝</Button>
+                <Button aria-label="通过" disabled={loading || !schema.ok} loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
+              </div>
+            ) : null}
+          </main>
+
+          <aside className="hr-right" style={hrRightStyle}>
+            {showingDemo ? <MetricGrid /> : null}
+            {rulePanelOpen ? (
+              <RuleConfigPanel
+                prompts={ruleConfigs}
+                selectedRule={selectedRule}
+                selectedRuleId={selectedRuleId}
+                activePromptId={ruleActivePromptId}
+                aiReviewEnabled={ruleAIReviewEnabled}
+                currentPromptId={detail?.aiReview?.prompt?.id ?? null}
+                loading={ruleLoading}
+                error={ruleError}
+                onSelectRule={setSelectedRuleId}
+                onClose={() => {
+                  ruleLoadSeq.current += 1
+                  setRulePanelOpen(false)
+                  setRuleLoading(false)
+                }}
+              />
+            ) : null}
+            <Timeline
+              auditLogs={showingDemo ? undefined : detail?.auditLogs}
+              submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id}
+              demoEvents={showingDemo ? selectedDemoDetail.timeline : undefined}
+              demoMode={showingDemo}
+            />
+          </aside>
+        </div>
+      )}
     </div>
   )
 }
@@ -694,22 +759,25 @@ function QueueCard({
 }) {
   if (item.kind === 'real') {
     const submission = item.submission
+    const stage = resolveStage(submission)
     return (
-      <div style={active ? activeQueueCardStyle : queueCardStyle}>
-        <label style={queueSelectStyle}>
+      <div className={`hr-item${active ? ' hr-item--selected' : ''}`}>
+        <div className="hr-item__head">
           <input
             aria-label={`选择 Submission #${submission.id}`}
             checked={selected}
             onChange={(event) => onToggleSelected(event.target.checked)}
             type="checkbox"
           />
-          <span>选择</span>
-        </label>
+        </div>
         <button onClick={onClick} style={queueCardButtonStyle}>
-          <div style={cardMetaStyle}>Task #{submission.taskId} · Item #{submission.itemId}</div>
-          <strong>Submission #{submission.id}</strong>
-          <div style={pillRowStyle}>
-            <span style={aiPillStyle}>预审 {formatAIReviewSummary(submission)}</span>
+          <div className="hr-item__head" style={{ marginBottom: 6 }}>
+            <span className="hr-item__sub">Submission #{submission.id}</span>
+            <span>· Task #{submission.taskId} · Item #{submission.itemId}</span>
+          </div>
+          <div className="hr-item__tags">
+            <span className="hr-tag hr-tag--ai">预审 {formatAIReviewSummary(submission)}</span>
+            <span className="hr-tag hr-tag--purple" aria-label={`审核阶段 ${stage.label}`}>{stage.label} {stage.progress}</span>
             <StatusBadge status={submission.status} />
           </div>
         </button>
@@ -717,12 +785,15 @@ function QueueCard({
     )
   }
   return (
-    <button onClick={onClick} style={active ? activeQueueCardStyle : queueCardStyle}>
-      <div style={cardMetaStyle}>{item.item.id} · {item.item.meta}</div>
-      <strong>{item.item.title}</strong>
-      <div style={pillRowStyle}>
-        <span style={aiPillStyle}>{item.item.badge}</span>
-        <span style={verdictPillStyle(item.item.tone)}>{item.item.verdict}</span>
+    <button onClick={onClick} className={`hr-item${active ? ' hr-item--selected' : ''}`} style={demoQueueButtonStyle}>
+      <div className="hr-item__head">
+        <span className="hr-item__sub">{item.item.id}</span>
+        <span>· {item.item.meta}</span>
+      </div>
+      <div className="hr-item__title">{item.item.title}</div>
+      <div className="hr-item__tags">
+        <span className="hr-tag hr-tag--ai">{item.item.badge}</span>
+        <span className={demoVerdictTagClass(item.item.tone)}>{item.item.verdict}</span>
       </div>
     </button>
   )
@@ -843,6 +914,8 @@ function RealReviewDetail({
   answer,
   reason,
   setReason,
+  stageLabel,
+  stageProgress,
 }: {
   detail: TaskBundle | null
   selected: Submission | null
@@ -851,24 +924,26 @@ function RealReviewDetail({
   answer: AnswerValue
   reason: string
   setReason: (value: string) => void
+  stageLabel: string
+  stageProgress: string
 }) {
   if (!detail?.item) {
     return (
-      <section style={{ ...detailShellStyle, border: '1px dashed var(--color-border-light)', minHeight: 420, alignContent: 'center', justifyItems: 'center' }}>
-        <EmptyState title="等待审核" body="从左侧队列选择一条提交记录开始人工审核。" variant="queue" />
-      </section>
+      <EmptyState title="等待审核" body="从左侧队列选择一条提交记录开始人工审核。" variant="queue" />
     )
   }
 
   return (
-    <section style={detailShellStyle}>
-      <div style={detailHeaderStyle}>
-        <div>
-          <h2 style={detailTitleStyle}>{schema.ok ? schema.schema.title : '提交详情'}</h2>
-          <p style={mutedTextStyle}>Submission #{detail.submission?.id} · Task #{detail.task.id} · Item #{detail.item.id}</p>
+    <>
+      <div className="hr-main__head">
+        <h2>{schema.ok ? schema.schema.title : '提交详情'}</h2>
+        <div className="hr-main__head-right">
+          <span className="lh-tag lh-tag--purple" aria-label={`审核阶段 ${stageLabel}`}>{stageLabel} · 审核进度 {stageProgress}</span>
+          <StatusBadge status={selected?.status} />
         </div>
-        <StatusBadge status={selected?.status} />
       </div>
+      <div className="hr-main__meta">Submission #{detail.submission?.id} · Task #{detail.task.id} · Item #{detail.item.id}</div>
+
       <div style={rendererShellStyle}>
         {schema.ok ? (
           <SchemaRenderer
@@ -882,61 +957,25 @@ function RealReviewDetail({
           <div role="alert" style={errorBannerStyle}>{schema.message}</div>
         )}
       </div>
-      <section style={aiResultStyle}>
-        <RealAIReviewSummary aiReview={detail.aiReview} submission={detail.submission} />
-      </section>
+
+      <AIVerdictPanel aiReview={detail.aiReview} submission={detail.submission} />
+
       {detail.latestHumanReview?.reason ? (
-        <section style={previousReviewStyle}>
-          <h3 style={sectionTitleStyle}>上一轮意见</h3>
+        <section className="ai-section" style={previousReviewStyle}>
+          <div className="ai-section__head"><span className="ai-section__title">上一轮意见</span></div>
           <p style={resultReasonStyle}>{detail.latestHumanReview.reason}</p>
         </section>
       ) : null}
-      <label style={labelStyle}>审核意见</label>
-      <textarea value={reason} onChange={(event) => setReason(event.target.value)} style={textareaStyle} placeholder="输入审核意见..." />
-      <RealAIDiagnostics answer={detail.revision?.answer} aiReview={detail.aiReview} auditLogs={detail.auditLogs ?? []} />
-    </section>
-  )
-}
 
-function RealAIReviewSummary({ aiReview, submission }: { aiReview?: AIReviewDetail | null, submission?: Submission }) {
-  if (aiReview) {
-    const score = formatAIScore(aiReview.overallScore)
-    const verdict = aiReview.verdict ?? submission?.aiVerdict ?? 'unknown'
-    const dimensions = normalizeDimensions(aiReview.dimensions)
-    return (
-      <>
-        <div style={sectionTitleRowStyle}>
-          <h3 style={sectionTitleStyle}>AI 预审结论</h3>
-          <span style={modelPillStyle}>{aiReview.prompt ? `v${aiReview.prompt.version} · ${aiReview.prompt.model}` : `prompt v${aiReview.promptVersion}`}</span>
-        </div>
-        <div>AI {verdict} · {score}</div>
-        <div style={{ color: verdict === 'pass' ? 'var(--color-success)' : 'var(--color-danger)', fontWeight: 700 }}>verdict: {verdict}</div>
-        <div style={{ fontWeight: 700 }}>score: {score}</div>
-        {dimensions.length > 0 ? <ScoreBars rows={dimensions} /> : null}
-        {aiReview.reason ? <p style={resultReasonStyle}>{aiReview.reason}</p> : null}
-        <div style={scoreLineStyle}>
-          <StatusBadge status={aiReview.status} />
-          <span>tokens: {aiReview.tokensInput + aiReview.tokensOutput}</span>
-          <span>latency: {aiReview.latencyMs}ms</span>
-        </div>
-      </>
-    )
-  }
-  if (submission?.aiVerdict) {
-    return (
-      <>
-        <h3 style={sectionTitleStyle}>AI 预审结论</h3>
-        <div>AI {submission.aiVerdict} · {formatAIScore(submission.aiScore)}</div>
-        <div style={{ color: submission.aiVerdict === 'pass' ? 'var(--color-success)' : 'var(--color-danger)', fontWeight: 700 }}>verdict: {submission.aiVerdict}</div>
-        <div style={{ fontWeight: 700 }}>score: {formatAIScore(submission.aiScore)}</div>
-      </>
-    )
-  }
-  return (
-    <>
-      <h3 style={sectionTitleStyle}>AI 预审结论</h3>
-      <div>AI 未预审</div>
-      <p style={mutedTextStyle}>暂无 AI 预审结果</p>
+      <div className="hr-review-label">审核意见 <span className="lh-muted">（打回时必填）</span></div>
+      <textarea className="hr-textarea" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="输入审核意见..." />
+      <div className="hr-quick-tags">
+        {QUICK_TAGS.map((tag) => (
+          <span key={tag} className="hr-quick-tag" onClick={() => setReason(reason ? `${reason} ${tag}` : tag)}>{tag}</span>
+        ))}
+      </div>
+
+      <RealAIDiagnostics answer={detail.revision?.answer} aiReview={detail.aiReview} auditLogs={detail.auditLogs ?? []} />
     </>
   )
 }
@@ -1168,24 +1207,6 @@ function formatAIScore(score: number | null | undefined) {
   return typeof score === 'number' && Number.isFinite(score) ? String(score) : '-'
 }
 
-function normalizeDimensions(raw: unknown): Array<{ label: string, value: number }> {
-  if (!Array.isArray(raw)) {
-    return []
-  }
-  return raw.flatMap((item) => {
-    if (!item || typeof item !== 'object') {
-      return []
-    }
-    const record = item as Record<string, unknown>
-    const label = typeof record.name === 'string' ? record.name : typeof record.label === 'string' ? record.label : ''
-    const score = typeof record.score === 'number' ? record.score : typeof record.value === 'number' ? record.value : NaN
-    if (!label || !Number.isFinite(score)) {
-      return []
-    }
-    return [{ label, value: score }]
-  })
-}
-
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, value))
 }
@@ -1236,11 +1257,16 @@ function canRetryAIReview(aiReview: AIReviewDetail | null | undefined) {
   return aiReview?.status === 'failed' || aiReview?.status === 'dead'
 }
 
-function verdictPillStyle(tone: DemoReviewItem['tone']): CSSProperties {
-  return {
-    ...neutralPillStyle,
-    color: tone === 'pass' ? 'var(--color-success)' : tone === 'reject' ? '#f97316' : tone === 'failed' ? 'var(--color-danger)' : 'var(--color-text-secondary)',
-    background: tone === 'pass' ? 'var(--color-success-soft)' : tone === 'reject' ? '#fff7ed' : tone === 'failed' ? 'var(--color-danger-soft)' : 'var(--color-panel-header)',
+function demoVerdictTagClass(tone: DemoReviewItem['tone']): string {
+  switch (tone) {
+    case 'pass':
+      return 'hr-tag hr-tag--success'
+    case 'reject':
+      return 'hr-tag hr-tag--warning'
+    case 'failed':
+      return 'hr-tag hr-tag--danger'
+    default:
+      return 'hr-tag hr-tag--purple'
   }
 }
 
@@ -1281,112 +1307,40 @@ const headerActionsStyle: CSSProperties = {
   alignItems: 'center',
 }
 
-const leftPanelStyle: CSSProperties = {
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
-  borderRadius: 'var(--radius-lg)',
-  padding: 'var(--space-sm)',
-  minHeight: 720,
+// 顶部视图切换 tab(审核工作台 / 审核结果)沿用 .hr-side__tabs 样式但收窄。
+const viewTabsStyle: CSSProperties = {
+  maxWidth: 320,
 }
 
-const centerPanelStyle: CSSProperties = {
-  display: 'grid',
-  gap: 'var(--space-md)',
+// hr-shell 默认是 flex 全高布局,这里包在卡片内,允许内容区收缩。
+const shellStyle: CSSProperties = {
+  minHeight: 640,
+  border: '1px solid var(--lh-border)',
+  borderRadius: 'var(--lh-radius-lg)',
+  overflow: 'hidden',
+  background: 'var(--lh-bg-card)',
+}
+
+const hrSideStyle: CSSProperties = {
   minWidth: 0,
 }
 
-const rightPanelStyle: CSSProperties = {
+const hrMainStyle: CSSProperties = {
+  minWidth: 0,
+}
+
+const hrRightStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
-  borderRadius: 'var(--radius-lg)',
-  padding: 'var(--space-sm)',
-  minHeight: 720,
+  alignContent: 'start',
 }
 
-const tabRowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr 1fr',
-  gap: 'var(--space-xs)',
-  borderBottom: '1px solid var(--color-border-light)',
-  paddingBottom: 'var(--space-sm)',
-}
-
-const tabStyle: CSSProperties = {
-  border: 0,
-  background: 'transparent',
-  color: 'var(--color-text-secondary)',
-  fontWeight: 600,
-  padding: 'var(--space-sm)',
-  cursor: 'pointer',
-}
-
-const activeTabStyle: CSSProperties = {
-  ...tabStyle,
-  color: 'var(--color-accent)',
-  borderBottom: '2px solid var(--color-accent)',
-}
-
-const bulkBarStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-md)',
-  padding: 'var(--space-sm)',
-  background: 'var(--color-panel-header)',
-  borderRadius: 'var(--radius-md)',
-  fontSize: 'var(--text-sm)',
-}
-
-const miniButtonStyle: CSSProperties = {
-  border: '1px solid var(--color-border-light)',
-  borderRadius: 'var(--radius-sm)',
-  background: 'var(--color-surface)',
-  padding: '4px 8px',
-  cursor: 'pointer',
-}
-
-const slaCardStyle: CSSProperties = {
-  display: 'grid',
-  gap: 2,
-  marginTop: 'var(--space-md)',
-  padding: 'var(--space-md)',
-  border: '1px solid var(--color-accent-soft)',
-  borderRadius: 'var(--radius-md)',
-  background: 'var(--color-info-bg)',
-  color: 'var(--color-text-secondary)',
-}
-
-const queueListStyle: CSSProperties = {
-  display: 'grid',
-  marginTop: 'var(--space-md)',
-}
-
-const queueCardStyle: CSSProperties = {
-  display: 'grid',
-  gap: 'var(--space-xs)',
+const demoQueueButtonStyle: CSSProperties = {
+  display: 'block',
   width: '100%',
-  padding: 'var(--space-md)',
-  border: 0,
-  borderBottom: '1px solid var(--color-border-light)',
-  background: 'var(--color-surface)',
   textAlign: 'left',
-  cursor: 'pointer',
-}
-
-const activeQueueCardStyle: CSSProperties = {
-  ...queueCardStyle,
-  background: 'var(--color-info-bg)',
-  borderLeft: '3px solid var(--color-accent)',
-}
-
-const queueSelectStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 'var(--space-xs)',
-  color: 'var(--color-text-muted)',
-  fontSize: 'var(--text-sm)',
+  font: 'inherit',
+  color: 'inherit',
 }
 
 const queueCardButtonStyle: CSSProperties = {
@@ -1399,26 +1353,6 @@ const queueCardButtonStyle: CSSProperties = {
   textAlign: 'left',
   color: 'inherit',
   cursor: 'pointer',
-}
-
-const cardMetaStyle: CSSProperties = {
-  color: 'var(--color-text-muted)',
-  fontSize: 'var(--text-sm)',
-}
-
-const pillRowStyle: CSSProperties = {
-  display: 'flex',
-  gap: 'var(--space-xs)',
-  flexWrap: 'wrap',
-}
-
-const aiPillStyle: CSSProperties = {
-  borderRadius: 999,
-  background: '#f3e8ff',
-  color: '#7c3aed',
-  padding: '2px 8px',
-  fontSize: 'var(--text-sm)',
-  fontWeight: 700,
 }
 
 const neutralPillStyle: CSSProperties = {
@@ -1648,42 +1582,6 @@ const processLogRowStyle: CSSProperties = {
   borderBottom: '1px dashed var(--color-border-light)',
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
-}
-
-const decisionGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(3, 1fr)',
-  gap: 'var(--space-sm)',
-}
-
-const decisionButtonBaseStyle: CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  padding: 'var(--space-lg)',
-  borderRadius: 'var(--radius-md)',
-  cursor: 'pointer',
-  textAlign: 'center',
-}
-
-const rejectDecisionStyle: CSSProperties = {
-  ...decisionButtonBaseStyle,
-  border: '1px solid #ffb4ab',
-  background: '#fff1f1',
-  color: 'var(--color-danger)',
-}
-
-const fixDecisionStyle: CSSProperties = {
-  ...decisionButtonBaseStyle,
-  border: '1px solid #f59e0b',
-  background: '#fffbeb',
-  color: '#b45309',
-}
-
-const passDecisionStyle: CSSProperties = {
-  ...decisionButtonBaseStyle,
-  border: '2px solid #4ade80',
-  background: 'var(--color-success-soft)',
-  color: 'var(--color-success)',
 }
 
 const legacyActionRowStyle: CSSProperties = {

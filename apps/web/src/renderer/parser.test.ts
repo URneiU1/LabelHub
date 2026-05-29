@@ -181,6 +181,58 @@ describe('parseTemplateSchema', () => {
     }
   })
 
+  it('parses visibleWhen and customRule validation metadata', () => {
+    const result = parseTemplateSchema({
+      title: 'advanced',
+      fields: [
+        { name: 'decision', widget: 'Radio', options: ['pass', 'reject'] },
+        { name: 'reject_reason', widget: 'Input', visibleWhen: { field: 'decision', equals: 'reject' } },
+        { name: 'score', widget: 'Input', customRule: { expr: 'len(value) >= 4', message: '至少 4 个字符' } },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields[1]).toMatchObject({
+        visibleWhen: { field: 'decision', equals: 'reject' },
+      })
+      expect(result.value.fields[2]).toMatchObject({
+        customRule: { expr: 'len(value) >= 4', message: '至少 4 个字符' },
+      })
+    }
+  })
+
+  it('rejects dangling visibleWhen references', () => {
+    const badRef = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'reason', widget: 'Input', visibleWhen: { field: 'missing', notEmpty: true } }],
+    })
+    expect(badRef.ok).toBe(false)
+    if (!badRef.ok) {
+      expect(badRef.error.field).toBe('fields[0].visibleWhen.field')
+    }
+  })
+
+  it('rejects an un-parseable customRule expr and an empty message', () => {
+    const badExpr = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'score', widget: 'Input', customRule: { expr: 'value >= ', message: 'invalid' } }],
+    })
+    expect(badExpr.ok).toBe(false)
+    if (!badExpr.ok) {
+      expect(badExpr.error.field).toBe('fields[0].customRule.expr')
+    }
+
+    const badMessage = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'score', widget: 'Input', customRule: { expr: 'value > 0', message: '' } }],
+    })
+    expect(badMessage.ok).toBe(false)
+    if (!badMessage.ok) {
+      expect(badMessage.error.field).toBe('fields[0].customRule.message')
+    }
+  })
+
   it('preserves export_fields and x-* extensions round-trip', () => {
     const result = parseTemplateSchema({
       title: 'exportable',

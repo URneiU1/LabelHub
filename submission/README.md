@@ -59,14 +59,14 @@ make web       # 终端 C — http://localhost:5173
 
 打开浏览器到 http://localhost:5173 即可。
 
-### 评估账号(密码均为 `pass`)
+### 评估账号(密码均为 `123456`)
 
 | 用户名 | 角色 | 评估场景 |
 |---|---|---|
 | `owner1` | Owner | 任务配置 / 模板 Designer / AI Prompt / Golden Sample / Stats Board / 多格式导出 |
 | `labeler1` | Labeler | 任务广场领题 / 答题(支持 Group + Tabs + ShowItem + Radio + Tags + RichText + JSONEditor + FileUpload + LLMTrigger 9+2 物料)/ 草稿自动保存 / 提交 |
 | `reviewer1` | Reviewer | 审核队列 / AI verdict + 维度评分展示 / 规则查看 / 通过-打回-修订 / 批量审核 |
-| `admin` | Admin | 全局管理 |
+| `admin1` | Admin | 全局管理 |
 
 ### 5 分钟跑通三角色完整链路
 

@@ -46,7 +46,7 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
     return (
       <section aria-label="数据看板" style={boardStyle}>
         <h3 style={headingStyle}>数据看板</h3>
-        <p style={{ color: 'var(--color-danger)' }}>{error}</p>
+        <p style={{ color: 'var(--lh-danger)' }}>{error}</p>
         <button type="button" aria-label="重试加载看板" onClick={() => load()} style={retryButtonStyle}>重试</button>
       </section>
     )
@@ -56,7 +56,7 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
     return (
       <section aria-label="数据看板" style={boardStyle}>
         <h3 style={headingStyle}>数据看板</h3>
-        <p style={{ color: 'var(--color-text-muted)' }}>加载中…</p>
+        <p style={{ color: 'var(--lh-text-3)' }}>加载中…</p>
       </section>
     )
   }
@@ -126,18 +126,18 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
 }
 
 const boardStyle: CSSProperties = {
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
+  background: 'var(--lh-bg-card)',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-lg)',
   padding: 'var(--space-lg)',
   marginTop: 'var(--space-lg)',
 }
-const headingStyle: CSSProperties = { fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
+const headingStyle: CSSProperties = { fontFamily: 'var(--lh-font-sans)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
 const gridStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 'var(--space-md)' }
-const cardStyle: CSSProperties = { border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', padding: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }
-const cardTitleStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }
-const bigNumberStyle: CSSProperties = { fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', color: 'var(--color-accent)' }
+const cardStyle: CSSProperties = { border: '1px solid var(--lh-border)', borderRadius: 'var(--radius-md)', padding: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }
+const cardTitleStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--lh-text-2)' }
+const bigNumberStyle: CSSProperties = { fontFamily: 'var(--lh-font-sans)', fontSize: 'var(--text-h1)', color: 'var(--lh-primary)' }
 const chartBoxStyle: CSSProperties = { height: 220 }
-const progressTrackStyle: CSSProperties = { height: 6, background: 'var(--color-border-light)', borderRadius: 99, overflow: 'hidden' }
-const progressFillStyle: CSSProperties = { height: '100%', background: 'var(--color-accent)' }
-const retryButtonStyle: CSSProperties = { marginTop: 'var(--space-sm)', padding: '6px 16px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', cursor: 'pointer' }
+const progressTrackStyle: CSSProperties = { height: 6, background: 'var(--lh-border)', borderRadius: 99, overflow: 'hidden' }
+const progressFillStyle: CSSProperties = { height: '100%', background: 'var(--lh-primary)' }
+const retryButtonStyle: CSSProperties = { marginTop: 'var(--space-sm)', padding: '6px 16px', border: '1px solid var(--lh-border)', borderRadius: 'var(--radius-md)', background: 'var(--lh-bg)', cursor: 'pointer' }

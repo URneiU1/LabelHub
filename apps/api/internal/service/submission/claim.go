@@ -14,6 +14,10 @@ const (
 	ItemStatusAvailable = "available"
 	ItemStatusClaimed   = "claimed"
 	TaskStatusPublished = "published"
+
+	DistributionFirstCome = "first_come"
+	DistributionAssigned  = "assigned"
+	DistributionQuota     = "quota"
 )
 
 var (
@@ -21,6 +25,8 @@ var (
 	ErrTaskNotPublished = errors.New("submission: task is not accepting new claims")
 	ErrNoAvailableItem  = errors.New("submission: no available item")
 	ErrClaimRaceLost    = errors.New("submission: claim race lost")
+	ErrQuotaReached     = errors.New("submission: per-user quota reached")
+	ErrNotAssigned      = errors.New("submission: labeler is not assigned to this task")
 )
 
 type ClaimInput struct {
@@ -65,6 +71,11 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 
 		if task.Status != TaskStatusPublished {
 			return ErrTaskNotPublished
+		}
+
+		// 分发策略约束(仅作用于"领新题"路径;已认领的题目重新拉取不受限,见上方早返回)。
+		if err := enforceDistribution(tx, task, input.LabelerID); err != nil {
+			return err
 		}
 
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
@@ -112,4 +123,41 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 		return nil
 	})
 	return result, err
+}
+
+// enforceDistribution 按任务分发策略决定 labeler 是否可领新题。
+//
+//	first_come: 不限制(默认)。
+//	quota     : QuotaPerUser>0 时,该 labeler 在本任务的 submission 数已达上限则拒绝。
+//	assigned  : 仅 task_assignees 里(task 级,item_id 为 NULL)登记的 labeler 可领。
+func enforceDistribution(tx *gorm.DB, task model.Task, labelerID uint64) error {
+	switch task.Distribution {
+	case DistributionQuota:
+		if task.QuotaPerUser <= 0 {
+			return nil
+		}
+		var count int64
+		if err := tx.Model(&model.Submission{}).
+			Where("task_id = ? AND labeler_id = ?", task.ID, labelerID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= int64(task.QuotaPerUser) {
+			return ErrQuotaReached
+		}
+		return nil
+	case DistributionAssigned:
+		var count int64
+		if err := tx.Model(&model.TaskAssignee{}).
+			Where("task_id = ? AND user_id = ? AND item_id IS NULL", task.ID, labelerID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrNotAssigned
+		}
+		return nil
+	default:
+		return nil
+	}
 }

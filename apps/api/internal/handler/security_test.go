@@ -287,6 +287,9 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .human_reviews.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "reviewer_id", "stage", "verdict", "reason", "created_at"}).
 			AddRow(81, 501, revisionID, 7, "first", "revise", "上一轮意见", now))
+	// 派生 reviewStage 的 approve 计数(当前 revision 已有 1 条 approve → 复审/second)。
+	mock.ExpectQuery(`(?is)^SELECT revision_id, COUNT\(\*\) AS total FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id", "total"}).AddRow(revisionID, 1))
 
 	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
 	registerAllHandlers(r, db)
@@ -298,6 +301,9 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	data := responseData(t, rec)
+	if data["reviewStage"] != "second" || data["reviewLevel"] != float64(2) || data["requiredLevels"] != float64(3) {
+		t.Fatalf("reviewStage/level/required = %v/%v/%v", data["reviewStage"], data["reviewLevel"], data["requiredLevels"])
+	}
 	aiReview := data["aiReview"].(map[string]any)
 	if aiReview["reason"] != "looks good" {
 		t.Fatalf("aiReview.reason = %v", aiReview["reason"])
@@ -496,6 +502,9 @@ func TestBatchReviewAppliesApproveForSelectedSubmissions(t *testing.T) {
 			AddRow(501, 1, 11, "human_reviewing", revisionID))
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 已有 2 条 approve → batch approve 这一条触发终审,落到 approved。
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(71, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions.`).

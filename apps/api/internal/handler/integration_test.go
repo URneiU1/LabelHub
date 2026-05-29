@@ -142,6 +142,9 @@ func TestReviewApprove_TransactionFullSequence(t *testing.T) {
 			AddRow(42, 1, 11, "human_reviewing", revisionID))
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 已有 2 条 approve → 本次是终审(第 3 次),推到 approved。
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).

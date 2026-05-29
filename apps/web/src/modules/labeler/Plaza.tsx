@@ -1,17 +1,25 @@
-import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
-import { apiGet, apiPost, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import { apiGet, apiPost, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
 import StatusBadge from '../../shared/components/StatusBadge'
+import ItemNav from './ItemNav'
+import MyData from './MyData'
+import TaskPlaza from './TaskPlaza'
+import '../../styles/lh/workbench.css'
+import '../../styles/lh/tasks.css'
+import './plaza.css'
 
 type ParsedSchema =
   | { ok: true, schema: TemplateSchema }
   | { ok: false, message: string }
+
+type View = 'plaza' | 'answer'
+type PlazaTab = 'tasks' | 'mydata'
 
 export default function LabelerPlaza() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -23,6 +31,13 @@ export default function LabelerPlaza() {
   const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const lastSavedDraftKey = useRef('')
   const autoSaveSeq = useRef(0)
+
+  // 4.3 视图编排:plaza(任务广场 + 我的数据)与 answer(三列作答页)切换。
+  const [view, setView] = useState<View>('plaza')
+  const [plazaTab, setPlazaTab] = useState<PlazaTab>('tasks')
+  const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [itemNav, setItemNav] = useState<LabelerTaskItems | null>(null)
+  const [itemNavLoading, setItemNavLoading] = useState(false)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -50,6 +65,20 @@ export default function LabelerPlaza() {
 
   const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
+
+  // 题目导航数据(新端点)。失败时降级:返回 null,作答页仍可用领取兜底导航。
+  const loadItemNav = useCallback(async (taskId: number) => {
+    setItemNavLoading(true)
+    try {
+      const data = await apiGet<LabelerTaskItems>(`/tasks/${taskId}/labeler/items`)
+      setItemNav(data)
+    } catch (error) {
+      setItemNav(null)
+      Toast.error(error instanceof Error ? error.message : '加载题目导航失败,已切换为仅领取模式')
+    } finally {
+      setItemNavLoading(false)
+    }
+  }, [])
 
   async function claim(taskId: number) {
     setLoading(true)
@@ -181,127 +210,272 @@ export default function LabelerPlaza() {
     return () => window.clearTimeout(timer)
   }, [answer, answerKey, bundle?.item, bundle?.task, schema])
 
-  return (
-    <div>
-      <div style={{ marginBottom: 'var(--space-xl)' }}>
-        <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', margin: 0, fontWeight: 700 }}>标注工作台</h1>
-        <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务领取 · 在线作答 · AI 辅助 · 结果提交</p>
-      </div>
+  // ---- 4.3 新增导航编排(不触碰上方既有 claim/saveDraft/submit/autosave/快捷键逻辑) ----
 
-      <div className="lh-shell-2col">
-        <section style={panelStyle}>
-          <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
-            <h2 style={headingStyle}>任务广场</h2>
+  // 打开导航里"我的题"(已领/有提交),镜像 openSubmission,但用 itemId 直接定位。
+  const openByItem = useCallback(async (taskId: number, itemId: number) => {
+    setLoading(true)
+    try {
+      const data = await apiGet<TaskBundle>(`/tasks/${taskId}/items/${itemId}`)
+      setBundle(data)
+      const nextAnswer = parseAnswer(data.revision?.answer)
+      autoSaveSeq.current += 1
+      lastSavedDraftKey.current = answerDraftKey(nextAnswer)
+      setAnswer(nextAnswer)
+      setErrors([])
+      setAutoSaveState('idle')
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载题目失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // 进入某任务作答页:记录活动任务、加载题目导航、领取下一题开始作答。
+  const enterTask = useCallback((task: Task) => {
+    setActiveTask(task)
+    setView('answer')
+    void loadItemNav(task.id)
+    void claim(task.id)
+    // claim 是每次渲染重建的组件方法,仅在点击时同步调用,不影响 enterTask 的语义。
+  }, [loadItemNav])
+
+  // 选中导航里的一题:我的题(mine 或有 submissionId)→ 直接打开;available/他人 → 领取下一题。
+  const selectNavItem = useCallback((item: LabelerTaskItem) => {
+    if (!activeTask) {
+      return
+    }
+    if (item.mine || item.submissionId != null) {
+      void openByItem(activeTask.id, item.itemId)
+    } else {
+      void claim(activeTask.id)
+    }
+    // claim 每次渲染重建,但仅在用户点击时同步调用,无需进依赖。
+  }, [activeTask, openByItem])
+
+  // 上一题/下一题:在题目导航列表里相对当前题移动;我的题直接打开,否则领取下一题。
+  const stepItem = useCallback((delta: number) => {
+    const items = itemNav?.items ?? []
+    if (!activeTask || items.length === 0) {
+      void claim(activeTask?.id ?? 0)
+      return
+    }
+    const currentIndex = items.findIndex((item) => item.itemId === bundle?.item?.id)
+    const nextIndex = Math.min(items.length - 1, Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + delta))
+    if (nextIndex === currentIndex) {
+      return
+    }
+    selectNavItem(items[nextIndex])
+  }, [activeTask, bundle?.item?.id, itemNav, selectNavItem])
+
+  // 跳过 / 领取下一题:走既有 claim 拿下一个 available。
+  const skipItem = useCallback(() => {
+    if (activeTask) {
+      void claim(activeTask.id)
+    }
+  }, [activeTask])
+
+  // 从"我的数据"打开一条提交:进入作答页,记录活动任务并加载题目导航,再复用既有 openSubmission。
+  const openFromMyData = useCallback((submission: Submission) => {
+    const matched = tasks.find((task) => task.id === submission.taskId)
+    setActiveTask(matched ?? { id: submission.taskId, title: `任务 #${submission.taskId}`, description: null, baselineDescription: null, status: 'published', totalItems: 0, finishedItems: 0 })
+    setView('answer')
+    void loadItemNav(submission.taskId)
+    void openSubmission(submission)
+    // openSubmission 每次渲染重建,仅在点击时调用,无需进依赖。
+  }, [tasks, loadItemNav])
+
+  const backToPlaza = useCallback(() => {
+    setView('plaza')
+    setBundle(null)
+    setActiveTask(null)
+    setItemNav(null)
+    setAnswer({})
+    setErrors([])
+    setAutoSaveState('idle')
+    autoSaveSeq.current += 1
+    lastSavedDraftKey.current = ''
+    void loadTasks()
+    void loadMySubmissions()
+  }, [loadMySubmissions, loadTasks])
+
+  // 提交/保存后刷新导航状态,保持左侧进度与状态点同步。仅在 bundle.submission?.status 变化时拉取。
+  useEffect(() => {
+    if (view === 'answer' && activeTask) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadItemNav(activeTask.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle?.submission?.status])
+
+  if (view === 'plaza') {
+    return (
+      <div className="lz-shell">
+        <div className="lh-page-head lh-hflex" style={{ alignItems: 'flex-start' }}>
+          <div>
+            <h1 className="lh-page-head__title">标注工作台</h1>
+            <div className="lh-page-head__crumb">在任务广场领取题目,或在我的数据查看标注记录</div>
           </div>
-          <div style={{ display: 'grid', gap: 'var(--space-md)' }}>
-            {tasks.map((task) => (
-              <div key={task.id} style={taskCardStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <strong style={{ fontSize: 'var(--text-base)' }}>{task.title}</strong>
+        </div>
+
+        <div className="lz-tabs" role="tablist" aria-label="工作台视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={plazaTab === 'tasks'}
+            className={'lz-tab' + (plazaTab === 'tasks' ? ' lz-tab--active' : '')}
+            onClick={() => setPlazaTab('tasks')}
+          >
+            任务广场
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={plazaTab === 'mydata'}
+            className={'lz-tab' + (plazaTab === 'mydata' ? ' lz-tab--active' : '')}
+            onClick={() => setPlazaTab('mydata')}
+          >
+            我的数据
+          </button>
+        </div>
+
+        {plazaTab === 'tasks' ? (
+          <TaskPlaza tasks={tasks} loading={loading} onEnter={enterTask} />
+        ) : (
+          <MyData submissions={mySubmissions} onOpen={openFromMyData} />
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="wb-shell">
+      <ItemNav
+        nav={itemNav}
+        loading={itemNavLoading}
+        activeItemId={bundle?.item?.id}
+        onSelect={selectNavItem}
+        onBack={backToPlaza}
+      />
+
+      <main className="wb-main">
+        {bundle?.item ? (
+          <>
+            <div className="wb-head">
+              <div>
+                <h1 className="wb-head__title">{schema.ok ? schema.schema.title : '标注表单'}</h1>
+                <div className="wb-head__meta">
+                  {[`任务 ID ${bundle.task.id}`, `题目 ID ${bundle.item.id}`, bundle.template?.version != null ? `模板 v${bundle.template.version}` : null]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </div>
-                <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 4 }}>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>完成: {task.finishedItems}/{task.totalItems}</span>
-                  <StatusBadge status={task.status} />
-                </div>
-                <ProgressBar value={task.finishedItems} total={task.totalItems} />
-                <Button aria-label="领取题目" loading={loading} onClick={() => void claim(task.id)} theme="solid" style={{ marginTop: 'var(--space-md)' }}>
-                  领取新题目
-                </Button>
+              </div>
+              <div className="wb-head__actions">
+                <StatusBadge status={bundle.submission?.status || 'draft'} label={bundle.submission ? undefined : '新题'} />
+              </div>
+            </div>
+
+            {bundle.latestHumanReview?.reason ? (
+              <div className="wb-banner" role="alert">
+                <strong>上一轮被打回：</strong>
+                {bundle.latestHumanReview.reason}
+              </div>
+            ) : null}
+
+            {schema.ok ? (
+              <SchemaRenderer
+                schema={schema.schema}
+                payload={payload}
+                value={answer}
+                errors={errors}
+                runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
+                onChange={(next) => {
+                  autoSaveSeq.current += 1
+                  setAnswer(next)
+                  if (answerDraftKey(next) !== lastSavedDraftKey.current) {
+                    setAutoSaveState('idle')
+                  }
+                  if (errors.length > 0) {
+                    setErrors(validateAnswer(schema.schema, next))
+                  }
+                }}
+              />
+            ) : (
+              <div role="alert" className="wb-banner">{schema.message}</div>
+            )}
+
+            <div className="wb-footer">
+              <Button theme="light" onClick={() => stepItem(-1)}>← 上一题</Button>
+              <Button theme="light" onClick={() => stepItem(1)}>下一题 →</Button>
+              <Button theme="light" onClick={skipItem}>跳过</Button>
+              <Button theme="light" onClick={() => Toast.info('已记录上报(演示)')}>报告题目</Button>
+              <span className="wb-footer__shortcuts">{autoSaveText(autoSaveState)}</span>
+              <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light">保存草稿</Button>
+              <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} title="提交审核 (Ctrl/Cmd + Enter)">提交审核</Button>
+            </div>
+          </>
+        ) : (
+          <EmptyState title="准备开始标注" body="正在领取题目,或在左侧题目导航选择一题开始工作。" variant="empty" />
+        )}
+      </main>
+
+      <aside className="wb-right">
+        <div className="wb-right__title">我的贡献（本任务）</div>
+
+        {itemNav?.counts ? (
+          <div className="wb-stats-card">
+            {taskStatCells(itemNav.counts).map((cell) => (
+              <div key={cell.label}>
+                <div className="wb-stats-cell__label">{cell.label}</div>
+                <div className={'wb-stats-cell__value' + (cell.toneClass ? ` ${cell.toneClass}` : '')}>{cell.value}</div>
               </div>
             ))}
-            {tasks.length === 0 ? (
-              <EmptyState title="暂无可领取任务" body="当前没有可领取的题目,稍后刷新任务广场。" variant="queue" />
-            ) : null}
           </div>
-          {mySubmissions.some((submission) => submission.status === 'revising') ? (
-            <div style={revisionListStyle}>
-              <h3 style={revisionHeadingStyle}>待修改</h3>
-              {mySubmissions.filter((submission) => submission.status === 'revising').map((submission) => (
-                <button
-                  key={submission.id}
-                  aria-label={`修改 Submission #${submission.id}`}
-                  onClick={() => void openSubmission(submission)}
-                  style={revisionButtonStyle}
-                >
-                  <strong>Submission #{submission.id}</strong>
-                  <span>Task #{submission.taskId} · Item #{submission.itemId}</span>
-                  <StatusBadge status={submission.status} />
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </section>
+        ) : null}
 
-        <main style={{ display: 'grid', gap: 'var(--space-lg)', alignContent: 'start' }}>
-          {bundle?.item ? (
-            <section style={{ ...panelStyle, minHeight: 600 }}>
-              <div style={formHeaderStyle}>
+        <div className="wb-history">
+          <div className="wb-history__head">本题历史</div>
+          {bundle?.auditLogs && bundle.auditLogs.length > 0 ? (
+            bundle.auditLogs.map((log) => (
+              <div key={log.id} className="wb-history__item">
                 <div>
-                  <h2 style={{ ...headingStyle, fontSize: 'var(--text-h1)' }}>{schema.ok ? schema.schema.title : '标注表单'}</h2>
-                  <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: 'var(--space-xs)' }}>
-                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>任务 ID: {bundle.task.id}</span>
-                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>题目 ID: {bundle.item.id}</span>
-                  </div>
+                  <div className={historyActionClass(log)}>{auditLogLabel(log)}</div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <StatusBadge status={bundle.submission?.status || 'draft'} label={bundle.submission ? undefined : '新题'} />
-                </div>
+                <span className="wb-history__date">{formatAuditDate(log.createdAt)}</span>
               </div>
-
-              <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-xl)', marginTop: 'var(--space-md)' }}>
-                {bundle.latestHumanReview?.reason ? (
-                  <div style={revisionReasonStyle}>
-                    <strong>上一轮打回意见</strong>
-                    <div>{bundle.latestHumanReview.reason}</div>
-                  </div>
-                ) : null}
-                {schema.ok ? (
-                  <SchemaRenderer
-                    schema={schema.schema}
-                    payload={payload}
-                    value={answer}
-                    errors={errors}
-                    runtime={{ taskId: bundle.task.id, itemId: bundle.item.id, submissionId: bundle.submission?.id }}
-                    onChange={(next) => {
-                      autoSaveSeq.current += 1
-                      setAnswer(next)
-                      if (answerDraftKey(next) !== lastSavedDraftKey.current) {
-                        setAutoSaveState('idle')
-                      }
-                      if (errors.length > 0) {
-                        setErrors(validateAnswer(schema.schema, next))
-                      }
-                    }}
-                  />
-                ) : (
-                  <div role="alert" style={errorBannerStyle}>{schema.message}</div>
-                )}
-              </div>
-
-              <div style={{ ...actionRowStyle, borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)', marginTop: 'var(--space-2xl)' }}>
-                <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light" style={{ width: 120 }}>保存草稿</Button>
-                <span style={autoSaveTextStyle}>{autoSaveText(autoSaveState)}</span>
-                <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} style={{ width: 120 }} title="提交审核 (Ctrl/Cmd + Enter)">提交审核</Button>
-              </div>
-            </section>
+            ))
           ) : (
-            <section style={{ ...panelStyle, border: '1px dashed var(--color-border-light)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
-              <EmptyState title="准备开始标注" body="请在左侧任务广场选择并领取一个任务开始工作。" variant="empty" />
-            </section>
+            <div className="wb-history__item">
+              <div className="wb-history__action">{bundle?.item ? '暂无历史记录' : '领取题目后显示历史'}</div>
+            </div>
           )}
-        </main>
-      </div>
+        </div>
+
+        <div className="wb-shortcuts">
+          <div className="wb-shortcuts__title">快捷键</div>
+          <div className="wb-shortcuts__row">
+            <span className="wb-kbd">⌘/Ctrl + Enter</span> 提交审核
+          </div>
+        </div>
+      </aside>
     </div>
   )
 }
 
-function ProgressBar({ value, total }: { value: number, total: number }) {
-  const width = total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
-  return (
-    <div style={progressTrackStyle} aria-hidden="true">
-      <div style={{ ...progressFillStyle, width: `${width}%` }} />
-    </div>
-  )
+// 把导航 counts 映射为右侧"我的贡献(本任务)"卡片,仅展示有真实数值的桶。
+function taskStatCells(counts: Record<string, number>) {
+  const submitted = (counts.submitted ?? 0) + (counts.ai_reviewing ?? 0) + (counts.human_reviewing ?? 0)
+  const cells: Array<{ label: string, value: number, toneClass?: string }> = []
+  if (submitted > 0) {
+    cells.push({ label: '已提交', value: submitted })
+  }
+  if ((counts.approved ?? 0) > 0) {
+    cells.push({ label: '通过', value: counts.approved, toneClass: 'wb-stats-cell__value--success' })
+  }
+  if ((counts.rejected ?? 0) > 0) {
+    cells.push({ label: '打回', value: counts.rejected, toneClass: 'wb-stats-cell__value--danger' })
+  }
+  return cells
 }
 
 function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
@@ -332,107 +506,40 @@ function autoSaveText(state: 'idle' | 'saving' | 'saved' | 'failed') {
   }
 }
 
-const panelStyle: CSSProperties = {
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
-  borderRadius: 'var(--radius-lg)',
-  padding: 'var(--space-xl)',
-  boxShadow: 'var(--shadow-md)',
+function auditLogLabel(log: AuditLog) {
+  const actor = log.actorType === 'ai' ? 'AI' : log.actorType === 'system' ? '系统' : log.actorType === 'human' ? '审核员' : log.actorType || ''
+  const eventLabel = AUDIT_EVENT_LABELS[log.event] ?? log.event
+  return [actor, eventLabel].filter(Boolean).join(' · ')
 }
 
-const headingStyle: CSSProperties = {
-  fontFamily: 'var(--font-heading)',
-  fontSize: 'var(--text-h2)',
-  margin: 0,
-  fontWeight: 600,
-  color: 'var(--color-text)',
+const AUDIT_EVENT_LABELS: Record<string, string> = {
+  claim: '领取',
+  draft: '保存草稿',
+  submit: '提交',
+  ai_pass: 'AI 通过',
+  ai_revise: 'AI 打回',
+  ai_uncertain: 'AI 待定',
+  human_approve: '复审通过',
+  human_revise: '复审打回',
+  resubmit: '重新提交',
+  export: '导出',
 }
 
-const taskCardStyle: CSSProperties = {
-  display: 'grid',
-  gap: 'var(--space-xs)',
-  padding: 'var(--space-lg)',
-  background: 'var(--color-bg)',
-  border: '1px solid var(--color-border-light)',
-  borderRadius: 'var(--radius-md)',
-  transition: 'transform var(--duration-fast)',
-  borderLeft: '3px solid var(--color-rail)',
+function historyActionClass(log: AuditLog) {
+  if (log.event.includes('revise') || log.toState === 'revising') {
+    return 'wb-history__action wb-history__action--reject'
+  }
+  if (log.event === 'resubmit' || log.event === 'submit') {
+    return 'wb-history__action wb-history__action--current'
+  }
+  return 'wb-history__who'
 }
 
-const revisionListStyle: CSSProperties = {
-  display: 'grid',
-  gap: 'var(--space-sm)',
-  marginTop: 'var(--space-xl)',
-  paddingTop: 'var(--space-lg)',
-  borderTop: '1px solid var(--color-border-light)',
-}
-
-const revisionHeadingStyle: CSSProperties = {
-  ...headingStyle,
-  fontSize: 'var(--text-base)',
-}
-
-const revisionButtonStyle: CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  width: '100%',
-  padding: 'var(--space-md)',
-  textAlign: 'left',
-  border: '1px solid var(--color-warning-soft)',
-  borderRadius: 'var(--radius-md)',
-  background: '#fff8e1',
-  color: 'var(--color-text)',
-  cursor: 'pointer',
-}
-
-const revisionReasonStyle: CSSProperties = {
-  display: 'grid',
-  gap: 'var(--space-xs)',
-  marginBottom: 'var(--space-lg)',
-  padding: 'var(--space-md)',
-  border: '1px solid var(--color-warning-soft)',
-  borderRadius: 'var(--radius-md)',
-  background: '#fff8e1',
-  color: 'var(--color-text)',
-}
-
-const progressTrackStyle: CSSProperties = {
-  height: 4,
-  marginTop: 'var(--space-xs)',
-  background: 'var(--color-border-light)',
-  borderRadius: 99,
-  overflow: 'hidden',
-}
-
-const progressFillStyle: CSSProperties = {
-  height: '100%',
-  background: 'var(--color-accent)',
-}
-
-const formHeaderStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  gap: 'var(--space-md)',
-  alignItems: 'flex-start',
-}
-
-const errorBannerStyle: CSSProperties = {
-  padding: 'var(--space-lg)',
-  borderRadius: 'var(--radius-md)',
-  border: '1px solid var(--color-danger)',
-  color: 'var(--color-danger)',
-  background: '#fff1f0',
-}
-
-const actionRowStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'flex-end',
-  gap: 'var(--space-md)',
-}
-
-const autoSaveTextStyle: CSSProperties = {
-  alignSelf: 'center',
-  marginRight: 'auto',
-  color: 'var(--color-text-muted)',
-  fontSize: 'var(--text-sm)',
+function formatAuditDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }

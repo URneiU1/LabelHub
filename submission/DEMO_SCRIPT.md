@@ -32,7 +32,7 @@
 ### Scene 1 · Owner — 任务/模板/AI Prompt(0:30 - 3:00) · 2.5 min
 
 #### 1.1 登录(0:30 - 0:45) · 15s
-- 登 `owner1` / `pass`
+- 登 `owner1` / `123456`
 - 进入 Owner Dashboard,左侧选 **官方任务 qa_quality**
 
 > "Owner 是任务发布者。Seed 里有两个官方任务——qa_quality 30 条文本质检题,preference_compare 12 条 A/B 偏好题。我们先看第一个。"
@@ -62,7 +62,7 @@
 ### Scene 2 · Labeler — 任务广场 → 提交(3:00 - 5:00) · 2 min
 
 #### 2.1 切角色(3:00 - 3:15) · 15s
-- 退出 → 登 `labeler1` / `pass`
+- 退出 → 登 `labeler1` / `123456`
 - 进入 **任务广场**
 
 > "Labeler 是标注员。任务广场按 first-come 抢占,我领取 qa_quality 第一题。"
@@ -86,7 +86,7 @@
 ### Scene 3 · Reviewer — 审核 + AI Verdict(5:00 - 7:00) · 2 min
 
 #### 3.1 切角色 + 审核队列(5:00 - 5:30) · 30s
-- 退出 → 登 `reviewer1` / `pass`
+- 退出 → 登 `reviewer1` / `123456`
 - 进入审核队列,等待刚才那条出现(AI 已跑完)
 
 > "Reviewer 看到 AI 预审结果——verdict、score、三维度评分、处理日志和 prompt 版本号。"

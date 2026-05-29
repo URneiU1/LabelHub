@@ -246,6 +246,49 @@ describe('SchemaRenderer', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('备注 is required')
   })
 
+  it('hides and shows fields based on visibleWhen against the current answer', async () => {
+    const user = userEvent.setup()
+    const result = parseTemplateSchema({
+      title: 'conditional',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] },
+        {
+          name: 'reject_reason',
+          widget: 'Input',
+          label: '打回原因',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+        },
+        {
+          name: 'reject_group',
+          widget: 'Group',
+          label: '打回详情',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+          fields: [{ name: 'severity', widget: 'Input', label: '严重程度' }],
+        },
+      ],
+    })
+    if (!result.ok) {
+      throw new Error(result.error.message)
+    }
+
+    function ConditionalRenderer() {
+      const [answer, setAnswer] = useState<AnswerValue>({ decision: 'pass' })
+      return <SchemaRenderer schema={result.value} value={answer} onChange={setAnswer} />
+    }
+
+    render(<ConditionalRenderer />)
+
+    // Hidden while decision === pass (covers both leaf and Group-child fields).
+    expect(screen.queryByLabelText('打回原因')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('严重程度')).not.toBeInTheDocument()
+
+    await user.click(within(screen.getByRole('radiogroup', { name: '结论' })).getByLabelText('reject'))
+
+    // Shown once decision === reject.
+    expect(screen.getByLabelText('打回原因')).toBeInTheDocument()
+    expect(screen.getByLabelText('严重程度')).toBeInTheDocument()
+  })
+
   it('renders ShowItem media modes from path', () => {
     const result = parseTemplateSchema({
       title: 'media',

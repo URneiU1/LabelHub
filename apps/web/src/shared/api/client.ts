@@ -145,6 +145,8 @@ export type DemoUser = {
   roles: string[]
 }
 
+export type TaskDistribution = 'first_come' | 'assigned' | 'quota'
+
 export type Task = {
   id: number
   title: string
@@ -156,6 +158,164 @@ export type Task = {
   finishedItems: number
   aiPromptId?: number | null
   aiReviewEnabled?: boolean
+  richDescription?: string | null
+  tags?: string | null
+  rewardConfig?: string | null
+  distribution?: string
+  quotaPerUser?: number
+  deadline?: string | null
+  publishedAt?: string | null
+}
+
+// 任务基础信息 create/update 的输入。后端会把 JSON 字段(richDescription/tags/rewardConfig)
+// 原样存进 json 列,所以这里用结构化值,提交前序列化成 JSON。
+export type TaskInfoInput = {
+  title?: string
+  description?: string | null
+  richDescription?: unknown
+  tags?: unknown
+  rewardConfig?: unknown
+  distribution?: TaskDistribution
+  quotaPerUser?: number
+  deadline?: string | null
+}
+
+export type TaskAssigneeView = {
+  userId: number
+  assignedAt: string | null
+}
+
+export type ImportItemsFileResult = { imported: number, format: string }
+export type ImportItemsResult = { imported: number }
+export type BatchUpdateItemsResult = { updated: number, requested: number }
+export type AddAssigneesResult = { added: number }
+export type RemoveAssigneeResult = { removed: number }
+
+export type PreviewItem = {
+  id: number
+  externalId: string | null
+  payload: unknown
+}
+
+// --- 4.1 任务管理后台的端点封装 ---
+
+// 创建任务:返回裸 task(后端 CreateTask 直接 httpx.OK(task))。
+export async function createTask(input: TaskInfoInput) {
+  return apiPost<Task>('/tasks', buildTaskInfoBody(input))
+}
+
+// 更新任务基础信息:后端返回 { task }。
+export async function updateTask(taskId: number, input: TaskInfoInput) {
+  const data = await request<{ task: Task }>(`/tasks/${taskId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildTaskInfoBody(input)),
+  })
+  return data.task
+}
+
+function buildTaskInfoBody(input: TaskInfoInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+  if (input.title !== undefined) body.title = input.title
+  if (input.description !== undefined) body.description = input.description
+  if (input.richDescription !== undefined) body.richDescription = input.richDescription
+  if (input.tags !== undefined) body.tags = input.tags
+  if (input.rewardConfig !== undefined) body.rewardConfig = input.rewardConfig
+  if (input.distribution !== undefined) body.distribution = input.distribution
+  if (input.quotaPerUser !== undefined) body.quotaPerUser = input.quotaPerUser
+  if (input.deadline !== undefined) body.deadline = input.deadline
+  return body
+}
+
+// 任务状态机迁移:draft→published→paused→published/ended。非法迁移后端返回 422 INVALID_STATE。
+export async function transitionTask(taskId: number, action: 'publish' | 'pause' | 'resume' | 'end') {
+  const data = await apiPost<{ task: Task }>(`/tasks/${taskId}/${action}`, {})
+  return data.task
+}
+
+// 文件导入题目:multipart form(file + 可选 format)。复用 apiUpload。
+export async function importItemsFile(taskId: number, file: File, format?: 'json' | 'jsonl' | 'xlsx') {
+  const form = new FormData()
+  form.append('file', file)
+  if (format) {
+    form.append('format', format)
+  }
+  return apiUpload<ImportItemsFileResult>(`/tasks/${taskId}/items/import-file`, form)
+}
+
+// JSON 直接导入:{ items: [...] }。
+export async function importItems(taskId: number, items: Array<Record<string, unknown>>) {
+  return apiPost<ImportItemsResult>(`/tasks/${taskId}/items/import`, { items })
+}
+
+// 批量覆盖题目 payload。
+export async function batchUpdateItems(taskId: number, items: Array<{ itemId: number, payload: unknown }>) {
+  return apiPost<BatchUpdateItemsResult>(`/tasks/${taskId}/items/batch-update`, { items })
+}
+
+// 随机/首条可用题目预览。无可用题目时后端返回 { item: null }。
+export async function previewItem(taskId: number) {
+  const data = await apiGet<{ item: PreviewItem | null }>(`/tasks/${taskId}/item-preview`)
+  return data.item
+}
+
+export type OwnerTaskItem = {
+  id: number
+  externalId: string | null
+  status: string
+  priority: number
+  payload: unknown
+}
+
+export type OwnerTaskItemsPage = {
+  items: OwnerTaskItem[]
+  nextCursor: string
+  hasMore: boolean
+}
+
+// Owner 批量编辑列表:游标分页列出某任务全部题目(含状态/payload)。后端用 PageOK 返回
+// { data, page:{ next_cursor, has_more } },标准 apiGet 会丢掉 page,这里直接读 envelope 保留游标。
+export async function listTaskItems(taskId: number, params?: { cursor?: string, limit?: number }): Promise<OwnerTaskItemsPage> {
+  const query = new URLSearchParams()
+  if (params?.cursor) {
+    query.set('cursor', params.cursor)
+  }
+  query.set('limit', String(params?.limit ?? 50))
+  const token = getToken()
+  if (!token) {
+    throw new Error('请先登录')
+  }
+  const response = await fetch(`/api/v1/tasks/${taskId}/items?${query.toString()}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const payload = await response.json() as
+    | { data: OwnerTaskItem[], page?: { next_cursor?: string, has_more?: boolean }, request_id?: string }
+    | ApiErrorEnvelope
+  if (!response.ok) {
+    const errorPayload = payload as ApiErrorEnvelope
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '加载题目列表失败', errorPayload.request_id ?? '')
+  }
+  const pagePayload = payload as { data: OwnerTaskItem[], page?: { next_cursor?: string, has_more?: boolean } }
+  return {
+    items: pagePayload.data ?? [],
+    nextCursor: pagePayload.page?.next_cursor ?? '',
+    hasMore: Boolean(pagePayload.page?.has_more),
+  }
+}
+
+// 指派管理(distribution='assigned')。
+export async function listAssignees(taskId: number) {
+  const data = await apiGet<{ assignees: TaskAssigneeView[] }>(`/tasks/${taskId}/assignees`)
+  return data.assignees
+}
+
+export async function addAssignees(taskId: number, userIds: number[]) {
+  return apiPost<AddAssigneesResult>(`/tasks/${taskId}/assignees`, { userIds })
+}
+
+export async function removeAssignee(taskId: number, userId: number) {
+  return apiDelete<RemoveAssigneeResult>(`/tasks/${taskId}/assignees/${userId}`)
 }
 
 export type TaskItem = {
@@ -166,6 +326,10 @@ export type TaskItem = {
   status: string
 }
 
+// 人工审核多级阶段:后端按当前 revision 的 approve 计数派生。
+// reviewStage first/second/final 对应 reviewLevel 1/2/3,requiredLevels 固定 3。
+export type ReviewStage = 'first' | 'second' | 'final'
+
 export type Submission = {
   id: number
   taskId: number
@@ -175,6 +339,9 @@ export type Submission = {
   aiScore?: number | null
   humanVerdict?: string
   currentRevisionId?: number
+  reviewStage?: ReviewStage
+  reviewLevel?: number
+  requiredLevels?: number
 }
 
 export type TaskTemplate = {
@@ -253,4 +420,76 @@ export type TaskBundle = {
   aiReview?: AIReviewDetail | null
   latestHumanReview?: HumanReviewSummary | null
   auditLogs?: AuditLog[]
+  reviewStage?: ReviewStage
+  reviewLevel?: number
+  requiredLevels?: number
+}
+
+// /reviewer/results 的单行:已定稿(approved/rejected)的 submission。
+export type ReviewResult = {
+  id: number
+  taskId: number
+  itemId: number
+  status: string
+  finalVerdict?: string | null
+  reviewerId?: number | null
+  aiScore?: number | null
+  updatedAt: string
+}
+
+export type ReviewResultsPage = {
+  results: ReviewResult[]
+  nextCursor: string
+  hasMore: boolean
+}
+
+// 审核结果列表:游标分页。后端用 PageOK 返回 { data, page:{ next_cursor, has_more } },
+// 标准 apiGet 会丢掉 page,这里直接读 envelope 以保留游标信息。
+export async function listReviewResults(params?: { cursor?: string, limit?: number }): Promise<ReviewResultsPage> {
+  const query = new URLSearchParams()
+  if (params?.cursor) {
+    query.set('cursor', params.cursor)
+  }
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const token = getToken()
+  if (!token) {
+    throw new Error('请先登录')
+  }
+  const response = await fetch(`/api/v1/reviewer/results${suffix}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const payload = await response.json() as
+    | { data: ReviewResult[], page?: { next_cursor?: string, has_more?: boolean }, request_id?: string }
+    | ApiErrorEnvelope
+  if (!response.ok) {
+    const errorPayload = payload as ApiErrorEnvelope
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '加载审核结果失败', errorPayload.request_id ?? '')
+  }
+  const pagePayload = payload as { data: ReviewResult[], page?: { next_cursor?: string, has_more?: boolean } }
+  return {
+    results: pagePayload.data ?? [],
+    nextCursor: pagePayload.page?.next_cursor ?? '',
+    hasMore: Boolean(pagePayload.page?.has_more),
+  }
+}
+
+// 作答页左侧"题目导航"用:某任务下一题对当前 labeler 的状态。
+// status: available 待标 / claimed 进行中 / taken 被他人领走 / 或其 submission 状态(draft/submitted/.../approved/rejected/revising)。
+export type LabelerTaskItem = {
+  itemId: number
+  externalId: string | null
+  status: string
+  mine: boolean
+  submissionId: number | null
+}
+
+export type LabelerTaskItems = {
+  taskId: number
+  total: number
+  items: LabelerTaskItem[]
+  counts: Record<string, number>
 }

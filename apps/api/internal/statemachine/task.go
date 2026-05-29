@@ -1,0 +1,70 @@
+package statemachine
+
+import "fmt"
+
+// 任务生命周期状态机,与提交(submission)状态机相互独立。
+// 草稿 → 发布中 → 已暂停 ↔ 发布中 → 已结束。
+//
+// Task lifecycle state machine, separate from the submission state machine.
+const (
+	TaskDraft     = "draft"
+	TaskPublished = "published"
+	TaskPaused    = "paused"
+	TaskEnded     = "ended"
+)
+
+const (
+	TaskEventPublish = "publish"
+	TaskEventPause   = "pause"
+	TaskEventResume  = "resume"
+	TaskEventEnd     = "end"
+)
+
+var taskTransitions = map[Key]Transition{
+	{TaskDraft, TaskEventPublish}:   {From: TaskDraft, Event: TaskEventPublish, To: []string{TaskPublished}},
+	{TaskPublished, TaskEventPause}: {From: TaskPublished, Event: TaskEventPause, To: []string{TaskPaused}},
+	{TaskPaused, TaskEventResume}:   {From: TaskPaused, Event: TaskEventResume, To: []string{TaskPublished}},
+	{TaskPublished, TaskEventEnd}:   {From: TaskPublished, Event: TaskEventEnd, To: []string{TaskEnded}},
+	{TaskPaused, TaskEventEnd}:      {From: TaskPaused, Event: TaskEventEnd, To: []string{TaskEnded}},
+}
+
+// CanTask 判定任务状态机的迁移是否合法。
+func CanTask(from string, event string, to string) bool {
+	transition, ok := taskTransitions[Key{From: from, Event: event}]
+	if !ok {
+		return false
+	}
+	for _, allowed := range transition.To {
+		if allowed == to {
+			return true
+		}
+	}
+	return false
+}
+
+// TaskTargetFor 返回某 (from, event) 对应的唯一目标状态;不存在则返回 ok=false。
+// 任务状态机每个事件目标唯一,故无需调用方再传 to。
+func TaskTargetFor(from string, event string) (string, bool) {
+	transition, ok := taskTransitions[Key{From: from, Event: event}]
+	if !ok || len(transition.To) != 1 {
+		return "", false
+	}
+	return transition.To[0], true
+}
+
+// ApplyTask 校验任务状态迁移,非法返回 error。
+func ApplyTask(from string, event string, to string) error {
+	if CanTask(from, event, to) {
+		return nil
+	}
+	return fmt.Errorf("invalid task transition: %s --%s--> %s", from, event, to)
+}
+
+// TaskTransitions 暴露任务状态机的全部合法迁移(供测试与文档使用)。
+func TaskTransitions() []Transition {
+	items := make([]Transition, 0, len(taskTransitions))
+	for _, transition := range taskTransitions {
+		items = append(items, transition)
+	}
+	return items
+}

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Toast } from '@douyinfe/semi-ui'
+import { Parser as ExprParser } from 'expr-eval'
 import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
 import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
 import { parseTemplateSchema } from '../../renderer/parser'
 import { widgetRegistry } from '../../renderer/widgets'
-import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type WidgetType } from '../../renderer/types'
+import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type VisibleWhen, type WidgetType } from '../../renderer/types'
 import './Designer.css'
 
 type TemplateDetailResponse = {
@@ -63,6 +64,15 @@ const widgetPrefixes: Record<WidgetType, string> = {
 }
 
 const nestedWidgetTypes = widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs')
+
+// Widgets that hold an answer value: visibleWhen / customRule are only meaningful on these.
+const advancedConfigWidgets: WidgetType[] = ['Input', 'TextArea', 'Radio', 'Tags', 'RichText', 'JSONEditor', 'FileUpload']
+
+// dataTransfer markers. A palette drop INSERTS a new widget; an existing-field drop REORDERS.
+const PALETTE_DRAG_PREFIX = 'labelhub/new-widget:'
+
+// Shared parser used only to surface a non-blocking parse hint for customRule expr in the panel.
+const designerExprParser = new ExprParser()
 
 export default function TemplateDesigner() {
   const { taskId, templateId } = useParams()
@@ -255,6 +265,37 @@ export default function TemplateDesigner() {
     setFields((current) => reorderFieldsToTarget(current, fieldId, targetFieldId))
   }
 
+  function insertWidgetBeforeTarget(widget: WidgetType, targetFieldId: string | null) {
+    if (!canEdit) return
+    setFields((current) => {
+      const field = createDefaultField(widget, current)
+      const targetIndex = targetFieldId === null ? current.length : current.findIndex((item) => item._draftId === targetFieldId)
+      const insertIndex = targetIndex < 0 ? current.length : targetIndex
+      const next = [...current.slice(0, insertIndex), field, ...current.slice(insertIndex)]
+      setSelectedId(field._draftId)
+      return next
+    })
+  }
+
+  function handleCanvasDrop(event: DragEvent<HTMLElement>, targetFieldId: string | null) {
+    if (!canEdit) return
+    event.preventDefault()
+    const transfer = event.dataTransfer.getData('text/plain')
+    if (transfer.startsWith(PALETTE_DRAG_PREFIX)) {
+      const widget = transfer.slice(PALETTE_DRAG_PREFIX.length) as WidgetType
+      if (widgetTypes.includes(widget)) {
+        insertWidgetBeforeTarget(widget, targetFieldId)
+      }
+      setDraggingFieldId(null)
+      return
+    }
+    const draggedId = draggingFieldId ?? transfer
+    if (draggedId && targetFieldId) {
+      moveFieldToDragTarget(draggedId, targetFieldId)
+    }
+    setDraggingFieldId(null)
+  }
+
   function updateSelected(patch: Partial<FieldSchema>) {
     if (!canEdit || !selectedField) return
     setFields((current) => current.map((field) => (
@@ -361,7 +402,21 @@ export default function TemplateDesigner() {
           </div>
           <div style={paletteStyle}>
             {widgetTypes.map((widget) => (
-              <Button key={widget} aria-label={`Add ${widget}`} disabled={!canEdit} onClick={() => appendField(widget)} theme="light" style={paletteButtonStyle}>
+              <Button
+                key={widget}
+                aria-label={`Add ${widget}`}
+                disabled={!canEdit}
+                draggable={canEdit}
+                onClick={() => appendField(widget)}
+                onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+                  if (!canEdit) return
+                  event.dataTransfer.effectAllowed = 'copy'
+                  event.dataTransfer.setData('text/plain', `${PALETTE_DRAG_PREFIX}${widget}`)
+                  setDraggingFieldId(null)
+                }}
+                theme="light"
+                style={paletteButtonStyle}
+              >
                 <span style={paletteButtonNodeStyle}>
                   <span style={paletteWidgetCodeStyle}>{widget}</span>
                   <span style={paletteWidgetLabelStyle}>{widgetLabels[widget]}</span>
@@ -389,7 +444,20 @@ export default function TemplateDesigner() {
                 />
               </div>
 
-              <div style={canvasStyle}>
+              <div
+                aria-label="canvas drop zone"
+                style={canvasStyle}
+                onDragOver={(event) => {
+                  if (!canEdit) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = draggingFieldId ? 'move' : 'copy'
+                }}
+                onDrop={(event) => {
+                  // Drops that miss a specific field append to the end (covers the empty canvas
+                  // and the gaps below the last node). Field-level drops stop propagation.
+                  handleCanvasDrop(event, null)
+                }}
+              >
                 {fields.length === 0 ? (
                   <EmptyCanvasDiagram />
                 ) : fields.map((field, index) => (
@@ -412,7 +480,7 @@ export default function TemplateDesigner() {
                     onDragOver={(event) => {
                       if (!canEdit) return
                       event.preventDefault()
-                      event.dataTransfer.dropEffect = 'move'
+                      event.dataTransfer.dropEffect = draggingFieldId ? 'move' : 'copy'
                     }}
                     onDragStart={(event) => {
                       if (!canEdit) return
@@ -421,13 +489,8 @@ export default function TemplateDesigner() {
                       setDraggingFieldId(field._draftId)
                     }}
                     onDrop={(event) => {
-                      if (!canEdit) return
-                      event.preventDefault()
-                      const draggedId = draggingFieldId ?? event.dataTransfer.getData('text/plain')
-                      if (draggedId) {
-                        moveFieldToDragTarget(draggedId, field._draftId)
-                      }
-                      setDraggingFieldId(null)
+                      event.stopPropagation()
+                      handleCanvasDrop(event, field._draftId)
                     }}
                   />
                 ))}
@@ -608,6 +671,8 @@ function PreviewItemStatus({ item, loading, loadError, parseError }: {
   return <div aria-label="preview_item_status" style={previewStatusStyle}>{text}</div>
 }
 
+type PropertyTab = 'basic' | 'validation' | 'logic'
+
 function PropertyPanel({ field, errors, fields, disabled, onChange }: {
   field: DraftField | null
   errors: DraftValidationError[]
@@ -615,6 +680,21 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
   disabled: boolean
   onChange: (patch: Partial<FieldSchema>) => void
 }) {
+  const [activeTab, setActiveTab] = useState<PropertyTab>('basic')
+  // Advanced config (visibleWhen / customRule) only applies to answer-holding widgets.
+  const supportsAdvanced = field ? advancedConfigWidgets.includes(field.widget) : false
+
+  // Reset to 基础 whenever a different field is selected, so the panel never opens on an
+  // advanced tab that the newly selected widget cannot show. React-recommended
+  // "adjust state during render" pattern, avoids an effect-driven cascading render.
+  const lastDraftId = useRef<string | null>(field?._draftId ?? null)
+  if (lastDraftId.current !== (field?._draftId ?? null)) {
+    lastDraftId.current = field?._draftId ?? null
+    if (activeTab !== 'basic') {
+      setActiveTab('basic')
+    }
+  }
+
   if (!field) {
     return (
       <>
@@ -624,6 +704,7 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
     )
   }
   const duplicateName = fields.some((candidate) => candidate._draftId !== field._draftId && candidate.name === field.name)
+  const currentTab = activeTab !== 'basic' && !supportsAdvanced ? 'basic' : activeTab
   return (
     <>
       <h2 style={subHeadingStyle}>属性</h2>
@@ -633,55 +714,246 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
             {errors.map((item) => <div key={`${item.field}-${item.message}`}>{item.field}: {item.message}</div>)}
           </div>
         ) : null}
-        <label style={fieldStyle}>
-          name
-          <input aria-label="field_name" disabled={disabled} value={field.name} onChange={(event) => onChange({ name: event.target.value })} style={inputStyle} />
-        </label>
-        {duplicateName ? <span style={errorTextStyle}>name 已存在</span> : null}
-        <label style={fieldStyle}>
-          label
-          <input aria-label="field_label" disabled={disabled} value={field.label} onChange={(event) => onChange({ label: event.target.value })} style={inputStyle} />
-        </label>
-        <label style={checkboxRowStyle}>
-          <input aria-label="field_required" type="checkbox" disabled={disabled} checked={field.required === true} onChange={(event) => onChange({ required: event.target.checked })} />
-          required
-        </label>
-        {(field.widget === 'Input' || field.widget === 'TextArea') ? (
-          <LengthControls field={field} disabled={disabled} onChange={onChange} />
+        {supportsAdvanced ? (
+          <div role="tablist" aria-label="property tabs" style={propertyTabBarStyle}>
+            <PropertyTabButton tab="basic" current={currentTab} label="基础" onSelect={setActiveTab} />
+            <PropertyTabButton tab="validation" current={currentTab} label="校验" onSelect={setActiveTab} />
+            <PropertyTabButton tab="logic" current={currentTab} label="联动" onSelect={setActiveTab} />
+          </div>
         ) : null}
-        {(field.widget === 'Radio' || field.widget === 'Tags') ? (
-          <label style={fieldStyle}>
-            options
-            <textarea
-              aria-label="field_options"
-              disabled={disabled}
-              value={(field.options ?? []).join('\n')}
-              onChange={(event) => onChange({ options: parseOptionsInput(event.target.value) })}
-              style={textareaStyle}
-            />
-          </label>
+
+        {currentTab === 'basic' ? (
+          <div role="tabpanel" aria-label="property tab 基础" style={propertyStackStyle}>
+            <label style={fieldStyle}>
+              name
+              <input aria-label="field_name" disabled={disabled} value={field.name} onChange={(event) => onChange({ name: event.target.value })} style={inputStyle} />
+            </label>
+            {duplicateName ? <span style={errorTextStyle}>name 已存在</span> : null}
+            <label style={fieldStyle}>
+              label
+              <input aria-label="field_label" disabled={disabled} value={field.label} onChange={(event) => onChange({ label: event.target.value })} style={inputStyle} />
+            </label>
+            <label style={checkboxRowStyle}>
+              <input aria-label="field_required" type="checkbox" disabled={disabled} checked={field.required === true} onChange={(event) => onChange({ required: event.target.checked })} />
+              required
+            </label>
+            {(field.widget === 'Input' || field.widget === 'TextArea') ? (
+              <LengthControls field={field} disabled={disabled} onChange={onChange} />
+            ) : null}
+            {(field.widget === 'Radio' || field.widget === 'Tags') ? (
+              <label style={fieldStyle}>
+                options
+                <textarea
+                  aria-label="field_options"
+                  disabled={disabled}
+                  value={(field.options ?? []).join('\n')}
+                  onChange={(event) => onChange({ options: parseOptionsInput(event.target.value) })}
+                  style={textareaStyle}
+                />
+              </label>
+            ) : null}
+            {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
+            {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
+            {field.widget === 'Tabs' ? <TabsControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
+            {field.widget === 'FileUpload' ? (
+              <label style={fieldStyle}>
+                maxFiles
+                <input
+                  aria-label="field_max_files"
+                  disabled={disabled}
+                  type="number"
+                  min={1}
+                  value={field.maxFiles ?? 5}
+                  onChange={(event) => onChange({ maxFiles: positiveNumberInput(event.target.value, 1) })}
+                  style={inputStyle}
+                />
+              </label>
+            ) : null}
+            {field.widget === 'LLMTrigger' ? <LLMTriggerControls field={field} disabled={disabled} fields={fields} onChange={onChange} /> : null}
+          </div>
         ) : null}
-        {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'Tabs' ? <TabsControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'FileUpload' ? (
-          <label style={fieldStyle}>
-            maxFiles
-            <input
-              aria-label="field_max_files"
-              disabled={disabled}
-              type="number"
-              min={1}
-              value={field.maxFiles ?? 5}
-              onChange={(event) => onChange({ maxFiles: positiveNumberInput(event.target.value, 1) })}
-              style={inputStyle}
-            />
-          </label>
+
+        {currentTab === 'validation' ? (
+          <div role="tabpanel" aria-label="property tab 校验" style={propertyStackStyle}>
+            <CustomRuleControls field={field} disabled={disabled} onChange={onChange} />
+          </div>
         ) : null}
-        {field.widget === 'LLMTrigger' ? <LLMTriggerControls field={field} disabled={disabled} fields={fields} onChange={onChange} /> : null}
+
+        {currentTab === 'logic' ? (
+          <div role="tabpanel" aria-label="property tab 联动" style={propertyStackStyle}>
+            <VisibleWhenControls field={field} fields={fields} disabled={disabled} onChange={onChange} />
+          </div>
+        ) : null}
       </div>
     </>
   )
+}
+
+function PropertyTabButton({ tab, current, label, onSelect }: {
+  tab: PropertyTab
+  current: PropertyTab
+  label: string
+  onSelect: (tab: PropertyTab) => void
+}) {
+  const active = current === tab
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-label={`property_tab_${tab}`}
+      onClick={() => onSelect(tab)}
+      style={active ? propertyTabButtonActiveStyle : propertyTabButtonStyle}
+    >
+      {label}
+    </button>
+  )
+}
+
+function VisibleWhenControls({ field, fields, disabled, onChange }: {
+  field: DraftField
+  fields: DraftField[]
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  // Controlling field can be any OTHER answer-holding field (excludes self, ShowItem, LLMTrigger, Group, Tabs).
+  const candidates = fields.filter((candidate) => (
+    candidate._draftId !== field._draftId && advancedConfigWidgets.includes(candidate.widget)
+  ))
+  const visibleWhen = field.visibleWhen
+  const controllingField = visibleWhen?.field ?? ''
+  const usesNotEmpty = visibleWhen?.notEmpty === true
+  const equalsText = usesNotEmpty ? '' : equalsToText(visibleWhen)
+
+  function selectControllingField(nextField: string) {
+    if (!nextField) {
+      onChange({ visibleWhen: undefined })
+      return
+    }
+    // Default to equals='' so the schema is parser-valid the moment a field is chosen.
+    onChange({ visibleWhen: { field: nextField, equals: visibleWhen && !usesNotEmpty ? visibleWhen.equals : '' } })
+  }
+
+  function setMode(notEmpty: boolean) {
+    if (!controllingField) return
+    onChange({ visibleWhen: notEmpty ? { field: controllingField, notEmpty: true } : { field: controllingField, equals: '' } })
+  }
+
+  function setEquals(value: string) {
+    if (!controllingField) return
+    onChange({ visibleWhen: { field: controllingField, equals: value } })
+  }
+
+  return (
+    <div style={nestedEditorStyle}>
+      <span style={nestedEditorLabelStyle}>条件显示 (visibleWhen)</span>
+      <span style={hintTextStyle}>选择一个控制字段后, 仅当其值满足条件时才显示当前字段。清空控制字段即移除联动。</span>
+      <label style={fieldStyle}>
+        控制字段
+        <select
+          aria-label="visible_when_field"
+          disabled={disabled}
+          value={controllingField}
+          onChange={(event) => selectControllingField(event.target.value)}
+          style={inputStyle}
+        >
+          <option value="">（无, 始终显示）</option>
+          {candidates.map((candidate) => (
+            <option key={candidate._draftId} value={candidate.name}>{candidate.name}</option>
+          ))}
+        </select>
+      </label>
+      {controllingField ? (
+        <>
+          <label style={checkboxRowStyle}>
+            <input
+              aria-label="visible_when_not_empty"
+              type="checkbox"
+              disabled={disabled}
+              checked={usesNotEmpty}
+              onChange={(event) => setMode(event.target.checked)}
+            />
+            仅要求控制字段非空 (notEmpty)
+          </label>
+          {usesNotEmpty ? null : (
+            <label style={fieldStyle}>
+              等于该值 (equals)
+              <input
+                aria-label="visible_when_equals"
+                disabled={disabled}
+                value={equalsText}
+                onChange={(event) => setEquals(event.target.value)}
+                style={inputStyle}
+                placeholder="例如 reject"
+              />
+            </label>
+          )}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function CustomRuleControls({ field, disabled, onChange }: {
+  field: DraftField
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  const customRule = field.customRule
+  const expr = customRule?.expr ?? ''
+  const message = customRule?.message ?? ''
+  const parseHint = useMemo(() => {
+    if (!expr.trim()) return ''
+    try {
+      designerExprParser.parse(expr)
+      return ''
+    } catch (error) {
+      return error instanceof Error ? error.message : '表达式无法解析'
+    }
+  }, [expr])
+
+  function update(nextExpr: string, nextMessage: string) {
+    if (!nextExpr.trim() && !nextMessage.trim()) {
+      onChange({ customRule: undefined })
+      return
+    }
+    onChange({ customRule: { expr: nextExpr, message: nextMessage } })
+  }
+
+  return (
+    <div style={nestedEditorStyle}>
+      <span style={nestedEditorLabelStyle}>自定义校验 (customRule)</span>
+      <span style={hintTextStyle}>表达式为真即视为通过。可用变量: value, len(value), answer.&lt;字段名&gt;。运算符用 and / or / not, 例如 len(value) &lt;= 35。</span>
+      <label style={fieldStyle}>
+        表达式 (expr)
+        <textarea
+          aria-label="custom_rule_expr"
+          disabled={disabled}
+          value={expr}
+          onChange={(event) => update(event.target.value, message)}
+          style={textareaStyle}
+          placeholder='len(value) <= 35'
+        />
+      </label>
+      {parseHint ? <span aria-label="custom_rule_expr_hint" style={errorTextStyle}>表达式解析提示: {parseHint}</span> : null}
+      <label style={fieldStyle}>
+        错误提示 (message)
+        <input
+          aria-label="custom_rule_message"
+          disabled={disabled}
+          value={message}
+          onChange={(event) => update(expr, event.target.value)}
+          style={inputStyle}
+          placeholder="不能超过 35 个字符"
+        />
+      </label>
+    </div>
+  )
+}
+
+function equalsToText(visibleWhen: VisibleWhen | undefined): string {
+  if (!visibleWhen || !('equals' in visibleWhen) || visibleWhen.equals === undefined) return ''
+  return typeof visibleWhen.equals === 'string' ? visibleWhen.equals : String(visibleWhen.equals)
 }
 
 function LengthControls({ field, disabled, onChange }: {
@@ -1087,6 +1359,12 @@ function normalizeFieldSchema(field: FieldSchema): FieldSchema {
     delete next.prompt
     delete next.target_field
   }
+  if (!advancedConfigWidgets.includes(next.widget)) {
+    // visibleWhen / customRule only apply to answer-holding widgets; drop them when the
+    // widget is switched to a display/container type so stale rules don't survive.
+    delete next.visibleWhen
+    delete next.customRule
+  }
   return next
 }
 
@@ -1123,6 +1401,9 @@ function stripDraftField(field: DraftField): FieldSchema {
   if (field.maxFiles !== undefined) result.maxFiles = field.maxFiles
   if (field.prompt !== undefined) result.prompt = field.prompt
   if (field.target_field !== undefined) result.target_field = field.target_field
+  if (field.visibleWhen !== undefined) result.visibleWhen = field.visibleWhen
+  if (field.customRule !== undefined) result.customRule = field.customRule
+  if (field.requiredWhen !== undefined) result.requiredWhen = field.requiredWhen
   if (field.fields !== undefined) result.fields = field.fields.map(stripFieldSchema)
   if (field.tabs !== undefined) {
     result.tabs = field.tabs.map((tab) => ({
@@ -1592,6 +1873,38 @@ const textareaStyle: CSSProperties = {
 const propertyStackStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-lg)',
+}
+
+const propertyTabBarStyle: CSSProperties = {
+  display: 'flex',
+  gap: 'var(--space-xs)',
+  borderBottom: '1px solid var(--color-border-light)',
+}
+
+const propertyTabButtonStyle: CSSProperties = {
+  flex: 1,
+  border: 0,
+  borderBottom: '2px solid transparent',
+  background: 'transparent',
+  padding: 'var(--space-sm) 0',
+  color: 'var(--color-text-secondary)',
+  fontFamily: 'var(--font-body)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 500,
+  cursor: 'pointer',
+}
+
+const propertyTabButtonActiveStyle: CSSProperties = {
+  ...propertyTabButtonStyle,
+  color: 'var(--color-accent)',
+  borderBottom: '2px solid var(--color-accent)',
+  fontWeight: 600,
+}
+
+const hintTextStyle: CSSProperties = {
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
+  lineHeight: 1.5,
 }
 
 const nestedEditorStyle: CSSProperties = {

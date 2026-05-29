@@ -17,17 +17,21 @@ export default function TagsWidget({ field, value, readOnly, onChange }: WidgetP
   return (
     <FieldFrame label={field.label} required={field.required}>
       <div style={optionRowStyle}>
-        {options.map((option) => (
-          <label key={String(option)} style={optionStyle}>
-            <input
-              type="checkbox"
-              checked={selected.includes(String(option))}
-              disabled={readOnly}
-              onChange={() => toggle(option)}
-            />
-            {String(option)}
-          </label>
-        ))}
+        {options.map((option) => {
+          const isOn = selected.includes(String(option))
+          return (
+            <label key={String(option)} style={optionStyle(isOn, readOnly)}>
+              <input
+                type="checkbox"
+                checked={isOn}
+                disabled={readOnly}
+                onChange={() => toggle(option)}
+                style={visuallyHiddenInputStyle}
+              />
+              {String(option)}
+            </label>
+          )
+        })}
       </div>
     </FieldFrame>
   )
@@ -39,15 +43,36 @@ function normalizedOptions(options?: FieldOption[]) {
 
 const optionRowStyle: CSSProperties = {
   display: 'flex',
-  gap: 'var(--space-sm)',
+  gap: 10,
   flexWrap: 'wrap',
 }
 
-const optionStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '4px 8px',
-  border: '1px solid var(--color-border-light)',
-  background: 'var(--color-surface)',
+function optionStyle(selected: boolean, readOnly?: boolean): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '7px 18px',
+    borderRadius: 999,
+    border: selected ? '1px solid #c3dafe' : '1px solid var(--lh-border)',
+    background: selected ? 'var(--lh-primary-soft)' : '#fff',
+    color: selected ? 'var(--lh-primary)' : 'var(--lh-text-1)',
+    fontSize: 13,
+    fontWeight: selected ? 500 : 400,
+    cursor: readOnly ? 'default' : 'pointer',
+    userSelect: 'none',
+    transition: 'background var(--duration-fast), border-color var(--duration-fast)',
+  }
+}
+
+const visuallyHiddenInputStyle: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
 }

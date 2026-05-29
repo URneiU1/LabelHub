@@ -67,4 +67,94 @@ describe('validateAnswer', () => {
     ])
     expect(validateAnswer(advancedSchema, { decision: 'pass', reject_reason: '' })).toEqual([])
   })
+
+  it('skips validation for fields hidden by visibleWhen', () => {
+    const visibilitySchema: TemplateSchema = {
+      title: 'visibility',
+      layout: 'single_page',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] },
+        {
+          name: 'reject_reason',
+          widget: 'Input',
+          label: '打回原因',
+          required: true,
+          visibleWhen: { field: 'decision', equals: 'reject' },
+        },
+      ],
+    }
+
+    // Hidden because decision !== reject -> required is skipped.
+    expect(validateAnswer(visibilitySchema, { decision: 'pass' })).toEqual([])
+    // Shown because decision === reject -> required is enforced.
+    expect(validateAnswer(visibilitySchema, { decision: 'reject', reject_reason: '' })).toEqual([
+      { field: 'reject_reason', message: '打回原因 is required' },
+    ])
+    expect(validateAnswer(visibilitySchema, { decision: 'reject', reject_reason: '理由充分' })).toEqual([])
+  })
+
+  it('applies customRule on non-empty visible values and skips empty ones', () => {
+    const customRuleSchema: TemplateSchema = {
+      title: 'custom-rule',
+      layout: 'single_page',
+      fields: [
+        {
+          name: 'score',
+          widget: 'Input',
+          label: '评分',
+          customRule: { expr: 'value >= "60"', message: '评分至少为 60' },
+        },
+      ],
+    }
+
+    // Empty value -> customRule skipped.
+    expect(validateAnswer(customRuleSchema, { score: '' })).toEqual([])
+    // expr false on a non-empty value -> error with the configured message.
+    expect(validateAnswer(customRuleSchema, { score: '50' })).toEqual([
+      { field: 'score', message: '评分至少为 60' },
+    ])
+    // expr true -> no error.
+    expect(validateAnswer(customRuleSchema, { score: '90' })).toEqual([])
+  })
+
+  it('composes customRule with len helper and sibling answers', () => {
+    const composedSchema: TemplateSchema = {
+      title: 'composed',
+      layout: 'single_page',
+      fields: [
+        { name: 'min_len', widget: 'Input', label: '最小长度' },
+        {
+          name: 'comment',
+          widget: 'TextArea',
+          label: '评语',
+          customRule: { expr: 'len(value) >= 4', message: '评语至少 4 个字符' },
+        },
+      ],
+    }
+
+    expect(validateAnswer(composedSchema, { comment: '太短' })).toEqual([
+      { field: 'comment', message: '评语至少 4 个字符' },
+    ])
+    expect(validateAnswer(composedSchema, { comment: '足够长的评语' })).toEqual([])
+  })
+
+  it('does not run customRule on fields hidden by visibleWhen', () => {
+    const hiddenRuleSchema: TemplateSchema = {
+      title: 'hidden-rule',
+      layout: 'single_page',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] },
+        {
+          name: 'score',
+          widget: 'Input',
+          label: '评分',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+          customRule: { expr: 'len(value) >= 4', message: '评分太短' },
+        },
+      ],
+    }
+
+    // score would fail its customRule, but it is hidden -> skipped entirely.
+    expect(validateAnswer(hiddenRuleSchema, { decision: 'pass', score: '1' })).toEqual([])
+  })
 })

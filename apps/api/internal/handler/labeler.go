@@ -31,6 +31,82 @@ func (h LabelerHandler) Register(api gin.IRouter) {
 	api.POST("/tasks/:taskId/items/:itemId/draft", middleware.RequireRoles("labeler"), h.SaveDraft)
 	api.POST("/tasks/:taskId/items/:itemId/submit", middleware.RequireRoles("labeler"), h.SubmitItem)
 	api.GET("/me/submissions", middleware.RequireRoles("labeler"), h.MySubmissions)
+	api.GET("/tasks/:taskId/labeler/items", middleware.RequireRoles("labeler"), h.ListMyTaskItems)
+}
+
+// labelerTaskItem 是作答页"题目导航"里的一题:其在本任务中的序号、外部 ID,以及当前 labeler
+// 对这一题的状态(available 待标 / claimed 进行中 / 或其 submission 状态;taken = 被他人领走)。
+type labelerTaskItem struct {
+	ItemID       uint64  `json:"itemId"`
+	ExternalID   *string `json:"externalId"`
+	Status       string  `json:"status"`
+	Mine         bool    `json:"mine"`
+	SubmissionID *uint64 `json:"submissionId"`
+}
+
+type labelerTaskItemsResponse struct {
+	TaskID uint64            `json:"taskId"`
+	Total  int               `json:"total"`
+	Items  []labelerTaskItem `json:"items"`
+	Counts map[string]int    `json:"counts"`
+}
+
+// ListMyTaskItems 返回某任务下全部题目及当前 labeler 对每题的状态,供作答页左侧"题目导航"
+// 展示完整进度(已提交/草稿/打回/进行中/待标)与跳题。两次查询 + 内存合并,避免复杂联表。
+func (h LabelerHandler) ListMyTaskItems(c *gin.Context) {
+	task, ok := loadTask(h.db, c)
+	if !ok {
+		return
+	}
+	claims, _ := middleware.Claims(c)
+
+	var items []model.TaskItem
+	if err := h.db.Where("task_id = ?", task.ID).Order("priority DESC, id ASC").Find(&items).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list items")
+		return
+	}
+	var subs []model.Submission
+	if err := h.db.Where("task_id = ?", task.ID).Find(&subs).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list submissions")
+		return
+	}
+	subByItem := make(map[uint64]model.Submission, len(subs))
+	for _, s := range subs {
+		subByItem[s.ItemID] = s
+	}
+
+	out := make([]labelerTaskItem, 0, len(items))
+	counts := map[string]int{}
+	for _, it := range items {
+		entry := labelerTaskItem{ItemID: it.ID}
+		if it.ExternalID.Valid {
+			ext := it.ExternalID.String
+			entry.ExternalID = &ext
+		}
+		switch sub, has := subByItem[it.ID]; {
+		case has && sub.LabelerID == claims.UserID:
+			entry.Status = sub.Status
+			entry.Mine = true
+			sid := sub.ID
+			entry.SubmissionID = &sid
+		case has:
+			entry.Status = "taken"
+		case it.ClaimedBy != nil && *it.ClaimedBy == claims.UserID:
+			entry.Status = "claimed"
+			entry.Mine = true
+		default:
+			entry.Status = "available"
+		}
+		counts[entry.Status]++
+		out = append(out, entry)
+	}
+
+	httpx.OK(c, labelerTaskItemsResponse{
+		TaskID: task.ID,
+		Total:  len(items),
+		Items:  out,
+		Counts: counts,
+	})
 }
 
 type answerRequest struct {
@@ -66,6 +142,10 @@ func (h LabelerHandler) ClaimItem(c *gin.Context) {
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "task is not accepting new claims")
 	case errors.Is(err, submission.ErrNoAvailableItem):
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "没有可领取的题目")
+	case errors.Is(err, submission.ErrQuotaReached):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "已达到本任务的领取配额")
+	case errors.Is(err, submission.ErrNotAssigned):
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "你未被指派到该任务")
 	case errors.Is(err, submission.ErrClaimRaceLost):
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "claim race lost, please retry")
 	case errors.Is(err, submission.ErrTaskTemplate):

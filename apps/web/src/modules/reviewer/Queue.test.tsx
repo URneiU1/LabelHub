@@ -3,12 +3,17 @@ import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ReviewerQueue from './Queue'
-import { apiGet, apiPost } from '../../shared/api/client'
+import { apiGet, apiPost, listReviewResults } from '../../shared/api/client'
 
-vi.mock('../../shared/api/client', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
-}))
+vi.mock('../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../shared/api/client')>('../../shared/api/client')
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPost: vi.fn(),
+    listReviewResults: vi.fn(),
+  }
+})
 
 vi.mock('@douyinfe/semi-ui', () => ({
   Button: ({ children, loading, theme, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean, theme?: string }) => {
@@ -24,6 +29,7 @@ vi.mock('@douyinfe/semi-ui', () => ({
 
 const mockApiGet = vi.mocked(apiGet)
 const mockApiPost = vi.mocked(apiPost)
+const mockListReviewResults = vi.mocked(listReviewResults)
 
 const submission = {
   id: 501,
@@ -33,6 +39,9 @@ const submission = {
   aiVerdict: 'pass',
   aiScore: 92.5,
   currentRevisionId: 901,
+  reviewStage: 'second' as const,
+  reviewLevel: 2,
+  requiredLevels: 3,
 }
 
 const task = {
@@ -57,7 +66,9 @@ describe('ReviewerQueue schema runtime flow', () => {
   beforeEach(() => {
     mockApiGet.mockReset()
     mockApiPost.mockReset()
-    mockApiPost.mockResolvedValue({ submission_id: 501, status: 'approved' })
+    mockListReviewResults.mockReset()
+    mockListReviewResults.mockResolvedValue({ results: [], nextCursor: '', hasMore: false })
+    mockApiPost.mockResolvedValue({ submission_id: 501, status: 'approved', stage: 'final' })
   })
 
   it('batch approves selected submissions through the real batch endpoint', async () => {
@@ -168,6 +179,9 @@ describe('ReviewerQueue schema runtime flow', () => {
             payload: { score: 92.5 },
             createdAt: '2026-05-26T13:00:00Z',
           }],
+          reviewStage: 'second',
+          reviewLevel: 2,
+          requiredLevels: 3,
         }
       }
       throw new Error(`unexpected GET ${path}`)
@@ -186,6 +200,115 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getByText('关键词覆盖充分，建议通过。')).toBeInTheDocument()
     expect(screen.getByText('请审核商品标题')).toBeInTheDocument()
     expect(screen.getAllByText('ai_done').length).toBeGreaterThan(0)
+  })
+
+  it('shows the review stage (复审 / 审核进度 2/3) in the detail and labels the approve action with the stage', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions/501') {
+        return {
+          task,
+          item,
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission,
+          revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+          aiReview: null,
+          auditLogs: [],
+          reviewStage: 'second',
+          reviewLevel: 2,
+          requiredLevels: 3,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<ReviewerQueue />)
+
+    // 队列行先带阶段小徽标(进入详情前只有 1 个)。
+    expect(await screen.findByLabelText('审核阶段 复审')).toBeInTheDocument()
+
+    await user.click(await screen.findByText('Submission #501'))
+
+    // 进入详情后,详情头部也显示当前阶段 + 审核进度(队列 + 详情共 2 个徽标)。
+    const stageBadges = await screen.findAllByLabelText('审核阶段 复审')
+    expect(stageBadges.length).toBeGreaterThanOrEqual(2)
+    expect(stageBadges.some((node) => node.textContent === '复审 · 审核进度 2/3')).toBe(true)
+    // 通过决策按钮标注当前阶段,体现「approve 推进一级」。
+    expect(screen.getByText('✓ 通过(复审)')).toBeInTheDocument()
+    expect(screen.getByText('推进一级 · 审核进度 2/3')).toBeInTheDocument()
+  })
+
+  it('lists finalized review results and opens one read-only', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions/777') {
+        return {
+          task,
+          item: { ...item, id: 22 },
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission: { ...submission, id: 777, itemId: 22, status: 'approved' },
+          revision: { id: 902, answer: JSON.stringify({ summary: '已定稿' }), draft: false },
+          aiReview: null,
+          auditLogs: [],
+          reviewStage: 'final',
+          reviewLevel: 3,
+          requiredLevels: 3,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockListReviewResults.mockResolvedValue({
+      results: [{
+        id: 777,
+        taskId: 1,
+        itemId: 22,
+        status: 'approved',
+        finalVerdict: 'approve',
+        reviewerId: 9,
+        aiScore: 88,
+        updatedAt: '2026-05-28T10:00:00Z',
+      }],
+      nextCursor: '',
+      hasMore: false,
+    })
+
+    render(<ReviewerQueue />)
+
+    await screen.findByText('Submission #501')
+    await user.click(screen.getByRole('tab', { name: '审核结果' }))
+
+    const resultRow = await screen.findByLabelText('查看 Submission #777 审核结果')
+    expect(resultRow).toHaveTextContent('SUB-777')
+    expect(resultRow).toHaveTextContent('决定 通过')
+    expect(mockListReviewResults).toHaveBeenCalled()
+
+    await user.click(resultRow)
+
+    // 点击结果行后切回工作台并加载只读详情。
+    const input = await screen.findByLabelText('历史字段')
+    expect(input).toHaveValue('已定稿')
+    expect(input).toBeDisabled()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/reviewer/submissions/777'))
   })
 
   it('shows an empty AI review state when no AI verdict exists', async () => {

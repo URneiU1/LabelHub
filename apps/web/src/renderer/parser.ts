@@ -1,4 +1,7 @@
+import { Parser as ExprParser } from 'expr-eval'
 import { showItemModes, widgetTypes, type AnswerValue, type FieldSchema, type ParseResult, type TabSchema, type TemplateSchema, type WidgetType } from './types'
+
+const exprParser = new ExprParser()
 
 const widgetSet = new Set<string>(widgetTypes)
 const showItemModeSet = new Set<string>(showItemModes)
@@ -110,6 +113,20 @@ function parseField(rawField: Record<string, unknown>, path: string, names: Set<
       return requiredWhenResult
     }
     field.requiredWhen = requiredWhenResult.value
+  }
+  if ('visibleWhen' in rawField) {
+    const visibleWhenResult = parseVisibleWhen(rawField.visibleWhen, `${path}.visibleWhen`)
+    if (!visibleWhenResult.ok) {
+      return visibleWhenResult
+    }
+    field.visibleWhen = visibleWhenResult.value
+  }
+  if ('customRule' in rawField) {
+    const customRuleResult = parseCustomRule(rawField.customRule, `${path}.customRule`)
+    if (!customRuleResult.ok) {
+      return customRuleResult
+    }
+    field.customRule = customRuleResult.value
   }
   if (widget === 'Group') {
     const childrenResult = parseFields(rawField.fields, `${path}.fields`, names)
@@ -234,6 +251,9 @@ function validateLLMTargets(fields: FieldSchema[], path: string, names: Set<stri
     if (field.requiredWhen && !names.has(field.requiredWhen.field)) {
       return parseError(`${fieldPath}.requiredWhen.field`, 'requiredWhen.field must reference an existing field')
     }
+    if (field.visibleWhen && !names.has(field.visibleWhen.field)) {
+      return parseError(`${fieldPath}.visibleWhen.field`, 'visibleWhen.field must reference an existing field')
+    }
     if (field.fields) {
       const result = validateLLMTargets(field.fields, `${fieldPath}.fields`, names)
       if (!result.ok) return result
@@ -272,6 +292,52 @@ function parseRequiredWhen(raw: unknown, path: string): ParseResult<FieldSchema[
     result.notEmpty = notEmpty
   }
   return { ok: true, value: result }
+}
+
+function parseVisibleWhen(raw: unknown, path: string): ParseResult<FieldSchema['visibleWhen']> {
+  if (!isRecord(raw)) {
+    return parseError(path, 'visibleWhen must be an object')
+  }
+  const field = stringProp(raw.field)
+  if (!field) {
+    return parseError(`${path}.field`, 'field is required')
+  }
+  const hasEquals = 'equals' in raw
+  const notEmpty = raw.notEmpty
+  if ('notEmpty' in raw && typeof notEmpty !== 'boolean') {
+    return parseError(`${path}.notEmpty`, 'notEmpty must be boolean')
+  }
+  if (!hasEquals && notEmpty !== true) {
+    return parseError(path, 'visibleWhen must set equals or notEmpty=true')
+  }
+  const result: FieldSchema['visibleWhen'] = { field }
+  if (hasEquals) {
+    result.equals = raw.equals
+  }
+  if (typeof notEmpty === 'boolean') {
+    result.notEmpty = notEmpty
+  }
+  return { ok: true, value: result }
+}
+
+function parseCustomRule(raw: unknown, path: string): ParseResult<FieldSchema['customRule']> {
+  if (!isRecord(raw)) {
+    return parseError(path, 'customRule must be an object')
+  }
+  const expr = typeof raw.expr === 'string' ? raw.expr.trim() : ''
+  if (!expr) {
+    return parseError(`${path}.expr`, 'expr is required')
+  }
+  try {
+    exprParser.parse(expr)
+  } catch {
+    return parseError(`${path}.expr`, 'expr must be a valid expression')
+  }
+  const message = stringProp(raw.message)
+  if (!message) {
+    return parseError(`${path}.message`, 'message is required')
+  }
+  return { ok: true, value: { expr, message } }
 }
 
 export function parseAnswer(raw?: string | null): AnswerValue {
