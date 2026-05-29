@@ -126,6 +126,32 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(mockApiGet).toHaveBeenCalledWith('/tasks/2/ai-prompts')
   })
 
+  it('switches the task detail between left-nav sections (AI / export)', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') return [task]
+      if (path === '/tasks/1/ai-prompts') return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      if (path === '/tasks/1/golden-samples') return { samples: [] }
+      if (path.startsWith('/tasks/1/ai-dry-runs')) return { dryRuns: [] }
+      if (path === '/tasks/1/exports') return { exports: [] }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    // 默认进入 AI 预审一节:prompt 模板可见
+    expect(await screen.findByLabelText('prompt_template')).toBeInTheDocument()
+
+    // 切到「数据导出」一节:AI 控件卸载,导出面板出现
+    await user.click(screen.getByRole('button', { name: '视图 数据导出' }))
+    await waitFor(() => expect(screen.queryByLabelText('prompt_template')).toBeNull())
+    expect(screen.getByLabelText('数据导出')).toBeInTheDocument()
+
+    // 切回「AI 预审」一节:prompt 模板重新出现
+    await user.click(screen.getByRole('button', { name: '视图 AI 预审' }))
+    expect(await screen.findByLabelText('prompt_template')).toBeInTheDocument()
+  })
+
   it('saves editable baseline description for the selected task', async () => {
     const user = userEvent.setup()
     mockApiPost.mockResolvedValue({

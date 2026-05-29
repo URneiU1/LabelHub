@@ -131,6 +131,9 @@ type DimensionRow = {
 export default function OwnerDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [selected, setSelected] = useState<Task | null>(null)
+  // 任务详情区的当前视图。把原来一长条拆成左栏可切换的几节,主区一次只显示一节。
+  // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
+  const [detailSection, setDetailSection] = useState<'stats' | 'ai' | 'export'>('ai')
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
@@ -855,6 +858,24 @@ export default function OwnerDashboard() {
               <EmptyState title="暂无任务" body="当前账号还没有可管理的任务。" variant="empty" />
             ) : null}
           </div>
+          {selected ? (
+            <nav className="lh-side-section" aria-label="任务视图" style={{ marginTop: 'var(--space-lg)' }}>
+              <div className="lh-side-section__title">视图</div>
+              {([['stats', '数据看板'], ['ai', 'AI 预审'], ['export', '数据导出']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-label={`视图 ${label}`}
+                  aria-pressed={detailSection === key}
+                  className={'lh-side-item' + (detailSection === key ? ' lh-side-item--active' : '')}
+                  onClick={() => setDetailSection(key)}
+                >
+                  <span className="lh-side-item__icon" />
+                  {label}
+                </button>
+              ))}
+            </nav>
+          ) : null}
         </section>
 
         <section style={{ ...panelStyle, minHeight: 600 }}>
@@ -881,11 +902,15 @@ export default function OwnerDashboard() {
                 <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
 
-              <Suspense fallback={<LoadingBlock title="看板加载中" rows={3} />}>
-                <StatsBoard taskId={selected.id} />
-              </Suspense>
-              <ExportPanel taskId={selected.id} />
+              {detailSection === 'stats' && (
+                <Suspense fallback={<LoadingBlock title="看板加载中" rows={3} />}>
+                  <StatsBoard taskId={selected.id} />
+                </Suspense>
+              )}
+              {detailSection === 'export' && <ExportPanel taskId={selected.id} />}
 
+              {detailSection === 'ai' && (
+                <>
               <div style={{ background: 'var(--lh-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--lh-border)' }}>
                 <div style={aiSettingsRowStyle}>
                   <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)', textTransform: 'uppercase' }}>Baseline 说明</div>
@@ -1194,6 +1219,8 @@ export default function OwnerDashboard() {
                   </div>
                 </div>
               </section>
+                </>
+              )}
               {exportRows.length > 0 ? (
                 <pre style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: 'var(--lh-bg)', overflow: 'auto', maxHeight: 260, borderRadius: 'var(--radius-md)', border: '1px solid var(--lh-border)' }}>
                   {JSON.stringify(exportRows.slice(0, 3), null, 2)}
