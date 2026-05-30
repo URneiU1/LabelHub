@@ -93,13 +93,26 @@ func TestMainFlowWithRealMySQLRedis(t *testing.T) {
 	}
 
 	simulateAIResult(t, ctx, sqlDB, second.ID, *second.CurrentRevisionID, "pass", 92)
-	if _, err := reviewsvc.Apply(db, reviewsvc.ApplyInput{
-		SubmissionID: second.ID,
-		Verdict:      "approve",
-		ReviewerID:   3,
-		Roles:        []string{"reviewer"},
-	}); err != nil {
-		t.Fatalf("approve review: %v", err)
+	// 多级人工审核:approve 需 RequiredHumanReviewLevels(=3)次才定稿(per current revision)。
+	// 前两次(初审/复审)只 advance stage,submission 停留 human_reviewing;第三次(终审)推到 approved。
+	for level := 1; level <= reviewsvc.RequiredHumanReviewLevels; level++ {
+		if _, err := reviewsvc.Apply(db, reviewsvc.ApplyInput{
+			SubmissionID: second.ID,
+			Verdict:      "approve",
+			ReviewerID:   3,
+			Roles:        []string{"reviewer"},
+		}); err != nil {
+			t.Fatalf("approve review level %d: %v", level, err)
+		}
+		if level < reviewsvc.RequiredHumanReviewLevels {
+			var s model.Submission
+			if err := db.First(&s, second.ID).Error; err != nil {
+				t.Fatalf("reload submission after approve level %d: %v", level, err)
+			}
+			if s.Status != "human_reviewing" {
+				t.Fatalf("after approve level %d: status %q, want human_reviewing", level, s.Status)
+			}
+		}
 	}
 	assertApproved(t, db, second.ID)
 
@@ -131,7 +144,11 @@ func startMySQL(t *testing.T, ctx context.Context) (*gorm.DB, *sql.DB) {
 	}
 	testcontainers.CleanupContainer(t, ctr)
 
-	dsn, err := ctr.ConnectionString(ctx, "parseTime=true", "multiStatements=true")
+	// clientFoundRows=true:让 UPDATE 的 RowsAffected 返回"匹配行数"而非"实际变更行数"。
+	// review.Apply 的中间级 approve 用 `UPDATE ... SET updated_at=now WHERE status='human_reviewing'`
+	// + RowsAffected==1 做乐观守卫;在快测里两次 approve 可能落在同一秒,updated_at 不变,
+	// 默认的"变更行数"会读成 0 而误报 ErrConcurrentWrite。匹配行数语义才是该守卫的本意。
+	dsn, err := ctr.ConnectionString(ctx, "parseTime=true", "multiStatements=true", "clientFoundRows=true")
 	if err != nil {
 		t.Fatalf("mysql dsn: %v", err)
 	}
