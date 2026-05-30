@@ -7,6 +7,7 @@ import StatusBadge from '../../shared/components/StatusBadge'
 import ExportPanel from './ExportPanel'
 import ImportPanel from './ImportPanel'
 import TaskManagePanel from './TaskManagePanel'
+import { useOwnerSection } from '../../shared/state/ownerSection'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
 const StatsBoard = lazy(() => import('./StatsBoard'))
 
@@ -129,23 +130,13 @@ type DimensionRow = {
   weight: string
 }
 
-// Owner 左栏导航:对齐组织方 demo SideNav 的三组结构。
-// 任务管理 = 左栏常驻的任务列表(选任务入口),故这里只列可切换的详情面板。
-// 人工审核「动作」归 Reviewer 角色,Owner 只读「审核结果」聚合。
-type DetailSection = 'template' | 'dataset' | 'ai' | 'review' | 'stats' | 'export'
-
-const SIDE_NAV_GROUPS: ReadonlyArray<{ title: string, items: ReadonlyArray<readonly [DetailSection, string]> }> = [
-  { title: '数据生产', items: [['template', '模板搭建'], ['dataset', '数据集']] },
-  { title: '审核与质检', items: [['ai', 'AI 预审'], ['review', '审核结果']] },
-  { title: '数据交付', items: [['stats', '数据看板'], ['export', '数据导出']] },
-]
-
 export default function OwnerDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [selected, setSelected] = useState<Task | null>(null)
   // 任务详情区的当前视图。把原来一长条拆成左栏可切换的几节,主区一次只显示一节。
   // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
-  const [detailSection, setDetailSection] = useState<DetailSection>('ai')
+  // 分节由全局「工作区」侧栏(AppLayout)驱动,经共享 store 桥接。
+  const detailSection = useOwnerSection()
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
@@ -840,62 +831,33 @@ export default function OwnerDashboard() {
         <p style={{ fontFamily: 'var(--lh-font-sans)', color: 'var(--lh-text-2)', marginTop: 'var(--space-xs)' }}>任务发布 · 模板搭建 · 审核配置 · 数据导出</p>
       </div>
 
-      <TaskManagePanel
-        tasks={tasks}
-        selected={selected}
-        onSelect={selectTask}
-        onTaskSaved={applyTaskSaved}
-        onTasksChanged={() => void reloadTasksKeepSelection()}
-      />
-
-      <div className="lh-shell-2col">
-        <section style={panelStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-            <h2 style={headingStyle}>任务列表</h2>
-          </div>
-          <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
-            {tasks.map((task) => (
-              <button key={task.id} onClick={() => selectTask(task)} style={task.id === selected?.id ? activeListButtonStyle : listButtonStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <strong style={{ fontSize: 'var(--text-base)' }}>{task.title}</strong>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>ID: {task.id}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-2)' }}>进度: {task.finishedItems}/{task.totalItems}</span>
-                  <StatusBadge status={task.status} />
-                </div>
-              </button>
-            ))}
-            {tasks.length === 0 ? (
-              <EmptyState title="暂无任务" body="当前账号还没有可管理的任务。" variant="empty" />
-            ) : null}
-          </div>
-          {selected ? (
-            <div style={{ marginTop: 'var(--space-lg)' }}>
-              {SIDE_NAV_GROUPS.map((group) => (
-                <nav key={group.title} className="lh-side-section" aria-label={group.title}>
-                  <div className="lh-side-section__title">{group.title}</div>
-                  {group.items.map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-label={`视图 ${label}`}
-                      aria-pressed={detailSection === key}
-                      className={'lh-side-item' + (detailSection === key ? ' lh-side-item--active' : '')}
-                      onClick={() => setDetailSection(key)}
-                    >
-                      <span className="lh-side-item__icon" />
-                      {label}
-                    </button>
-                  ))}
-                </nav>
+      <div>
+        <section style={{ ...panelStyle, minHeight: 600 }}>
+          {detailSection === 'tasks' && (
+            <TaskManagePanel
+              tasks={tasks}
+              selected={selected}
+              onSelect={selectTask}
+              onTaskSaved={applyTaskSaved}
+              onTasksChanged={() => void reloadTasksKeepSelection()}
+            />
+          )}
+          {detailSection !== 'tasks' && tasks.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-lg)' }}>
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>当前任务</span>
+              {tasks.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => selectTask(task)}
+                  style={task.id === selected?.id ? activeTaskChipStyle : taskChipStyle}
+                >
+                  {task.title}
+                </button>
               ))}
             </div>
-          ) : null}
-        </section>
-
-        <section style={{ ...panelStyle, minHeight: 600 }}>
-          {selected ? (
+          )}
+          {detailSection !== 'tasks' && selected ? (
             <>
               <div style={{ borderBottom: '1px solid var(--lh-border)', paddingBottom: 'var(--space-md)', marginBottom: 'var(--space-lg)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1273,9 +1235,10 @@ export default function OwnerDashboard() {
                 </pre>
               ) : null}
             </>
-          ) : (
+          ) : null}
+          {detailSection !== 'tasks' && !selected && (
             <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--lh-text-3)' }}>
-              请在左侧选择一个标注任务进行管理
+              请在「任务管理」中选择一个任务进行配置
             </div>
           )}
         </section>
@@ -1774,24 +1737,22 @@ const mutedStyle: React.CSSProperties = {
   fontSize: 'var(--text-sm)',
 }
 
-const listButtonStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  width: '100%',
-  padding: 'var(--space-md)',
-  textAlign: 'left',
-  background: 'var(--lh-bg-card)',
-  border: '1px solid var(--lh-border)',
+const taskChipStyle: React.CSSProperties = {
+  padding: 'var(--space-xs) var(--space-md)',
   borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--lh-border)',
+  background: 'var(--lh-bg-card)',
+  color: 'var(--lh-text-2)',
+  fontSize: 'var(--text-sm)',
   cursor: 'pointer',
-  transition: 'all var(--duration-fast)',
 }
 
-const activeListButtonStyle: React.CSSProperties = {
-  ...listButtonStyle,
+const activeTaskChipStyle: React.CSSProperties = {
+  ...taskChipStyle,
   borderColor: 'var(--lh-primary)',
-  background: 'var(--lh-bg-elev)',
-  boxShadow: 'var(--shadow-sm)',
+  background: 'var(--lh-primary-soft)',
+  color: 'var(--lh-primary)',
+  fontWeight: 600,
 }
 
 const templateDesignerLinkStyle: React.CSSProperties = {

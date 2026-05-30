@@ -1,6 +1,8 @@
 # HANDOFF — Owner 左侧导航重排为「三组七栏」
 
-> ✅ **已完成(2026-05-31,路线 A)**:用户拍板走路线 A(六栏 / AI 合一),已在 `feat/ui-reskin-s7-and-followups` 上实现。Dashboard 左栏现为三组 `lh-side-section`(数据生产 / 审核与质检 / 数据交付),6 个可切换分节(模板搭建·数据集 / AI 预审·审核结果 / 数据看板·数据导出)+ 左栏常驻任务列表(=任务管理)。AI 预审 = 配置+黄金评测合一;审核结果 = 只读聚合(人工审核动作仍归 Reviewer)。37 个 Dashboard 测试零改动全过,详见 `docs/CHANGELOG.md` 的 `owner-left-nav-three-groups` 条目。下文为原始交接说明,保留供参考。
+> ✅ **已完成(2026-05-31,路线 A)**:用户拍板走路线 A(六栏 / AI 合一),已在 `feat/ui-reskin-s7-and-followups` 上实现。Dashboard 左栏现为三组 `lh-side-section`(数据生产 / 审核与质检 / 数据交付),6 个可切换分节(模板搭建·数据集 / AI 预审·审核结果 / 数据看板·数据导出)+ 左栏常驻任务列表(=任务管理)。AI 预审 = 配置+黄金评测合一;审核结果 = 只读聚合(人工审核动作仍归 Reviewer)。37 个 Dashboard 测试零改动全过,详见 `docs/CHANGELOG.md` 的 `owner-left-nav-three-groups` 条目。
+>
+> ✅ **后续(同日,采纳本文第 6 节决策 #4)**:用户要求把三组分节**提升到全局「工作区」侧栏**(`AppLayout`,= demo 的真实结构),已实现。新增共享 store `shared/state/ownerSection.ts` 桥接 shell↔页面;AppLayout owner 侧栏渲染 `OWNER_NAV_GROUPS`(7 项含任务管理),Dashboard 改单列、`'tasks'` 节挂 `TaskManagePanel`、非 tasks 节加「当前任务」chip 切换器保留选任务入口。158/158 测试 + lint + build 全过,详见 `owner-nav-promote-to-global-sidebar` 条目。下文为原始交接说明,保留供参考。
 
 > 写给下一个 session。目标:把 Owner 后台左栏从现在的「任务列表 + 3 个视图(数据看板/AI 预审/数据导出)」**扩成对齐组织方 demo `~/labelhub-ui-demo` SideNav 的三组结构**,并守住职责分离(人工审核动作留在 Reviewer,不进 Owner)。先读本文件,再读 `docs/HANDOFF.md`(部署/项目总览)和 `docs/CHANGELOG.md`(最近改动)。
 

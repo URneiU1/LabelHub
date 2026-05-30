@@ -1,5 +1,6 @@
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { clearToken, getCurrentUser, hasAnyRole } from '../api/client'
+import { OWNER_NAV_GROUPS, setOwnerSection, useOwnerSection } from '../state/ownerSection'
 
 interface NavItem {
   to: string
@@ -28,8 +29,14 @@ function primaryRole(roles: string[]): string {
 }
 
 export default function AppLayout() {
+  const navigate = useNavigate()
+  const ownerSection = useOwnerSection()
   const user = getCurrentUser()
   const visibleNavItems = NAV_ITEMS.filter((item) => hasAnyRole(item.roles))
+  // Owner/admin 的左栏是「工作区」三组分节(对齐 demo SideNav);分节由 ownerSection store 驱动,
+  // 跨子树同步到 Owner 页(Dashboard)。其它角色仍用各自的路由导航。
+  const ownerWorkspace = hasAnyRole(['owner', 'admin'])
+  const otherRoleNavItems = visibleNavItems.filter((item) => item.to !== '/owner')
   const roles = user?.roles ?? []
   const role = primaryRole(roles)
   const roleLabel = ROLE_LABEL[role] ?? role
@@ -60,21 +67,61 @@ export default function AppLayout() {
       </header>
       <div className="lh-shell">
         <aside className="lh-shell__side">
-          <div className="lh-side-section">
-            <div className="lh-side-section__title">工作区</div>
-            {visibleNavItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
-                }
-              >
-                <span className="lh-side-item__icon" />
-                {item.label}
-              </NavLink>
-            ))}
-          </div>
+          {ownerWorkspace ? (
+            OWNER_NAV_GROUPS.map((group) => (
+              <nav className="lh-side-section" key={group.title} aria-label={group.title}>
+                <div className="lh-side-section__title">{group.title}</div>
+                {group.items.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={'lh-side-item' + (ownerSection === key ? ' lh-side-item--active' : '')}
+                    aria-current={ownerSection === key ? 'page' : undefined}
+                    onClick={() => {
+                      setOwnerSection(key)
+                      navigate('/owner')
+                    }}
+                  >
+                    <span className="lh-side-item__icon" />
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            ))
+          ) : (
+            <div className="lh-side-section">
+              <div className="lh-side-section__title">工作区</div>
+              {visibleNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
+                  }
+                >
+                  <span className="lh-side-item__icon" />
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+          {ownerWorkspace && otherRoleNavItems.length > 0 ? (
+            <div className="lh-side-section">
+              <div className="lh-side-section__title">其它</div>
+              {otherRoleNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
+                  }
+                >
+                  <span className="lh-side-item__icon" />
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          ) : null}
         </aside>
         <main className="lh-shell__main">
           <Outlet />

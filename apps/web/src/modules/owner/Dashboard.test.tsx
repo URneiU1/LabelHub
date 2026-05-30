@@ -4,6 +4,7 @@ import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OwnerDashboard from './Dashboard'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON } from '../../shared/api/client'
+import { resetOwnerSection, setOwnerSection } from '../../shared/state/ownerSection'
 
 const mockModalConfirm = vi.hoisted(() => vi.fn())
 
@@ -55,6 +56,8 @@ describe('OwnerDashboard AI prompt flow', () => {
     mockApiDelete.mockReset()
     mockModalConfirm.mockReset()
     window.history.pushState({}, '', '/')
+    // 分节是模块级 store,重置回默认 'ai' 避免跨用例泄漏。
+    resetOwnerSection()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]
@@ -126,8 +129,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(mockApiGet).toHaveBeenCalledWith('/tasks/2/ai-prompts')
   })
 
-  it('switches the task detail between left-nav sections (AI / export)', async () => {
-    const user = userEvent.setup()
+  it('switches the task detail between sections via the owner-section store (AI / export)', async () => {
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') return [task]
       if (path === '/tasks/1/ai-prompts') return { prompts: [], activePromptId: null, aiReviewEnabled: false }
@@ -142,13 +144,13 @@ describe('OwnerDashboard AI prompt flow', () => {
     // 默认进入 AI 预审一节:prompt 模板可见
     expect(await screen.findByLabelText('prompt_template')).toBeInTheDocument()
 
-    // 切到「数据导出」一节:AI 控件卸载,导出面板出现
-    await user.click(screen.getByRole('button', { name: '视图 数据导出' }))
+    // 切到「数据导出」一节(分节由全局工作区侧栏经 store 驱动):AI 控件卸载,导出面板出现
+    act(() => setOwnerSection('export'))
     await waitFor(() => expect(screen.queryByLabelText('prompt_template')).toBeNull())
-    expect(screen.getByLabelText('数据导出')).toBeInTheDocument()
+    expect(await screen.findByLabelText('数据导出')).toBeInTheDocument()
 
     // 切回「AI 预审」一节:prompt 模板重新出现
-    await user.click(screen.getByRole('button', { name: '视图 AI 预审' }))
+    act(() => setOwnerSection('ai'))
     expect(await screen.findByLabelText('prompt_template')).toBeInTheDocument()
   })
 

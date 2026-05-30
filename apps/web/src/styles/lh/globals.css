@@ -218,6 +218,21 @@ button {
   font-weight: 600;
 }
 
+/* lh-side-item 也用在 <button> 上(Owner 工作区分节);重置原生按钮外观以对齐 NavLink。 */
+button.lh-side-item {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+button.lh-side-item--active {
+  background: var(--lh-primary-soft);
+}
+
 .lh-side-item__icon {
   width: 16px;
   height: 16px;
