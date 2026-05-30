@@ -5,6 +5,7 @@ import EmptyState from '../../shared/components/EmptyState'
 import LoadingBlock from '../../shared/components/LoadingBlock'
 import StatusBadge from '../../shared/components/StatusBadge'
 import ExportPanel from './ExportPanel'
+import ImportPanel from './ImportPanel'
 import TaskManagePanel from './TaskManagePanel'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
 const StatsBoard = lazy(() => import('./StatsBoard'))
@@ -128,12 +129,23 @@ type DimensionRow = {
   weight: string
 }
 
+// Owner 左栏导航:对齐组织方 demo SideNav 的三组结构。
+// 任务管理 = 左栏常驻的任务列表(选任务入口),故这里只列可切换的详情面板。
+// 人工审核「动作」归 Reviewer 角色,Owner 只读「审核结果」聚合。
+type DetailSection = 'template' | 'dataset' | 'ai' | 'review' | 'stats' | 'export'
+
+const SIDE_NAV_GROUPS: ReadonlyArray<{ title: string, items: ReadonlyArray<readonly [DetailSection, string]> }> = [
+  { title: '数据生产', items: [['template', '模板搭建'], ['dataset', '数据集']] },
+  { title: '审核与质检', items: [['ai', 'AI 预审'], ['review', '审核结果']] },
+  { title: '数据交付', items: [['stats', '数据看板'], ['export', '数据导出']] },
+]
+
 export default function OwnerDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [selected, setSelected] = useState<Task | null>(null)
   // 任务详情区的当前视图。把原来一长条拆成左栏可切换的几节,主区一次只显示一节。
   // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
-  const [detailSection, setDetailSection] = useState<'stats' | 'ai' | 'export'>('ai')
+  const [detailSection, setDetailSection] = useState<DetailSection>('ai')
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
@@ -859,22 +871,26 @@ export default function OwnerDashboard() {
             ) : null}
           </div>
           {selected ? (
-            <nav className="lh-side-section" aria-label="任务视图" style={{ marginTop: 'var(--space-lg)' }}>
-              <div className="lh-side-section__title">视图</div>
-              {([['stats', '数据看板'], ['ai', 'AI 预审'], ['export', '数据导出']] as const).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-label={`视图 ${label}`}
-                  aria-pressed={detailSection === key}
-                  className={'lh-side-item' + (detailSection === key ? ' lh-side-item--active' : '')}
-                  onClick={() => setDetailSection(key)}
-                >
-                  <span className="lh-side-item__icon" />
-                  {label}
-                </button>
+            <div style={{ marginTop: 'var(--space-lg)' }}>
+              {SIDE_NAV_GROUPS.map((group) => (
+                <nav key={group.title} className="lh-side-section" aria-label={group.title}>
+                  <div className="lh-side-section__title">{group.title}</div>
+                  {group.items.map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-label={`视图 ${label}`}
+                      aria-pressed={detailSection === key}
+                      className={'lh-side-item' + (detailSection === key ? ' lh-side-item--active' : '')}
+                      onClick={() => setDetailSection(key)}
+                    >
+                      <span className="lh-side-item__icon" />
+                      {label}
+                    </button>
+                  ))}
+                </nav>
               ))}
-            </nav>
+            </div>
           ) : null}
         </section>
 
@@ -901,6 +917,36 @@ export default function OwnerDashboard() {
                 <MetricCell label="EVAL SET" value={String(goldenSamples.length)} detail={goldenSampleLoading ? 'loading samples' : `${Object.keys(goldenRunRows).length} recent runs`} tone="teal" />
                 <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
+
+              {detailSection === 'template' && (
+                <section style={aiPromptSectionStyle} aria-label="模板搭建">
+                  <h3 style={subHeadingStyle}>模板搭建</h3>
+                  <p style={mutedStyle}>用可视化 Designer 拖拽物料、配置 visibleWhen / customRule 的显隐与校验规则。</p>
+                  <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>打开 Designer</a>
+                </section>
+              )}
+              {detailSection === 'dataset' && (
+                <ImportPanel taskId={selected.id} onImported={() => void reloadTasksKeepSelection()} />
+              )}
+
+              {detailSection === 'review' && (
+                <section style={aiPromptSectionStyle} aria-label="审核结果">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+                    <h3 style={subHeadingStyle}>审核结果(只读)</h3>
+                    <StatusBadge status="draft" label="只读视图" />
+                  </div>
+                  <p style={mutedStyle}>
+                    人工审核的初审 / 复审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
+                  </p>
+                  <div style={controlStripStyle}>
+                    <MetricCell label="PROGRESS" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
+                    <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
+                  </div>
+                  <p style={mutedStyle}>
+                    通过率、AI vs 人工差异、三级审核进度等详细图表见左侧「数据看板」。
+                  </p>
+                </section>
+              )}
 
               {detailSection === 'stats' && (
                 <Suspense fallback={<LoadingBlock title="看板加载中" rows={3} />}>
