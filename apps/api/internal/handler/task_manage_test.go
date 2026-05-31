@@ -630,3 +630,36 @@ func TestListItemsPaginatesWithCursor(t *testing.T) {
 		t.Fatalf("expectations not met: %v", err)
 	}
 }
+
+func TestListLabelerCandidatesReturnsActiveLabelers(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "published")
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .users.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "display_name"}).
+			AddRow(101, "labeler1", "标注员一号").
+			AddRow(102, "labeler2", "标注员二号"))
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/assignee-candidates", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	candidates, ok := data["candidates"].([]any)
+	if !ok || len(candidates) != 2 {
+		t.Fatalf("candidates = %v", data["candidates"])
+	}
+	first := candidates[0].(map[string]any)
+	if first["username"] != "labeler1" || first["userId"].(float64) != 101 || first["displayName"] != "标注员一号" {
+		t.Fatalf("first candidate = %v", first)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}

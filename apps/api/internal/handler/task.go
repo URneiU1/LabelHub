@@ -57,6 +57,7 @@ func (h TaskHandler) Register(api gin.IRouter) {
 	api.POST("/tasks/:taskId/pause", middleware.RequireRoles("owner", "admin"), h.PauseTask)
 	api.POST("/tasks/:taskId/resume", middleware.RequireRoles("owner", "admin"), h.ResumeTask)
 	api.POST("/tasks/:taskId/end", middleware.RequireRoles("owner", "admin"), h.EndTask)
+	api.GET("/tasks/:taskId/assignee-candidates", middleware.RequireRoles("owner", "admin"), h.ListLabelerCandidates)
 	api.GET("/tasks/:taskId/assignees", middleware.RequireRoles("owner", "admin"), h.ListAssignees)
 	api.POST("/tasks/:taskId/assignees", middleware.RequireRoles("owner", "admin"), h.AddAssignees)
 	api.DELETE("/tasks/:taskId/assignees/:userId", middleware.RequireRoles("owner", "admin"), h.RemoveAssignee)

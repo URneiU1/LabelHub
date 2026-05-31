@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Toast } from '@douyinfe/semi-ui'
 import {
   addAssignees,
+  listAssigneeCandidates,
   listAssignees,
   removeAssignee,
+  type AssigneeCandidate,
   type TaskAssigneeView,
 } from '../../shared/api/client'
 
@@ -13,15 +15,20 @@ interface AssigneePanelProps {
 
 export default function AssigneePanel({ taskId }: AssigneePanelProps) {
   const [assignees, setAssignees] = useState<TaskAssigneeView[]>([])
+  const [candidates, setCandidates] = useState<AssigneeCandidate[]>([])
   const [loading, setLoading] = useState(false)
-  const [userIdDraft, setUserIdDraft] = useState('')
+  const [selectedId, setSelectedId] = useState('')
   const [adding, setAdding] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await listAssignees(taskId)
-      setAssignees(data)
+      const [assigneeList, candidateList] = await Promise.all([
+        listAssignees(taskId),
+        listAssigneeCandidates(taskId),
+      ])
+      setAssignees(assigneeList)
+      setCandidates(candidateList)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载指派列表失败')
     } finally {
@@ -30,23 +37,35 @@ export default function AssigneePanel({ taskId }: AssigneePanelProps) {
   }, [taskId])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切任务时先清空旧指派
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切任务时先清空旧数据
     setAssignees([])
+    setSelectedId('')
     void load()
   }, [load])
 
+  const nameFor = useCallback((userId: number) => {
+    const candidate = candidates.find((item) => item.userId === userId)
+    return candidate ? (candidate.displayName || candidate.username) : `用户 #${userId}`
+  }, [candidates])
+
+  const assignedIds = useMemo(() => new Set(assignees.map((item) => item.userId)), [assignees])
+  const unassigned = useMemo(
+    () => candidates.filter((candidate) => !assignedIds.has(candidate.userId)),
+    [candidates, assignedIds],
+  )
+
   async function add() {
-    const userId = Number(userIdDraft.trim())
+    const userId = Number(selectedId)
     if (!Number.isInteger(userId) || userId <= 0) {
-      Toast.error('请输入正整数用户 ID')
+      Toast.error('请先选择一个标注员')
       return
     }
     setAdding(true)
     try {
       await addAssignees(taskId, [userId])
-      setUserIdDraft('')
+      setSelectedId('')
       await load()
-      Toast.success(`已指派用户 #${userId}`)
+      Toast.success(`已指派 ${nameFor(userId)}`)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '指派失败')
     } finally {
@@ -58,7 +77,7 @@ export default function AssigneePanel({ taskId }: AssigneePanelProps) {
     try {
       await removeAssignee(taskId, userId)
       setAssignees((current) => current.filter((item) => item.userId !== userId))
-      Toast.success(`已取消用户 #${userId} 的指派`)
+      Toast.success(`已取消 ${nameFor(userId)} 的指派`)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '取消指派失败')
     }
@@ -67,15 +86,21 @@ export default function AssigneePanel({ taskId }: AssigneePanelProps) {
   return (
     <div className="lh-vflex" style={{ gap: 12 }}>
       <div className="lh-hflex">
-        <input
-          aria-label="assignee_user_id"
+        <select
+          aria-label="assignee_candidate"
           className="taskform__input"
-          value={userIdDraft}
-          onChange={(event) => setUserIdDraft(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void add() } }}
-          placeholder="标注员用户 ID"
-        />
-        <button type="button" aria-label="添加指派" disabled={adding} className="lh-btn lh-btn--primary" onClick={() => void add()}>
+          value={selectedId}
+          onChange={(event) => setSelectedId(event.target.value)}
+          disabled={loading || unassigned.length === 0}
+        >
+          <option value="">{unassigned.length === 0 ? '无可指派的标注员' : '选择标注员…'}</option>
+          {unassigned.map((candidate) => (
+            <option key={candidate.userId} value={candidate.userId}>
+              {(candidate.displayName || candidate.username)} (#{candidate.userId})
+            </option>
+          ))}
+        </select>
+        <button type="button" aria-label="添加指派" disabled={adding || !selectedId} className="lh-btn lh-btn--primary" onClick={() => void add()}>
           {adding ? '指派中…' : '指派'}
         </button>
       </div>
@@ -88,7 +113,7 @@ export default function AssigneePanel({ taskId }: AssigneePanelProps) {
         <div className="taskform__tags">
           {assignees.map((assignee) => (
             <span key={assignee.userId} className="lh-tag taskform__tag">
-              用户 #{assignee.userId}
+              {nameFor(assignee.userId)}
               <button type="button" aria-label={`移除指派 ${assignee.userId}`} className="taskform__tag-remove" onClick={() => void remove(assignee.userId)}>×</button>
             </span>
           ))}

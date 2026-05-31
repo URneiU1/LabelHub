@@ -310,6 +310,18 @@ export async function listAssignees(taskId: number) {
   return data.assignees
 }
 
+export type AssigneeCandidate = {
+  userId: number
+  username: string
+  displayName: string
+}
+
+// 列出可指派的标注员(role=labeler 且 active),供「指派」分发策略下从列表选人。
+export async function listAssigneeCandidates(taskId: number) {
+  const data = await apiGet<{ candidates: AssigneeCandidate[] }>(`/tasks/${taskId}/assignee-candidates`)
+  return data.candidates
+}
+
 export async function addAssignees(taskId: number, userIds: number[]) {
   return apiPost<AddAssigneesResult>(`/tasks/${taskId}/assignees`, { userIds })
 }

@@ -163,3 +163,31 @@ func (h TaskHandler) RemoveAssignee(c *gin.Context) {
 	}
 	httpx.OK(c, gin.H{"removed": userID})
 }
+
+type labelerCandidateView struct {
+	UserID      uint64 `json:"userId"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+}
+
+// ListLabelerCandidates 返回可被指派到任务的标注员(role=labeler 且 active),供 owner
+// 在「指派」分发策略下从列表里选人,而不是手输用户 ID。只回最小字段。
+func (h TaskHandler) ListLabelerCandidates(c *gin.Context) {
+	if _, ok := loadOwnedTask(h.db, c); !ok {
+		return
+	}
+	var users []model.User
+	if err := h.db.
+		Joins("JOIN user_roles ON user_roles.user_id = users.id AND user_roles.role = ?", "labeler").
+		Where("users.status = ?", "active").
+		Order("users.id ASC").
+		Find(&users).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list labeler candidates")
+		return
+	}
+	out := make([]labelerCandidateView, 0, len(users))
+	for _, u := range users {
+		out = append(out, labelerCandidateView{UserID: u.ID, Username: u.Username, DisplayName: u.DisplayName})
+	}
+	httpx.OK(c, gin.H{"candidates": out})
+}
