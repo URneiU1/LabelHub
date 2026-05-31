@@ -50,6 +50,7 @@ func (h TaskHandler) Register(api gin.IRouter) {
 	api.POST("/tasks/:taskId/baseline", middleware.RequireRoles("owner", "admin"), h.UpdateBaseline)
 	api.GET("/tasks/:taskId/item-preview", middleware.RequireRoles("owner", "admin"), h.PreviewItem)
 	api.GET("/tasks/:taskId/items", middleware.RequireRoles("owner", "admin"), h.ListItems)
+	api.GET("/tasks/:taskId/review-results", middleware.RequireRoles("owner", "admin"), h.ListReviewResults)
 	api.POST("/tasks/:taskId/items/import", middleware.RequireRoles("owner", "admin"), h.ImportItems)
 	api.POST("/tasks/:taskId/items/import-file", middleware.RequireRoles("owner", "admin"), h.ImportItemsFile)
 	api.POST("/tasks/:taskId/items/batch-update", middleware.RequireRoles("owner", "admin"), h.BatchUpdateItems)

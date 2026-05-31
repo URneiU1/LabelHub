@@ -6,6 +6,7 @@ import LoadingBlock from '../../shared/components/LoadingBlock'
 import StatusBadge from '../../shared/components/StatusBadge'
 import ExportPanel from './ExportPanel'
 import ImportPanel from './ImportPanel'
+import ReviewResultsPanel from './ReviewResultsPanel'
 import TaskManagePanel from './TaskManagePanel'
 import { useOwnerSection } from '../../shared/state/ownerSection'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
@@ -905,8 +906,9 @@ export default function OwnerDashboard() {
                     <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
                   </div>
                   <p style={mutedStyle}>
-                    通过率、AI vs 人工差异、三级审核进度等详细图表见左侧「数据看板」。
+                    通过率、AI vs 人工差异、三级审核进度等汇总图表见左侧「数据看板」;下方是逐条质检结果,用于回看 AI 预审标准。
                   </p>
+                  <ReviewResultsPanel taskId={selected.id} />
                 </section>
               )}
 

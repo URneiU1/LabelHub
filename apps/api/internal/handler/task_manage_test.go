@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/xuri/excelize/v2"
@@ -658,6 +659,49 @@ func TestListLabelerCandidatesReturnsActiveLabelers(t *testing.T) {
 	first := candidates[0].(map[string]any)
 	if first["username"] != "labeler1" || first["userId"].(float64) != 101 || first["displayName"] != "标注员一号" {
 		t.Fatalf("first candidate = %v", first)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestListReviewResultsReturnsAIVsHumanAgreement(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "published")
+	now := time.Now()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "item_id", "status", "ai_verdict", "ai_score", "human_verdict", "updated_at"}).
+			AddRow(20, 200, "approved", "pass", 0.9, "approve", now).
+			AddRow(19, 199, "rejected", "pass", 0.7, "reject", now))
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/review-results", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	items := resp["data"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d (body=%s)", len(items), rec.Body.String())
+	}
+	// AI pass + 人工 approve -> 一致
+	first := items[0].(map[string]any)
+	if first["aiVerdict"] != "pass" || first["humanVerdict"] != "approve" || first["agreed"] != true {
+		t.Fatalf("first (pass/approve) should agree: %v", first)
+	}
+	// AI pass + 人工 reject -> 不一致(owner 该回看的信号)
+	second := items[1].(map[string]any)
+	if second["agreed"] != false {
+		t.Fatalf("second (AI pass vs human reject) should disagree: %v", second)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

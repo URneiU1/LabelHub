@@ -489,6 +489,57 @@ export async function listReviewResults(params?: { cursor?: string, limit?: numb
   }
 }
 
+// Owner「审核结果」逐条质检反馈:某任务已定稿提交的 AI 判定 vs 人工判定 + 是否一致。
+export type OwnerReviewResult = {
+  id: number
+  itemId: number
+  status: string
+  aiVerdict: string | null
+  aiScore: number | null
+  humanVerdict: string | null
+  agreed: boolean | null
+  updatedAt: string
+}
+
+export type OwnerReviewResultsPage = {
+  results: OwnerReviewResult[]
+  nextCursor: string
+  hasMore: boolean
+}
+
+// 游标分页。后端 PageOK 返回 { data, page },标准 apiGet 丢 page,这里直接读 envelope。
+export async function listOwnerReviewResults(taskId: number, params?: { cursor?: string, limit?: number }): Promise<OwnerReviewResultsPage> {
+  const query = new URLSearchParams()
+  if (params?.cursor) {
+    query.set('cursor', params.cursor)
+  }
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const token = getToken()
+  if (!token) {
+    throw new Error('请先登录')
+  }
+  const response = await fetch(`/api/v1/tasks/${taskId}/review-results${suffix}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const payload = await response.json() as
+    | { data: OwnerReviewResult[], page?: { next_cursor?: string, has_more?: boolean }, request_id?: string }
+    | ApiErrorEnvelope
+  if (!response.ok) {
+    const errorPayload = payload as ApiErrorEnvelope
+    throw new ApiError(errorPayload.error?.code ?? 'UNKNOWN', errorPayload.error?.message ?? '加载审核结果失败', errorPayload.request_id ?? '')
+  }
+  const pagePayload = payload as { data: OwnerReviewResult[], page?: { next_cursor?: string, has_more?: boolean } }
+  return {
+    results: pagePayload.data ?? [],
+    nextCursor: pagePayload.page?.next_cursor ?? '',
+    hasMore: Boolean(pagePayload.page?.has_more),
+  }
+}
+
 // 作答页左侧"题目导航"用:某任务下一题对当前 labeler 的状态。
 // status: available 待标 / claimed 进行中 / taken 被他人领走 / 或其 submission 状态(draft/submitted/.../approved/rejected/revising)。
 export type LabelerTaskItem = {

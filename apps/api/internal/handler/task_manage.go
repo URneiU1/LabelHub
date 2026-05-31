@@ -3,6 +3,9 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -190,4 +193,74 @@ func (h TaskHandler) ListLabelerCandidates(c *gin.Context) {
 		out = append(out, labelerCandidateView{UserID: u.ID, Username: u.Username, DisplayName: u.DisplayName})
 	}
 	httpx.OK(c, gin.H{"candidates": out})
+}
+
+// ownerReviewResultItem:owner「审核结果」逐条质检反馈的单行。AI 预审判定 vs 人工判定
+// 是否一致,供 owner 回看预审标准准不准、要不要调(只读,不做审核动作)。
+type ownerReviewResultItem struct {
+	ID           uint64    `json:"id"`
+	ItemID       uint64    `json:"itemId"`
+	Status       string    `json:"status"`
+	AIVerdict    *string   `json:"aiVerdict"`
+	AIScore      *float64  `json:"aiScore"`
+	HumanVerdict *string   `json:"humanVerdict"`
+	Agreed       *bool     `json:"agreed"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// aiHumanAgreed:AI 预审判定与人工终判是否一致。任一缺失返回 nil(无法比较)。
+// pass↔approve、reject↔reject 视为一致;uncertain 或交叉视为不一致(值得 owner 回看)。
+func aiHumanAgreed(aiVerdict, humanVerdict *string) *bool {
+	if aiVerdict == nil || humanVerdict == nil {
+		return nil
+	}
+	agreed := (*aiVerdict == "pass" && *humanVerdict == "approve") ||
+		(*aiVerdict == "reject" && *humanVerdict == "reject")
+	return &agreed
+}
+
+// ListReviewResults 列出该任务已定稿(approved/rejected)的提交,带 AI 判定 / 人工判定 /
+// 是否一致,供 owner 在「审核结果」做只读质检回看。人工审核「动作」仍归 Reviewer。
+func (h TaskHandler) ListReviewResults(c *gin.Context) {
+	task, ok := loadOwnedTask(h.db, c)
+	if !ok {
+		return
+	}
+	limit := httpx.CursorLimit(c)
+	query := h.db.Model(&model.Submission{}).
+		Where("task_id = ? AND status IN ?", task.ID, finalizedReviewStatuses)
+	if cursor := strings.TrimSpace(c.Query("cursor")); cursor != "" {
+		cursorID, err := strconv.ParseUint(cursor, 10, 64)
+		if err != nil {
+			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "cursor must be a positive integer")
+			return
+		}
+		query = query.Where("id < ?", cursorID)
+	}
+
+	var submissions []model.Submission
+	if err := query.Order("updated_at DESC, id DESC").Limit(limit + 1).Find(&submissions).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review results")
+		return
+	}
+	page := httpx.Page{}
+	if len(submissions) > limit {
+		submissions = submissions[:limit]
+		page.HasMore = true
+		page.NextCursor = strconv.FormatUint(submissions[len(submissions)-1].ID, 10)
+	}
+	items := make([]ownerReviewResultItem, 0, len(submissions))
+	for _, s := range submissions {
+		items = append(items, ownerReviewResultItem{
+			ID:           s.ID,
+			ItemID:       s.ItemID,
+			Status:       s.Status,
+			AIVerdict:    s.AIVerdict,
+			AIScore:      s.AIScore,
+			HumanVerdict: s.HumanVerdict,
+			Agreed:       aiHumanAgreed(s.AIVerdict, s.HumanVerdict),
+			UpdatedAt:    s.UpdatedAt,
+		})
+	}
+	httpx.PageOK(c, items, page)
 }
