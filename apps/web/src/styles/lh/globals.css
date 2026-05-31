@@ -43,6 +43,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-family: var(--lh-font-display);
   font-weight: 700;
   font-size: 16px;
   color: var(--lh-text-1);
@@ -52,8 +53,9 @@ button {
 .lh-topnav__brand-dot {
   width: 18px;
   height: 18px;
-  border: 2.5px solid var(--lh-primary);
-  border-radius: 50%;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--lh-primary), var(--lh-primary-2));
+  box-shadow: 0 2px 6px rgba(96, 155, 255, 0.35);
 }
 
 .lh-topnav__crumbs {
@@ -234,20 +236,23 @@ button.lh-side-item--active {
 }
 
 .lh-side-item__icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid currentColor;
-  border-radius: 3px;
-  opacity: 0.6;
+  border-radius: 50%;
+  background: var(--lh-divider);
+  transition: background 120ms ease;
+}
+
+.lh-side-item:hover .lh-side-item__icon {
+  background: var(--lh-border);
 }
 
 .lh-side-item--active .lh-side-item__icon {
   background: var(--lh-primary);
-  border-color: var(--lh-primary);
-  opacity: 1;
+  box-shadow: 0 2px 6px rgba(96, 155, 255, 0.35);
 }
 
 /* ---------- Page heading ---------- */
@@ -256,6 +261,7 @@ button.lh-side-item--active {
 }
 
 .lh-page-head__title {
+  font-family: var(--lh-font-display);
   font-size: 22px;
   font-weight: 700;
   color: var(--lh-text-1);
@@ -285,9 +291,25 @@ button.lh-side-item--active {
 .lh-stat {
   background: #fff;
   border: 1px solid var(--lh-border);
+  border-left: 3px solid var(--lh-primary);
   border-radius: var(--lh-radius-lg);
   padding: 16px 18px;
   position: relative;
+  box-shadow: var(--lh-shadow-sm);
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+
+.lh-stat:hover {
+  box-shadow: var(--lh-shadow);
+  transform: translateY(-2px);
+}
+
+.lh-stat:has(.lh-stat__value--success) {
+  border-left-color: var(--lh-success);
+}
+
+.lh-stat:has(.lh-stat__value--warning) {
+  border-left-color: var(--lh-warning);
 }
 
 .lh-stat__label {
@@ -319,6 +341,7 @@ button.lh-side-item--active {
   background: #fff;
   border: 1px solid var(--lh-border);
   border-radius: var(--lh-radius-lg);
+  box-shadow: var(--lh-shadow-sm);
 }
 
 .lh-card__head {
@@ -411,6 +434,8 @@ button.lh-side-item--active {
   background: var(--lh-primary-2);
   border-color: var(--lh-primary-2);
   color: #fff;
+  box-shadow: 0 6px 18px rgba(96, 155, 255, 0.3);
+  transform: translateY(-1px);
 }
 
 .lh-btn--ghost {

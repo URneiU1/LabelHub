@@ -1,19 +1,19 @@
 :root {
-  --lh-bg: #f4f5f7;
+  --lh-bg: #f7f8fa;
   --lh-bg-card: #ffffff;
-  --lh-bg-elev: #fafbfc;
-  --lh-border: #e5e6eb;
+  --lh-bg-elev: #f6f8fb;
+  --lh-border: #e1e6ec;
   --lh-border-strong: #c9cdd4;
-  --lh-divider: #f2f3f5;
+  --lh-divider: #f0f2f6;
 
   --lh-text-1: #1d2129;
   --lh-text-2: #4e5969;
   --lh-text-3: #86909c;
   --lh-text-4: #c9cdd4;
 
-  --lh-primary: #165dff;
-  --lh-primary-2: #4080ff;
-  --lh-primary-soft: #e8f3ff;
+  --lh-primary: #609bff;
+  --lh-primary-2: #346cd8;
+  --lh-primary-soft: #e9f1ff;
 
   --lh-success: #00b42a;
   --lh-success-soft: #e8ffea;
@@ -26,18 +26,20 @@
   --lh-cyan: #14c9c9;
   --lh-cyan-soft: #e8fffb;
 
-  --lh-radius-sm: 4px;
-  --lh-radius: 6px;
-  --lh-radius-lg: 8px;
-  --lh-radius-xl: 12px;
+  --lh-radius-sm: 6px;
+  --lh-radius: 10px;
+  --lh-radius-lg: 14px;
+  --lh-radius-xl: 20px;
 
-  --lh-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --lh-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --lh-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --lh-shadow-sm: 0 1px 2px rgba(154, 160, 185, 0.08);
+  --lh-shadow: 0 4px 16px rgba(166, 173, 201, 0.18);
+  --lh-shadow-lg: 0 15px 40px rgba(166, 173, 201, 0.25);
 
-  --lh-font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC",
+  --lh-font-sans: "Poppins", -apple-system, BlinkMacSystemFont, "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
     sans-serif;
+  --lh-font-display: "Montserrat", "Poppins", -apple-system, BlinkMacSystemFont,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --lh-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
 

@@ -1,36 +1,37 @@
 /* ============================================================
-   LabelHub Editorial Console Design Tokens
-   Dense work surfaces, quiet typography, stable status colors.
+   LabelHub Design Tokens — PetaV2-aligned theme
+   Soft-blue accent, Montserrat/Poppins type, rounded surfaces,
+   soft layered shadows, stable status colors.
    ============================================================ */
 
 :root {
-  /* Color */
-  --color-bg: #f7f7f4;
+  /* Color — PetaV2 cool palette (soft blue accent, neutral greys) */
+  --color-bg: #f7f8fa;
   --color-surface: #ffffff;
-  --color-surface-subtle: #fbfaf7;
-  --color-surface-hover: #f1f1ec;
-  --color-text: #171713;
-  --color-text-secondary: #57564f;
-  --color-text-muted: #8a887f;
-  --color-accent: #b8442e;
-  --color-accent-hover: #97331f;
-  --color-border: #d8d6cd;
-  --color-border-light: #e7e4da;
-  --color-success: #20734b;
-  --color-warning: #9a6a10;
-  --color-danger: #b33a32;
+  --color-surface-subtle: #fafbfc;
+  --color-surface-hover: #eef2f9;
+  --color-text: #1d2129;
+  --color-text-secondary: #4e5969;
+  --color-text-muted: #86909c;
+  --color-accent: #609bff;
+  --color-accent-hover: #346cd8;
+  --color-border: #e1e6ec;
+  --color-border-light: #eef0f4;
+  --color-success: #28a745;
+  --color-warning: #b9821a;
+  --color-danger: #db4437;
 
   /* Work surface */
-  --color-canvas: #fbfaf6;
-  --color-grid-line: rgba(0, 0, 0, 0.04);
+  --color-canvas: #fafbfc;
+  --color-grid-line: rgba(96, 123, 170, 0.06);
   --color-node-bg: #ffffff;
-  --color-node-border: #d5d1c4;
-  --color-panel-header: #efede6;
-  --color-info-bg: #eef5fb;
-  --color-accent-soft: #f5e4dd;
-  --color-rail: #cf9483;
-  --color-port: #6c9ac0;
-  --color-code-bg: #f0eee7;
+  --color-node-border: #e1e6ec;
+  --color-panel-header: #f2f4f8;
+  --color-info-bg: #eaf1ff;
+  --color-accent-soft: #e9f1ff;
+  --color-rail: #9db7e6;
+  --color-port: #609bff;
+  --color-code-bg: #f0f2f6;
 
   /* Status */
   --status-draft-bg: #eeeeea;
@@ -55,9 +56,11 @@
   --color-warning-soft: #fff8d8;
   --color-danger-soft: #fde9e7;
 
-  /* Typography */
-  --font-heading: Georgia, 'Times New Roman', serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* Typography — Montserrat headings + Poppins body (CJK falls back to system) */
+  --font-heading: 'Montserrat', 'Poppins', -apple-system, BlinkMacSystemFont,
+    'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  --font-body: 'Poppins', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   --text-hero: 2rem;
   --text-h1: 1.25rem;
@@ -75,17 +78,17 @@
   --space-2xl: 48px;
   --space-section: 40px;
 
-  /* Border */
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 8px;
+  /* Border — rounder, PetaV2-style */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --border-width: 1px;
   --border-style: solid;
 
-  /* Shadow */
-  --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.03);
-  --shadow-md: 0 4px 12px rgba(23,23,19,0.08);
-  --shadow-lg: 0 12px 24px rgba(23,23,19,0.12);
+  /* Shadow — soft, layered, bluish-grey */
+  --shadow-sm: 0 1px 2px rgba(154, 160, 185, 0.08);
+  --shadow-md: 0 4px 16px rgba(166, 173, 201, 0.18);
+  --shadow-lg: 0 15px 40px rgba(166, 173, 201, 0.25);
 
   /* Motion */
   --duration-fast: 100ms;

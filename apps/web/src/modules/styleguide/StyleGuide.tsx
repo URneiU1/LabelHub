@@ -20,9 +20,9 @@ export default function StyleGuide() {
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-2xl) var(--space-xl)', background: 'var(--color-bg)', minHeight: '100vh' }}>
       <div style={{ background: 'var(--color-surface)', padding: 'var(--space-2xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--color-border-light)' }}>
-        <Title heading={1} style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, letterSpacing: 0 }}>Editorial Console Style Guide</Title>
+        <Title heading={1} style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, letterSpacing: 0 }}>LabelHub Style Guide</Title>
         <Paragraph style={{ color: 'var(--color-text-secondary)', fontFamily: 'var(--font-body)', fontSize: 'var(--text-h2)' }}>
-          LabelHub Editorial 风格令牌 · 高密度控制台 · 稳定状态色 · 共享状态组件
+          LabelHub 风格令牌 · 柔和蓝主色 · 圆角与柔和阴影 · 稳定状态色 · 共享状态组件
         </Paragraph>
       </div>
 
@@ -143,7 +143,7 @@ export default function StyleGuide() {
 
       <footer style={{ marginTop: 'var(--space-2xl)', textAlign: 'center', paddingBottom: 'var(--space-2xl)' }}>
         <Paragraph style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-          LabelHub Design System · Typography: Georgia/serif + system sans · Primary: #b8442e · Background: #f7f7f4
+          LabelHub Design System · Typography: Montserrat + Poppins · Primary: #609bff · Background: #f7f8fa
         </Paragraph>
       </footer>
     </div>
