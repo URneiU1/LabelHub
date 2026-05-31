@@ -7,6 +7,7 @@ import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
 import { parseTemplateSchema } from '../../renderer/parser'
 import { widgetRegistry } from '../../renderer/widgets'
 import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type VisibleWhen, type WidgetType } from '../../renderer/types'
+import '../../styles/lh/designer.css'
 import './Designer.css'
 
 type TemplateDetailResponse = {
@@ -63,6 +64,25 @@ const widgetPrefixes: Record<WidgetType, string> = {
   LLMTrigger: 'llm_trigger',
 }
 
+const widgetIcons: Record<WidgetType, string> = {
+  ShowItem: 'SHOW',
+  Group: '[]',
+  Tabs: 'TAB',
+  Input: 'Aa',
+  TextArea: '¶',
+  Radio: '◉',
+  Tags: '#',
+  RichText: 'RT',
+  JSONEditor: '{}',
+  FileUpload: 'IMG',
+  LLMTrigger: 'AI',
+}
+
+const paletteGroups: Array<{ label: string, widgets: WidgetType[] }> = [
+  { label: '物料', widgets: widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs') },
+  { label: '布局', widgets: ['Group', 'Tabs'] },
+]
+
 const nestedWidgetTypes = widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs')
 
 // Widgets that hold an answer value: visibleWhen / customRule are only meaningful on these.
@@ -95,6 +115,8 @@ export default function TemplateDesigner() {
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null)
+  const [activeCanvasTab, setActiveCanvasTab] = useState('base')
+  const [showSchemaPreview, setShowSchemaPreview] = useState(false)
   const loadSeq = useRef(0)
   const routeRef = useRef({ taskId: numericTaskId, templateId: numericTemplateId })
 
@@ -225,6 +247,7 @@ export default function TemplateDesigner() {
   const validationErrorsByDraftId = useMemo(() => groupValidationErrorsByDraftId(validationErrors), [validationErrors])
   const canEdit = isLatest && !schemaError && !taskMismatch
   const saveDisabled = saving || !canEdit || validationErrors.length > 0 || fields.length === 0
+  const canvasTabsField = fields.find((field) => field.widget === 'Tabs') ?? null
 
   function appendField(widget: WidgetType) {
     if (!canEdit) return
@@ -312,6 +335,45 @@ export default function TemplateDesigner() {
     setError('')
   }
 
+  function selectCanvasTab(index: number) {
+    if (!canvasTabsField) return
+    setActiveCanvasTab(`tab-${index}`)
+    setSelectedId(canvasTabsField._draftId)
+  }
+
+  function addCanvasTab() {
+    if (!canEdit) return
+    if (!canvasTabsField) {
+      const tabsField = createDefaultField('Tabs', fields)
+      setFields((current) => [...current, tabsField])
+      setSelectedId(tabsField._draftId)
+      setActiveCanvasTab('tab-0')
+      return
+    }
+    const nextIndex = (canvasTabsField.tabs?.length ?? 0) + 1
+    const nextTab = attachDraftIdsToTab({
+      label: `Tab ${nextIndex}`,
+      fields: [createNestedDefaultField(nextNestedFieldName(fields, `${canvasTabsField.name}_tab${nextIndex}`, 'Input'), 'Input')],
+    })
+    setFields((current) => current.map((field) => (
+      field._draftId === canvasTabsField._draftId
+        ? normalizeDraftField({ ...field, tabs: [...(field.tabs ?? []), nextTab] })
+        : field
+    )))
+    setSelectedId(canvasTabsField._draftId)
+    setActiveCanvasTab(`tab-${nextIndex - 1}`)
+  }
+
+  function exportSchemaJSON() {
+    const blob = new Blob([JSON.stringify(buildTemplatePayload(title, fields, schema), null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `task-${numericTaskId}-template-r${template?.version ?? 1}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
   function isCurrentRoute(routeTaskId: number, routeTemplateId: number) {
     return routeRef.current.taskId === routeTaskId && routeRef.current.templateId === routeTemplateId
   }
@@ -361,28 +423,38 @@ export default function TemplateDesigner() {
 
   return (
     <div style={pageStyle}>
-      <div style={{ ...toolbarStyle, background: 'var(--color-surface)', padding: 'var(--space-lg) var(--space-xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
+      <div className="template-designer-toolbar" style={{ ...toolbarStyle, background: 'var(--color-surface)', padding: 'var(--space-lg) var(--space-xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
         <div>
-          <Link to={`/owner/tasks/${numericTaskId}/templates`} style={backLinkStyle}>← 返回版本列表</Link>
-          <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>Template Designer</h1>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
-             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>ID: {template?.id}</span>
-             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>Version: v{template?.version ?? '-'}</span>
-             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: isLatest ? '#e8f5e9' : '#fff3e0', color: isLatest ? '#2e7d32' : '#ef6c00', fontWeight: 600 }}>{isLatest ? 'LATEST / EDITABLE' : 'READONLY'}</span>
+          <div className="template-designer-breadcrumb">
+            <span>任务负责人后台</span>
+            <span>/</span>
+            <Link to={`/owner/tasks/${numericTaskId}/templates`}>模板搭建</Link>
+            <span>/</span>
+            <span>T-{numericTaskId} · r{template?.version ?? '-'}</span>
+          </div>
+          <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>模板搭建器（Designer）</h1>
+          <div className="template-designer-subtitle">拖拽物料、配置联动与校验规则，发布后由标注工作台直接消费。</div>
+          <div className="template-designer-version-row">
+             <span className="designer-version">当前版本 r{template?.version ?? '-'}</span>
+             <span className="designer-task-link">绑定任务 T-{numericTaskId}</span>
+             <span className={isLatest ? 'template-designer-status template-designer-status--latest' : 'template-designer-status template-designer-status--readonly'}>{isLatest ? 'LATEST / EDITABLE' : 'READONLY'}</span>
           </div>
         </div>
         <div style={toolbarActionsStyle}>
           {!isLatest && latestTemplateId ? (
             <Link to={`/owner/tasks/${numericTaskId}/templates/${latestTemplateId}`} style={latestTemplateLinkStyle}>查看最新版本</Link>
           ) : null}
+          <Button aria-label="预览 Schema" onClick={() => setShowSchemaPreview((current) => !current)} theme="light">预览</Button>
+          <Button aria-label="导出 Schema JSON" onClick={exportSchemaJSON} theme="light">导出 Schema JSON</Button>
           {taskMismatch ? null : canEdit ? (
             <>
               <Button aria-label="Discard" disabled={saving} onClick={discardChanges} theme="light">重置修改</Button>
-              <Button aria-label="Save as new version" disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>保存并发布新版</Button>
+              <Button aria-label="Save as new version" disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>保存并发布版本 r{(template?.version ?? 0) + 1}</Button>
             </>
           ) : (
             <Button aria-label="Fork as new version" disabled={saving || !schema} loading={saving} theme="solid" onClick={() => void forkTemplate()}>Fork 为新版本</Button>
           )}
+          <span className="template-designer-avatar" aria-label="当前用户">O</span>
         </div>
       </div>
 
@@ -394,6 +466,7 @@ export default function TemplateDesigner() {
           {validationErrors.map((item) => <div key={`${item.field}-${item.message}`} style={{ fontSize: 13 }}>• {item.field}: {item.message}</div>)}
         </div>
       ) : null}
+      {showSchemaPreview ? <pre aria-label="schema preview" style={jsonPreviewStyle}>{JSON.stringify(buildTemplatePayload(title, fields, schema), null, 2)}</pre> : null}
 
       <div className="template-designer-grid" style={{ marginTop: 'var(--space-lg)' }}>
         <aside className="template-designer-palette" style={panelStyle}>
@@ -401,27 +474,30 @@ export default function TemplateDesigner() {
             <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
           </div>
           <div style={paletteStyle}>
-            {widgetTypes.map((widget) => (
-              <Button
-                key={widget}
-                aria-label={`Add ${widget}`}
-                disabled={!canEdit}
-                draggable={canEdit}
-                onClick={() => appendField(widget)}
-                onDragStart={(event: DragEvent<HTMLButtonElement>) => {
-                  if (!canEdit) return
-                  event.dataTransfer.effectAllowed = 'copy'
-                  event.dataTransfer.setData('text/plain', `${PALETTE_DRAG_PREFIX}${widget}`)
-                  setDraggingFieldId(null)
-                }}
-                theme="light"
-                style={paletteButtonStyle}
-              >
-                <span style={paletteButtonNodeStyle}>
-                  <span style={paletteWidgetCodeStyle}>{widget}</span>
-                  <span style={paletteWidgetLabelStyle}>{widgetLabels[widget]}</span>
-                </span>
-              </Button>
+            {paletteGroups.map((group) => (
+              <section key={group.label} className="template-designer-palette-group">
+                <div className="palette-group__title">{group.label}</div>
+                {group.widgets.map((widget) => (
+                  <Button
+                    key={widget}
+                    aria-label={`Add ${widget}`}
+                    className="palette-item"
+                    disabled={!canEdit}
+                    draggable={canEdit}
+                    onClick={() => appendField(widget)}
+                    onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+                      if (!canEdit) return
+                      event.dataTransfer.effectAllowed = 'copy'
+                      event.dataTransfer.setData('text/plain', `${PALETTE_DRAG_PREFIX}${widget}`)
+                      setDraggingFieldId(null)
+                    }}
+                    theme="light"
+                  >
+                    <span className={`palette-item__icon${widget === 'LLMTrigger' ? ' palette-item__icon--purple' : widget === 'ShowItem' ? ' palette-item__icon--show' : ''}`}>{widgetIcons[widget]}</span>
+                    <span>{widgetLabels[widget]}</span>
+                  </Button>
+                ))}
+              </section>
             ))}
           </div>
         </aside>
@@ -434,6 +510,14 @@ export default function TemplateDesigner() {
             </label>
 
             <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)' }}>
+              <div role="tablist" aria-label="canvas tabs" className="canvas-tabs">
+                <button type="button" role="tab" aria-selected={activeCanvasTab === 'base'} className={`canvas-tab${activeCanvasTab === 'base' ? ' canvas-tab--active' : ''}`} onClick={() => setActiveCanvasTab('base')}>基础信息</button>
+                {(canvasTabsField?.tabs ?? []).map((tab, index) => (
+                  <button key={tab._draftId ?? `${tab.label}-${index}`} type="button" role="tab" aria-selected={activeCanvasTab === `tab-${index}`} className={`canvas-tab${activeCanvasTab === `tab-${index}` ? ' canvas-tab--active' : ''}`} onClick={() => selectCanvasTab(index)}>{tab.label}</button>
+                ))}
+                <button type="button" aria-label="新增画布 Tab" className="canvas-tab canvas-tab--add" disabled={!canEdit} onClick={addCanvasTab}>+ 新 Tab</button>
+                <span className="canvas-hint">拖拽字段卡调整顺序</span>
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
                 <div style={{ fontWeight: 600 }}>画布区域 (Canvas)</div>
                 <PreviewItemStatus
@@ -554,6 +638,7 @@ function CanvasField({
   return (
     <section
       aria-label={`canvas field ${field.name}`}
+      className={`template-designer-field canvas-field${selected ? ' canvas-field--selected' : ''}${field.widget === 'LLMTrigger' ? ' canvas-field--llm' : ''}${field.widget === 'ShowItem' ? ' canvas-field--show' : ''}`}
       onDragOver={onDragOver}
       onDrop={onDrop}
       style={dragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle}
@@ -567,6 +652,7 @@ function CanvasField({
             <span style={{ fontSize: 11, padding: '1px 6px', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 4, color: 'var(--color-text-muted)' }}>{widgetLabels[field.widget]}</span>
           </div>
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{field.label}</span>
+          <span className="canvas-field__meta">字段名: <span className="canvas-field__meta-strong">{field.name}</span> · {widgetLabels[field.widget]}</span>
         </button>
         <div style={fieldActionsStyle}>
           <Button size="small" theme="light" disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
@@ -583,6 +669,11 @@ function CanvasField({
           {errors.map((item) => <div key={`${item.field}-${item.message}`} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {item.field}: {item.message}
           </div>)}
+        </div>
+      ) : null}
+      {(field.widget === 'Radio' || field.widget === 'Tags') && field.options?.length ? (
+        <div className="canvas-options template-designer-option-row">
+          {field.options.map((option) => <span key={option} className="canvas-option">{option}</span>)}
         </div>
       ) : null}
       {field.widget === 'Group' || field.widget === 'Tabs' ? (
@@ -1628,35 +1719,6 @@ const panelStyle: CSSProperties = {
 const paletteStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-sm)',
-}
-
-const paletteButtonStyle: CSSProperties = {
-  justifyContent: 'stretch',
-  textAlign: 'left',
-  height: 'auto',
-  padding: 0,
-  borderColor: 'var(--color-node-border)',
-  background: 'var(--color-node-bg)',
-}
-
-const paletteButtonNodeStyle: CSSProperties = {
-  display: 'grid',
-  gap: 3,
-  width: '100%',
-  padding: 'var(--space-sm) var(--space-md)',
-  borderLeft: '3px solid var(--color-rail)',
-}
-
-const paletteWidgetCodeStyle: CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 10,
-  color: 'var(--color-text-muted)',
-  textTransform: 'uppercase',
-}
-
-const paletteWidgetLabelStyle: CSSProperties = {
-  color: 'var(--color-text)',
-  fontWeight: 600,
 }
 
 const canvasStyle: CSSProperties = {

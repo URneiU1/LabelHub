@@ -77,7 +77,7 @@ describe('TemplateDesigner', () => {
 
     renderDesigner('/owner/tasks/1/templates/10')
 
-    await screen.findByText('Template Designer')
+    await screen.findByRole('heading', { name: '模板搭建器（Designer）' })
     await user.click(screen.getByRole('button', { name: 'Add Radio' }))
     await user.click(screen.getByRole('button', { name: 'Add Radio' }))
     expect(screen.getByRole('button', { name: /select radio_1/ })).toBeInTheDocument()
@@ -107,6 +107,35 @@ describe('TemplateDesigner', () => {
       ],
       export_fields: ['summary', 'fluency_score'],
     })
+  })
+
+  it('renders the org-style toolbar and creates a real Tabs layout from the canvas sub-nav', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    expect(await screen.findByRole('heading', { name: '模板搭建器（Designer）' })).toBeInTheDocument()
+    expect(screen.getByText('任务负责人后台')).toBeInTheDocument()
+    expect(screen.getByText('当前版本 r2')).toBeInTheDocument()
+    expect(screen.getByText('绑定任务 T-1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览 Schema' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出 Schema JSON' })).toBeInTheDocument()
+    expect(screen.getByText('物料')).toBeInTheDocument()
+    expect(screen.getByText('布局')).toBeInTheDocument()
+
+    const canvasTabs = screen.getByRole('tablist', { name: 'canvas tabs' })
+    expect(within(canvasTabs).getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(within(canvasTabs).getByRole('button', { name: '新增画布 Tab' }))
+
+    expect(screen.getByRole('button', { name: /select tabs_1/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('tablist', { name: 'canvas tabs' })).getByRole('tab', { name: 'Tab 1' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('copies and reorders fields before saving a new version', async () => {
@@ -460,7 +489,7 @@ describe('TemplateDesigner', () => {
 
     renderDesigner('/owner/tasks/1/templates/9')
 
-    await screen.findByText('Template Designer')
+    await screen.findByRole('heading', { name: '模板搭建器（Designer）' })
     expect(screen.getByRole('button', { name: 'Add Radio' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'drag summary' })).toBeDisabled()
     expect(screen.getByLabelText('field_name')).toBeDisabled()
