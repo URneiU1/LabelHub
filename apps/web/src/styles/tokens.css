@@ -13,8 +13,8 @@
   --color-text: #1d2129;
   --color-text-secondary: #4e5969;
   --color-text-muted: #86909c;
-  --color-accent: #609bff;
-  --color-accent-hover: #346cd8;
+  --color-accent: #2f6bff;
+  --color-accent-hover: #1f56db;
   --color-border: #e1e6ec;
   --color-border-light: #eef0f4;
   --color-success: #28a745;
@@ -30,7 +30,7 @@
   --color-info-bg: #eaf1ff;
   --color-accent-soft: #e9f1ff;
   --color-rail: #9db7e6;
-  --color-port: #609bff;
+  --color-port: #2f6bff;
   --color-code-bg: #f0f2f6;
 
   /* Status */

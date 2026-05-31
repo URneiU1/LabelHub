@@ -11,9 +11,10 @@
   --lh-text-3: #86909c;
   --lh-text-4: #c9cdd4;
 
-  --lh-primary: #609bff;
-  --lh-primary-2: #346cd8;
+  --lh-primary: #2f6bff;
+  --lh-primary-2: #1f56db;
   --lh-primary-soft: #e9f1ff;
+  --lh-primary-rgb: 47, 107, 255;
 
   --lh-success: #00b42a;
   --lh-success-soft: #e8ffea;

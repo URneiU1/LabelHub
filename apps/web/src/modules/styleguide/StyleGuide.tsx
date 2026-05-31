@@ -143,7 +143,7 @@ export default function StyleGuide() {
 
       <footer style={{ marginTop: 'var(--space-2xl)', textAlign: 'center', paddingBottom: 'var(--space-2xl)' }}>
         <Paragraph style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-          LabelHub Design System · Typography: Montserrat + Poppins · Primary: #609bff · Background: #f7f8fa
+          LabelHub Design System · Typography: Montserrat + Poppins · Primary: #2f6bff · Background: #f7f8fa
         </Paragraph>
       </footer>
     </div>
