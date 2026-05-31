@@ -67,4 +67,11 @@ describe('AppLayout navigation', () => {
     expect(screen.queryByText('全部')).not.toBeInTheDocument()
     expect(screen.queryByText('Prompt 配置')).not.toBeInTheDocument()
   })
+
+  it('shows only the two sub-tabs for 数据导出 (no 全部 overview tab)', () => {
+    renderAt('/owner/export/config')
+    expect(screen.getByText('导出配置')).toBeInTheDocument()
+    expect(screen.getByText('导出历史')).toBeInTheDocument()
+    expect(screen.queryByText('全部')).not.toBeInTheDocument()
+  })
 })

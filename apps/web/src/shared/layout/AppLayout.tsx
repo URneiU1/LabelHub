@@ -5,6 +5,7 @@ import {
   DEFAULT_SECTION,
   OWNER_NAV_GROUPS,
   OWNER_SUB_NAV,
+  SECTION_DEFAULT_SUB,
   isOwnerSection,
   setOwnerSection,
   setOwnerSubView,
@@ -141,13 +142,15 @@ export default function AppLayout() {
         <main className="lh-shell__main">
           {subTabs && activeSection ? (
             <nav className="lh-subtabs" aria-label="子页面">
-              <NavLink
-                to={`/owner/${activeSection}`}
-                end
-                className={({ isActive }) => 'lh-subtab' + (isActive ? ' lh-subtab--active' : '')}
-              >
-                全部
-              </NavLink>
+              {SECTION_DEFAULT_SUB[activeSection] ? null : (
+                <NavLink
+                  to={`/owner/${activeSection}`}
+                  end
+                  className={({ isActive }) => 'lh-subtab' + (isActive ? ' lh-subtab--active' : '')}
+                >
+                  全部
+                </NavLink>
+              )}
               {subTabs.map((tab) => (
                 <NavLink
                   key={tab.key}

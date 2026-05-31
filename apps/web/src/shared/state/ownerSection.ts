@@ -48,6 +48,13 @@ export const OWNER_SUB_NAV: Partial<Record<OwnerSection, ReadonlyArray<OwnerSubI
   ],
 }
 
+// 这些分节的子页是「互斥二选一」,不需要「全部/概览」标签:不渲染「全部」,
+// 进入分节直接默认落到这里指定的第一个子页(在 App.tsx 配重定向)。
+// 不在此表的分节(如 AI 预审,工具多)保留「全部」概览入口。
+export const SECTION_DEFAULT_SUB: Partial<Record<OwnerSection, string>> = {
+  export: 'config',
+}
+
 export const DEFAULT_SECTION: OwnerSection = 'ai'
 
 let currentSection: OwnerSection = DEFAULT_SECTION
