@@ -31,6 +31,31 @@ type dimAverage struct {
 	Avg  float64 `json:"avg"`
 }
 
+// verdictPair 是一条已同时有 AI 判定与人工终判的提交,用于一致率与混淆矩阵。
+type verdictPair struct {
+	AIVerdict    string `gorm:"column:ai_verdict"`
+	HumanVerdict string `gorm:"column:human_verdict"`
+}
+
+// confusionCell 是混淆矩阵的一格:某个 AI 判定 × 某个人工终判 的提交数。
+type confusionCell struct {
+	AI    string `json:"ai"`
+	Human string `json:"human"`
+	Count int    `json:"count"`
+}
+
+// scoreBucket 是 AI 总分的一个分桶区间的提交数。
+type scoreBucket struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// trendPoint 是某一天完成(approved/rejected)的提交数。
+type trendPoint struct {
+	Day   string `json:"day" gorm:"column:day"`
+	Count int    `json:"count" gorm:"column:count"`
+}
+
 type taskStatsResponse struct {
 	Progress struct {
 		Total    int `json:"total"`
@@ -43,7 +68,10 @@ type taskStatsResponse struct {
 		Disagree int     `json:"disagree"`
 		Rate     float64 `json:"rate"`
 	} `json:"aiVsHuman"`
-	DimensionAverages []dimAverage `json:"dimensionAverages"`
+	DimensionAverages []dimAverage    `json:"dimensionAverages"`
+	Confusion         []confusionCell `json:"confusion"`
+	ScoreBuckets      []scoreBucket   `json:"scoreBuckets"`
+	CompletionTrend   []trendPoint    `json:"completionTrend"`
 }
 
 func (h StatsHandler) TaskStats(c *gin.Context) {
@@ -77,10 +105,7 @@ func (h StatsHandler) TaskStats(c *gin.Context) {
 		resp.PassRate = float64(approved) / float64(approved+rejected)
 	}
 
-	var pairs []struct {
-		AIVerdict    string `gorm:"column:ai_verdict"`
-		HumanVerdict string `gorm:"column:human_verdict"`
-	}
+	var pairs []verdictPair
 	if err := h.db.Model(&model.Submission{}).
 		Select("ai_verdict, human_verdict").
 		Where("task_id = ? AND ai_verdict IS NOT NULL AND human_verdict IS NOT NULL", task.ID).
@@ -97,6 +122,7 @@ func (h StatsHandler) TaskStats(c *gin.Context) {
 	if resp.AIvsHuman.Compared > 0 {
 		resp.AIvsHuman.Rate = float64(resp.AIvsHuman.Disagree) / float64(resp.AIvsHuman.Compared)
 	}
+	resp.Confusion = buildConfusion(pairs)
 
 	var dimRows []struct {
 		Dimensions string `gorm:"column:dimensions"`
@@ -114,6 +140,34 @@ func (h StatsHandler) TaskStats(c *gin.Context) {
 		dims = append(dims, d.Dimensions)
 	}
 	resp.DimensionAverages = aggregateDimensions(dims)
+
+	var scoreRows []struct {
+		AIScore float64 `gorm:"column:ai_score"`
+	}
+	if err := h.db.Model(&model.Submission{}).
+		Select("ai_score").
+		Where("task_id = ? AND ai_score IS NOT NULL", task.ID).
+		Scan(&scoreRows).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load ai scores")
+		return
+	}
+	scores := make([]float64, 0, len(scoreRows))
+	for _, r := range scoreRows {
+		scores = append(scores, r.AIScore)
+	}
+	resp.ScoreBuckets = bucketScores(scores)
+
+	var trendRows []trendPoint
+	if err := h.db.Model(&model.Submission{}).
+		Select("DATE(updated_at) AS day, COUNT(*) AS count").
+		Where("task_id = ? AND status IN ?", task.ID, []string{"approved", "rejected"}).
+		Group("DATE(updated_at)").
+		Order("day").
+		Scan(&trendRows).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load completion trend")
+		return
+	}
+	resp.CompletionTrend = trendRows
 
 	httpx.OK(c, resp)
 }
@@ -172,6 +226,53 @@ func aggregateDimensions(rawDims []string) []dimAverage {
 			continue
 		}
 		out = append(out, dimAverage{Name: name, Avg: a.sum / float64(a.count)})
+	}
+	return out
+}
+
+// buildConfusion 把 (AI 判定, 人工终判) 对聚合成混淆矩阵格,按 ai、human 排序保证稳定。
+// 不假定判定取值,出现哪些组合就输出哪些(前端按固定坐标轴查表,缺失补 0)。纯函数。
+func buildConfusion(pairs []verdictPair) []confusionCell {
+	counts := map[[2]string]int{}
+	for _, p := range pairs {
+		counts[[2]string{p.AIVerdict, p.HumanVerdict}]++
+	}
+	out := make([]confusionCell, 0, len(counts))
+	for key, count := range counts {
+		out = append(out, confusionCell{AI: key[0], Human: key[1], Count: count})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AI != out[j].AI {
+			return out[i].AI < out[j].AI
+		}
+		return out[i].Human < out[j].Human
+	})
+	return out
+}
+
+// bucketScores 把 AI 总分(0-100)分到固定区间。区间左闭右开,最后一档含 100。纯函数。
+func bucketScores(scores []float64) []scoreBucket {
+	defs := []struct {
+		label  string
+		lo, hi float64
+	}{
+		{"<60", 0, 60},
+		{"60-70", 60, 70},
+		{"70-80", 70, 80},
+		{"80-90", 80, 90},
+		{"90-100", 90, 100.0001},
+	}
+	out := make([]scoreBucket, len(defs))
+	for i, d := range defs {
+		out[i] = scoreBucket{Label: d.label}
+	}
+	for _, s := range scores {
+		for i, d := range defs {
+			if s >= d.lo && s < d.hi {
+				out[i].Count++
+				break
+			}
+		}
 	}
 	return out
 }

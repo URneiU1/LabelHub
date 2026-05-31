@@ -22,20 +22,26 @@ const stats = {
   passRate: 0.75,
   aiVsHuman: { compared: 3, disagree: 1, rate: 0.3333 },
   dimensionAverages: [{ name: '相关性', avg: 9 }, { name: '完整性', avg: 6 }],
+  confusion: [{ ai: 'pass', human: 'approve', count: 2 }, { ai: 'reject', human: 'approve', count: 1 }],
+  scoreBuckets: [{ label: '<60', count: 1 }, { label: '90-100', count: 2 }],
+  completionTrend: [{ day: '2026-05-31', count: 2 }, { day: '2026-06-01', count: 2 }],
 }
 
 describe('StatsBoard', () => {
   beforeEach(() => mockApiGet.mockReset())
 
-  it('renders four metric blocks and the pass-rate number', async () => {
+  it('renders the KPI cards, charts and confusion matrix', async () => {
     mockApiGet.mockResolvedValue(stats)
     render(<StatsBoard taskId={1} />)
 
     expect(await screen.findByLabelText('进度')).toBeInTheDocument()
     expect(screen.getByLabelText('通过率')).toBeInTheDocument()
-    expect(screen.getByLabelText('AI vs 人工')).toBeInTheDocument()
-    expect(screen.getByLabelText('维度均分')).toBeInTheDocument()
-    expect(screen.getByText('75.0%')).toBeInTheDocument()
+    expect(screen.getByLabelText('AI 一致率')).toBeInTheDocument()
+    expect(screen.getByLabelText('AI 分数分布')).toBeInTheDocument()
+    expect(screen.getByLabelText('完成趋势')).toBeInTheDocument()
+    expect(screen.getByLabelText('维度雷达')).toBeInTheDocument()
+    expect(screen.getByLabelText('AI 与人工混淆矩阵')).toBeInTheDocument()
+    expect(screen.getByText('75%')).toBeInTheDocument()
     expect(screen.getByText('4/10')).toBeInTheDocument()
   })
 
@@ -68,7 +74,7 @@ describe('StatsBoard', () => {
   it('renders without crashing when dimensionAverages is empty', async () => {
     mockApiGet.mockResolvedValue({ ...stats, dimensionAverages: [] })
     render(<StatsBoard taskId={1} />)
-    expect(await screen.findByLabelText('维度均分')).toBeInTheDocument()
+    expect(await screen.findByLabelText('维度雷达')).toBeInTheDocument()
   })
 
   it('ignores stale retry response after switching task', async () => {
