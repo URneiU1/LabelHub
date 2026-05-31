@@ -96,7 +96,7 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
   }
   const trendSpec = {
     type: 'area',
-    data: [{ id: 'trend', values: completionTrend.map((p) => ({ day: p.day, count: p.count })) }],
+    data: [{ id: 'trend', values: completionTrend.map((p) => ({ day: p.day.slice(0, 10), count: p.count })) }],
     xField: 'day',
     yField: 'count',
     color: ['#2f6bff'],
