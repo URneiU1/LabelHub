@@ -8,7 +8,7 @@ import ExportPanel from './ExportPanel'
 import ImportPanel from './ImportPanel'
 import ReviewResultsPanel from './ReviewResultsPanel'
 import TaskManagePanel from './TaskManagePanel'
-import { useOwnerSection, useOwnerSubTarget } from '../../shared/state/ownerSection'
+import { useOwnerSection, useOwnerSubView } from '../../shared/state/ownerSection'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
 const StatsBoard = lazy(() => import('./StatsBoard'))
 
@@ -138,7 +138,7 @@ export default function OwnerDashboard() {
   // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
   // 分节由全局「工作区」侧栏(AppLayout)驱动,经共享 store 桥接。
   const detailSection = useOwnerSection()
-  const subTarget = useOwnerSubTarget()
+  const aiSub = useOwnerSubView()
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
@@ -348,26 +348,6 @@ export default function OwnerDashboard() {
       void loadDryRunHistory(selected.id, dryRunHistorySampleID(dryRunHistorySampleFilter))
     }
   }, [dryRunHistorySampleFilter, loadDryRunHistory, selected])
-
-  // 子侧栏点击 → 平滑滚动到面板内对应锚点并短暂高亮。锚点可能在懒加载子面板中,
-  // 元素尚未挂载时重试几次。
-  useEffect(() => {
-    if (!subTarget) return undefined
-    const anchor = subTarget.anchor
-    let attempts = 0
-    let timer = window.setTimeout(function tryScroll() {
-      const el = document.getElementById(anchor)
-      if (el) {
-        el.classList.add('lh-anchor-flash')
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        window.setTimeout(() => el.classList.remove('lh-anchor-flash'), 1200)
-        return
-      }
-      attempts += 1
-      if (attempts < 6) timer = window.setTimeout(tryScroll, 100)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [subTarget])
 
   function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
     seqRef.current += 1
@@ -941,7 +921,7 @@ export default function OwnerDashboard() {
               {detailSection === 'export' && <ExportPanel taskId={selected.id} />}
 
               {detailSection === 'ai' && (
-                <>
+                <div className="lh-ai-sub" data-sub={aiSub ?? 'all'}>
               <div id="ai-baseline" style={{ background: 'var(--lh-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--lh-border)' }}>
                 <div style={aiSettingsRowStyle}>
                   <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)', textTransform: 'uppercase' }}>Baseline 说明</div>
@@ -957,6 +937,7 @@ export default function OwnerDashboard() {
               </div>
 
               <section id="ai-prompts" style={aiPromptSectionStyle}>
+                <div id="ai-config">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
                   <h3 style={subHeadingStyle}>AI 自动预审配置</h3>
                   <StatusBadge status={aiReviewEnabled ? 'running' : 'draft'} label={aiReviewEnabled ? 'AI review: 已启用' : 'AI review: 已关闭'} />
@@ -1012,6 +993,7 @@ export default function OwnerDashboard() {
                   保存配置
                 </Button>
 
+                </div>
                 <div id="ai-dryrun" style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
                   <h4 style={{ ...subHeadingStyle, marginBottom: 'var(--space-md)' }}>AI Dry-run 测试</h4>
                   <div style={dryRunGridStyle}>
@@ -1250,7 +1232,7 @@ export default function OwnerDashboard() {
                   </div>
                 </div>
               </section>
-                </>
+                </div>
               )}
               {exportRows.length > 0 ? (
                 <pre style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: 'var(--lh-bg)', overflow: 'auto', maxHeight: 260, borderRadius: 'var(--radius-md)', border: '1px solid var(--lh-border)' }}>

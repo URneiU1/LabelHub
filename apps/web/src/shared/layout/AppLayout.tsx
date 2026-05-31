@@ -1,12 +1,13 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Outlet, NavLink, useParams } from 'react-router-dom'
 import { clearToken, getCurrentUser, hasAnyRole } from '../api/client'
 import {
+  DEFAULT_SECTION,
   OWNER_NAV_GROUPS,
   OWNER_SUB_NAV,
+  isOwnerSection,
   setOwnerSection,
-  setOwnerSubTarget,
-  useOwnerSection,
-  useOwnerSubTarget,
+  setOwnerSubView,
 } from '../state/ownerSection'
 
 interface NavItem {
@@ -36,14 +37,23 @@ function primaryRole(roles: string[]): string {
 }
 
 export default function AppLayout() {
-  const navigate = useNavigate()
-  const ownerSection = useOwnerSection()
-  const ownerSubTarget = useOwnerSubTarget()
+  const params = useParams()
   const user = getCurrentUser()
   const visibleNavItems = NAV_ITEMS.filter((item) => hasAnyRole(item.roles))
-  // Owner/admin 的左栏是「工作区」三组分节(对齐 demo SideNav);分节由 ownerSection store 驱动,
-  // 跨子树同步到 Owner 页(Dashboard)。其它角色仍用各自的路由导航。
+  // Owner/admin 的左栏是「工作区」三组分节(对齐 demo SideNav)。每个分节是独立路由页
+  // (/owner/:section),侧栏用 NavLink 跳转;分节页内容渲染在 Owner 页(Dashboard)。
+  // 因侧栏(shell)与页面(<Outlet/>)分属不同子树,这里把 URL 的 section/sub 同步进
+  // 全局 store,Dashboard 订阅后据此渲染对应分节与子页。其它角色仍用各自的路由导航。
   const ownerWorkspace = hasAnyRole(['owner', 'admin'])
+  const activeSection = isOwnerSection(params.section) ? params.section : undefined
+  const subTabs = activeSection ? OWNER_SUB_NAV[activeSection] : undefined
+
+  useEffect(() => {
+    if (!ownerWorkspace) return
+    setOwnerSection(isOwnerSection(params.section) ? params.section : DEFAULT_SECTION)
+    setOwnerSubView(params.sub ?? null)
+  }, [ownerWorkspace, params.section, params.sub])
+
   const otherRoleNavItems = visibleNavItems.filter((item) => item.to !== '/owner')
   const roles = user?.roles ?? []
   const role = primaryRole(roles)
@@ -79,49 +89,18 @@ export default function AppLayout() {
             OWNER_NAV_GROUPS.map((group) => (
               <nav className="lh-side-section" key={group.title} aria-label={group.title}>
                 <div className="lh-side-section__title">{group.title}</div>
-                {group.items.map(([key, label]) => {
-                  const isActive = ownerSection === key
-                  const subItems = OWNER_SUB_NAV[key]
-                  return (
-                    <div key={key}>
-                      <button
-                        type="button"
-                        className={'lh-side-item' + (isActive ? ' lh-side-item--active' : '')}
-                        aria-current={isActive ? 'page' : undefined}
-                        aria-expanded={subItems ? isActive : undefined}
-                        onClick={() => {
-                          setOwnerSection(key)
-                          navigate('/owner')
-                        }}
-                      >
-                        <span className="lh-side-item__icon" />
-                        {label}
-                        {subItems ? <span className="lh-side-item__caret" aria-hidden="true" /> : null}
-                      </button>
-                      {isActive && subItems ? (
-                        <div className="lh-side-subnav" role="group" aria-label={label + ' 子菜单'}>
-                          {subItems.map((sub) => (
-                            <button
-                              key={sub.anchor}
-                              type="button"
-                              className={
-                                'lh-side-subitem' +
-                                (ownerSubTarget?.anchor === sub.anchor ? ' lh-side-subitem--active' : '')
-                              }
-                              onClick={() => {
-                                setOwnerSection(key)
-                                navigate('/owner')
-                                setOwnerSubTarget(sub.anchor)
-                              }}
-                            >
-                              {sub.label}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
+                {group.items.map(([key, label]) => (
+                  <NavLink
+                    key={key}
+                    to={`/owner/${key}`}
+                    className={({ isActive }) =>
+                      'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
+                    }
+                  >
+                    <span className="lh-side-item__icon" />
+                    {label}
+                  </NavLink>
+                ))}
               </nav>
             ))
           ) : (
@@ -160,6 +139,26 @@ export default function AppLayout() {
           ) : null}
         </aside>
         <main className="lh-shell__main">
+          {subTabs && activeSection ? (
+            <nav className="lh-subtabs" aria-label="子页面">
+              <NavLink
+                to={`/owner/${activeSection}`}
+                end
+                className={({ isActive }) => 'lh-subtab' + (isActive ? ' lh-subtab--active' : '')}
+              >
+                全部
+              </NavLink>
+              {subTabs.map((tab) => (
+                <NavLink
+                  key={tab.key}
+                  to={`/owner/${activeSection}/${tab.key}`}
+                  className={({ isActive }) => 'lh-subtab' + (isActive ? ' lh-subtab--active' : '')}
+                >
+                  {tab.label}
+                </NavLink>
+              ))}
+            </nav>
+          ) : null}
           <Outlet />
         </main>
       </div>

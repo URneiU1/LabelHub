@@ -40,4 +40,31 @@ describe('AppLayout navigation', () => {
     expect(screen.queryByText('标注工作台')).not.toBeInTheDocument()
     expect(screen.queryByText('审核中心')).not.toBeInTheDocument()
   })
+
+  function renderAt(path: string) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/owner/:section" element={<div>section page</div>} />
+            <Route path="/owner/:section/:sub" element={<div>sub page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('shows in-page sub-tabs only for sections that split into sub-pages (AI yes, tasks no)', () => {
+    const { unmount } = renderAt('/owner/ai')
+    // AI 分节有子页 → 顶部出现「全部」+ 子页标签
+    expect(screen.getByText('全部')).toBeInTheDocument()
+    expect(screen.getByText('Prompt 配置')).toBeInTheDocument()
+    expect(screen.getByText('试跑历史')).toBeInTheDocument()
+    unmount()
+
+    // 任务管理是单一页面 → 不出现子标签条
+    renderAt('/owner/tasks')
+    expect(screen.queryByText('全部')).not.toBeInTheDocument()
+    expect(screen.queryByText('Prompt 配置')).not.toBeInTheDocument()
+  })
 })

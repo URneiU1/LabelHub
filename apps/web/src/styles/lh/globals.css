@@ -255,79 +255,58 @@ button.lh-side-item--active {
   box-shadow: 0 2px 6px rgba(var(--lh-primary-rgb), 0.35);
 }
 
-/* ---------- Side sub-nav (expands under the active section) ---------- */
-.lh-side-item__caret {
-  margin-left: auto;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  opacity: 0.45;
-  transition: transform 160ms ease, opacity 160ms ease;
-}
-
-.lh-side-item--active .lh-side-item__caret {
-  transform: rotate(45deg);
-  opacity: 0.9;
-}
-
-.lh-side-subnav {
-  margin: 2px 0 8px 19px;
-  padding-left: 12px;
-  border-left: 1px solid var(--lh-border);
+/* ---------- Section sub-tabs (in-page tabs for sections that split into sub-pages) ---------- */
+.lh-subtabs {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--lh-border);
 }
 
-.lh-side-subitem {
-  appearance: none;
-  -webkit-appearance: none;
-  border: none;
-  background: none;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: var(--lh-radius-sm);
-  font-size: 13px;
-  color: var(--lh-text-3);
-  transition: background 120ms ease, color 120ms ease;
+.lh-subtab {
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--lh-text-2);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
-.lh-side-subitem:hover {
-  background: var(--lh-bg-elev);
+.lh-subtab:hover {
   color: var(--lh-text-1);
 }
 
-.lh-side-subitem--active {
+.lh-subtab--active {
   color: var(--lh-primary);
+  border-bottom-color: var(--lh-primary);
   font-weight: 600;
 }
 
-/* 子项跳转时,目标区块短暂高亮(并留出滚动顶距,避免贴顶) */
-.lh-anchor-flash {
-  scroll-margin-top: 16px;
-  animation: lh-anchor-flash 1.2s ease-out;
+/* AI 分节子页过滤:外壳为零盒(display:contents),按 data-sub 隐藏非当前子页的区块。
+   data-sub="all"(默认/概览,也是测试态)时不隐藏任何块。 */
+.lh-ai-sub {
+  display: contents;
 }
 
-@keyframes lh-anchor-flash {
-  0% {
-    box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0);
-  }
-  25% {
-    box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0.4);
-  }
-  100% {
-    box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lh-anchor-flash {
-    animation: none;
-  }
+.lh-ai-sub[data-sub="baseline"] #ai-prompts,
+.lh-ai-sub[data-sub="prompts"] #ai-baseline,
+.lh-ai-sub[data-sub="prompts"] #ai-dryrun,
+.lh-ai-sub[data-sub="prompts"] #ai-golden,
+.lh-ai-sub[data-sub="prompts"] #ai-history,
+.lh-ai-sub[data-sub="dryrun"] #ai-baseline,
+.lh-ai-sub[data-sub="dryrun"] #ai-config,
+.lh-ai-sub[data-sub="dryrun"] #ai-golden,
+.lh-ai-sub[data-sub="dryrun"] #ai-history,
+.lh-ai-sub[data-sub="golden"] #ai-baseline,
+.lh-ai-sub[data-sub="golden"] #ai-config,
+.lh-ai-sub[data-sub="golden"] #ai-dryrun,
+.lh-ai-sub[data-sub="golden"] #ai-history,
+.lh-ai-sub[data-sub="history"] #ai-baseline,
+.lh-ai-sub[data-sub="history"] #ai-config,
+.lh-ai-sub[data-sub="history"] #ai-dryrun,
+.lh-ai-sub[data-sub="history"] #ai-golden {
+  display: none;
 }
 
 /* ---------- Page heading ---------- */

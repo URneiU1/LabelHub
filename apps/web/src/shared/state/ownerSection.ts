@@ -19,45 +19,32 @@ export const OWNER_NAV_GROUPS: ReadonlyArray<OwnerNavGroup> = [
   { title: '数据交付', items: [['stats', '数据看板'], ['export', '数据导出']] },
 ]
 
-// 子侧栏:进入某个分节后,若该分节有多个子区域,在父项下面展开可跳转的子项。
-// anchor 对应面板内元素的 id(见 Dashboard / 各子面板);label 为显示文案。
-// 只给「真有多个子区域」的分节配子项;任务管理/模板搭建是单一视图,不展开。
-// 增删子项只改这一处即可。
+const OWNER_SECTION_KEYS: ReadonlyArray<OwnerSection> = ['tasks', 'template', 'dataset', 'ai', 'review', 'stats', 'export']
+
+// 路由 param 校验:把 /owner/:section 的字符串收敛回合法分节,否则回退默认。
+export function isOwnerSection(value: string | undefined): value is OwnerSection {
+  return value !== undefined && (OWNER_SECTION_KEYS as ReadonlyArray<string>).includes(value)
+}
+
+// 页内标签页(子页面):只有「AI 预审」分节内容多到需要拆子页;其它分节是单一页面。
+// 子页 URL 形如 /owner/ai/<key>;key 同时用于 Dashboard 内 CSS data-sub 过滤显示。
+// 增删子页只改这一处即可。
 export interface OwnerSubItem {
-  anchor: string
+  key: string
   label: string
 }
 
 export const OWNER_SUB_NAV: Partial<Record<OwnerSection, ReadonlyArray<OwnerSubItem>>> = {
   ai: [
-    { anchor: 'ai-baseline', label: 'Baseline 说明' },
-    { anchor: 'ai-prompts', label: 'Prompt 配置' },
-    { anchor: 'ai-dryrun', label: 'Dry-run 测试' },
-    { anchor: 'ai-golden', label: '评测集' },
-    { anchor: 'ai-history', label: '试跑历史' },
-  ],
-  dataset: [
-    { anchor: 'ds-file', label: '文件导入' },
-    { anchor: 'ds-json', label: 'JSON 导入' },
-    { anchor: 'ds-items', label: '题目列表' },
-  ],
-  review: [
-    { anchor: 'rv-summary', label: '审核汇总' },
-    { anchor: 'rv-results', label: '逐条质检结果' },
-  ],
-  stats: [
-    { anchor: 'st-progress', label: '进度' },
-    { anchor: 'st-pass', label: '通过率' },
-    { anchor: 'st-status', label: '状态分布' },
-    { anchor: 'st-dim', label: '维度均分' },
-  ],
-  export: [
-    { anchor: 'ex-config', label: '导出配置' },
-    { anchor: 'ex-history', label: '导出历史' },
+    { key: 'prompts', label: 'Prompt 配置' },
+    { key: 'baseline', label: 'Baseline 说明' },
+    { key: 'dryrun', label: 'Dry-run 测试' },
+    { key: 'golden', label: '评测集' },
+    { key: 'history', label: '试跑历史' },
   ],
 }
 
-const DEFAULT_SECTION: OwnerSection = 'ai'
+export const DEFAULT_SECTION: OwnerSection = 'ai'
 
 let currentSection: OwnerSection = DEFAULT_SECTION
 const listeners = new Set<() => void>()
@@ -88,39 +75,33 @@ export function useOwnerSection(): OwnerSection {
   return useSyncExternalStore(subscribe, getOwnerSection, getOwnerSection)
 }
 
-// 子项点击 → 滚动目标。seq 让重复点击同一锚点也能再次触发滚动。
-export interface OwnerSubTarget {
-  anchor: string
-  seq: number
+// 当前子页(/owner/ai/<sub> 的 sub);null = 该分节的「全部/概览」。
+// 由 AppLayout 从 URL 同步写入,Dashboard 订阅后用于 CSS data-sub 过滤显示。
+let currentSubView: string | null = null
+const subViewListeners = new Set<() => void>()
+
+export function getOwnerSubView(): string | null {
+  return currentSubView
 }
 
-let subTargetSeq = 0
-let currentSubTarget: OwnerSubTarget | null = null
-const subTargetListeners = new Set<() => void>()
-
-export function getOwnerSubTarget(): OwnerSubTarget | null {
-  return currentSubTarget
+export function setOwnerSubView(sub: string | null): void {
+  if (sub === currentSubView) return
+  currentSubView = sub
+  subViewListeners.forEach((listener) => listener())
 }
 
-export function setOwnerSubTarget(anchor: string): void {
-  subTargetSeq += 1
-  currentSubTarget = { anchor, seq: subTargetSeq }
-  subTargetListeners.forEach((listener) => listener())
+// 测试用:重置子页,避免模块级状态跨用例泄漏。
+export function resetOwnerSubView(): void {
+  setOwnerSubView(null)
 }
 
-// 测试用:重置滚动目标,避免模块级状态跨用例泄漏。
-export function resetOwnerSubTarget(): void {
-  currentSubTarget = null
-  subTargetListeners.forEach((listener) => listener())
-}
-
-function subscribeSubTarget(listener: () => void): () => void {
-  subTargetListeners.add(listener)
+function subscribeSubView(listener: () => void): () => void {
+  subViewListeners.add(listener)
   return () => {
-    subTargetListeners.delete(listener)
+    subViewListeners.delete(listener)
   }
 }
 
-export function useOwnerSubTarget(): OwnerSubTarget | null {
-  return useSyncExternalStore(subscribeSubTarget, getOwnerSubTarget, getOwnerSubTarget)
+export function useOwnerSubView(): string | null {
+  return useSyncExternalStore(subscribeSubView, getOwnerSubView, getOwnerSubView)
 }

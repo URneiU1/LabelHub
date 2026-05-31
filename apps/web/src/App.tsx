@@ -19,9 +19,11 @@ export default function App() {
         <Route path="/style-guide" element={<StyleGuide />} />
         <Route element={<RequireAuth />}>
           <Route element={<AppLayout />}>
-            <Route path="/owner" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
+            <Route path="/owner" element={<Navigate to="/owner/ai" replace />} />
             <Route path="/owner/tasks/:taskId/templates" element={<RequireRole roles={['owner', 'admin']}><TemplateList /></RequireRole>} />
             <Route path="/owner/tasks/:taskId/templates/:templateId" element={<RequireRole roles={['owner', 'admin']}><TemplateDesigner /></RequireRole>} />
+            <Route path="/owner/:section" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
+            <Route path="/owner/:section/:sub" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
             <Route path="/labeler" element={<RequireRole roles={['labeler']}><LabelerPlaza /></RequireRole>} />
             <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue /></RequireRole>} />
           </Route>
