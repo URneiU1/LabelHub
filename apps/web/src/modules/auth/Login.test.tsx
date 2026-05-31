@@ -60,4 +60,20 @@ describe('Login demo roles', () => {
       expect(mockNavigate).toHaveBeenCalledWith(targetPath)
     })
   })
+
+  it('logs in with a typed username and password and routes by role', async () => {
+    const user = userEvent.setup()
+    mockLogin.mockResolvedValue({ id: 9, username: 'reviewer1', displayName: '审核员', roles: ['reviewer'] })
+
+    render(<Login />)
+
+    await user.type(screen.getByLabelText('用户名'), 'reviewer1')
+    await user.type(screen.getByLabelText('密码'), 'secret-pass')
+    await user.click(screen.getByRole('button', { name: '登录' }))
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith('reviewer1', 'secret-pass')
+      expect(mockNavigate).toHaveBeenCalledWith('/reviewer')
+    })
+  })
 })
