@@ -38,7 +38,9 @@ func ResubmitClearedFields(to string, now time.Time) map[string]any {
 // 新 claim 已经会创建 draft submission;这里保留 create 分支用于兼容历史数据。
 func findOrCreateSubmission(tx *gorm.DB, task model.Task, item model.TaskItem, labelerID uint64) (model.Submission, error) {
 	var submission model.Submission
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("item_id = ?", item.ID).First(&submission).Error
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("item_id = ? AND labeler_id = ?", item.ID, labelerID).
+		First(&submission).Error
 	if err == nil {
 		if submission.TaskID != task.ID || submission.ItemID != item.ID || submission.LabelerID != labelerID {
 			return model.Submission{}, ErrItemNotClaimed

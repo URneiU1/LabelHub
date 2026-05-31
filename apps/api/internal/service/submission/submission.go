@@ -12,12 +12,14 @@ package submission
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/service/audit"
 	"labelhub-api/internal/statemachine"
+	"labelhub.local/reviewsampling"
 )
 
 // 业务错误分类。handler 把这些映射到 HTTP 码:
@@ -85,8 +87,16 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 				return err
 			}
 		}
+		overlap := overlapConsensus
+		if !input.Draft && requiredOverlapForItem(task, item.ID) > 1 {
+			priorAnswers, err := priorOverlapAnswers(tx, item.ID, sub.ID)
+			if err != nil {
+				return err
+			}
+			overlap = decideOverlapOutcome(task, item.ID, priorAnswers, input.AnswerRaw)
+		}
 		aiPlan := aiReviewPlan{}
-		if !input.Draft {
+		if !input.Draft && overlap == overlapConsensus {
 			var err error
 			aiPlan, err = buildAIReviewPlan(tx, task, sub, revision)
 			if err != nil {
@@ -97,6 +107,7 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 		to := from
 		submitEvent := ""
 		dispatchEvent := ""
+		now := NowUTC()
 		updates := map[string]any{"current_revision_id": revision.ID}
 		if !input.Draft {
 			if from != statemachine.StateDraft && from != statemachine.StateRevising {
@@ -107,18 +118,32 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}
 			submitEvent = statemachine.EventSubmit
 			to = statemachine.StateSubmitted
-			if aiPlan.Enabled {
-				to = statemachine.StateAIReviewing
-				dispatchEvent = statemachine.EventEnqueue
-			} else {
-				to = statemachine.StateHumanReviewing
-				dispatchEvent = statemachine.EventSkipAI
-			}
-			if err := statemachine.Apply(statemachine.StateSubmitted, dispatchEvent, to); err != nil {
-				return fmt.Errorf("%w: submitted --%s--> %s", ErrInvalidTransition, dispatchEvent, to)
-			}
-			for key, value := range ResubmitClearedFields(to, NowUTC()) {
+			for key, value := range ResubmitClearedFields(statemachine.StateSubmitted, now) {
 				updates[key] = value
+			}
+			switch overlap {
+			case overlapConsensus:
+				if aiPlan.Enabled {
+					to = statemachine.StateAIReviewing
+					dispatchEvent = statemachine.EventEnqueue
+				} else if !task.HumanReviewEnabled || !reviewsampling.ShouldReview(task.ID, item.ID, input.UserID, task.ReviewSamplingPct) {
+					to = statemachine.StateApproved
+					dispatchEvent = statemachine.EventSamplingAutoApproved
+					updates["approved_at"] = now
+				} else {
+					to = statemachine.StateHumanReviewing
+					dispatchEvent = statemachine.EventSkipAI
+				}
+				if err := statemachine.Apply(statemachine.StateSubmitted, dispatchEvent, to); err != nil {
+					return fmt.Errorf("%w: submitted --%s--> %s", ErrInvalidTransition, dispatchEvent, to)
+				}
+				updates["status"] = to
+			case overlapNeedsArbitration:
+				to = statemachine.StateNeedsArbitration
+				if err := statemachine.Apply(statemachine.StateSubmitted, statemachine.EventConsensusConflict, to); err != nil {
+					return fmt.Errorf("%w: submitted --%s--> %s", ErrInvalidTransition, statemachine.EventConsensusConflict, to)
+				}
+				updates["status"] = to
 			}
 		} else if from != statemachine.StateDraft {
 			return ErrDraftAfterSubmit
@@ -132,12 +157,34 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 		if err := tx.Model(&model.Submission{}).Where("id = ?", sub.ID).Updates(updates).Error; err != nil {
 			return err
 		}
-		if !input.Draft {
+		if !input.Draft && overlap == overlapConsensus {
 			if err := createPendingAIReview(tx, sub, revision, aiPlan); err != nil {
 				return err
 			}
 			if err := createAIReviewOutbox(tx, aiPlan); err != nil {
 				return err
+			}
+		}
+		if !input.Draft && overlap == overlapConsensus && to == statemachine.StateApproved {
+			if err := finishAutoApprovedItem(tx, task.ID, item.ID, now); err != nil {
+				return err
+			}
+		}
+		if !input.Draft {
+			switch overlap {
+			case overlapWaiting:
+				if err := releaseOverlapClaim(tx, item.ID, ItemStatusAvailable); err != nil {
+					return err
+				}
+			case overlapNeedsArbitration:
+				if err := tx.Model(&model.Submission{}).
+					Where("item_id = ? AND id <> ? AND status = ?", item.ID, sub.ID, statemachine.StateSubmitted).
+					Update("status", statemachine.StateNeedsArbitration).Error; err != nil {
+					return err
+				}
+				if err := releaseOverlapClaim(tx, item.ID, ItemStatusNeedsArbitration); err != nil {
+					return err
+				}
 			}
 		}
 		if !input.Draft {
@@ -153,21 +200,56 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}); err != nil {
 				return err
 			}
-			// 派发(enqueue / skip_ai)是系统按任务配置自动决策,不是用户动作,
-			// 因此审计记为 system + 无 actor_id,避免审计轨迹误导。
-			if err := audit.Write(tx, audit.LogEntry{
-				EntityType: "submission",
-				EntityID:   sub.ID,
-				FromState:  statemachine.StateSubmitted,
-				ToState:    to,
-				ActorType:  "system",
-				ActorID:    nil,
-				Event:      dispatchEvent,
-			}); err != nil {
-				return err
+			if dispatchEvent != "" {
+				// 派发(enqueue / skip_ai)是系统按任务配置自动决策,不是用户动作,
+				// 因此审计记为 system + 无 actor_id,避免审计轨迹误导。
+				if err := audit.Write(tx, audit.LogEntry{
+					EntityType: "submission",
+					EntityID:   sub.ID,
+					FromState:  statemachine.StateSubmitted,
+					ToState:    to,
+					ActorType:  "system",
+					ActorID:    nil,
+					Event:      dispatchEvent,
+				}); err != nil {
+					return err
+				}
+			}
+			if overlap == overlapNeedsArbitration {
+				if err := audit.Write(tx, audit.LogEntry{
+					EntityType: "submission",
+					EntityID:   sub.ID,
+					FromState:  statemachine.StateSubmitted,
+					ToState:    statemachine.StateNeedsArbitration,
+					ActorType:  "system",
+					ActorID:    nil,
+					Event:      statemachine.EventConsensusConflict,
+				}); err != nil {
+					return err
+				}
 			}
 		}
 		return tx.First(&response, sub.ID).Error
 	})
 	return response, err
+}
+
+func finishAutoApprovedItem(tx *gorm.DB, taskID uint64, itemID uint64, now time.Time) error {
+	result := tx.Model(&model.TaskItem{}).
+		Where("id = ? AND status = ?", itemID, ItemStatusClaimed).
+		Updates(map[string]any{"status": "finished", "finished_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrClaimRaceLost
+	}
+	result = tx.Model(&model.Task{}).Where("id = ?", taskID).Update("finished_items", gorm.Expr("finished_items + 1"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrClaimRaceLost
+	}
+	return nil
 }

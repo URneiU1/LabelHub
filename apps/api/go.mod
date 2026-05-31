@@ -21,11 +21,14 @@ require (
 	gorm.io/gorm v1.31.1
 	labelhub.local/exporter v0.0.0
 	labelhub.local/llmreview v0.0.0
+	labelhub.local/reviewsampling v0.0.0
 )
 
 replace labelhub.local/exporter => ../../pkg/exporter
 
 replace labelhub.local/llmreview => ../../pkg/llmreview
+
+replace labelhub.local/reviewsampling => ../../pkg/reviewsampling
 
 require (
 	dario.cat/mergo v1.0.2 // indirect

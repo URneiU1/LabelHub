@@ -129,6 +129,34 @@ func TestApplyFinalApproveWritesHumanReviewAndFinishesItem(t *testing.T) {
 	}
 }
 
+func TestApplyArbitrationApproveFinishesItemInOneStep(t *testing.T) {
+	db, mock, sqlDB := newReviewMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.`).WillReturnRows(reviewSubmissionRows("needs_arbitration"))
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .tasks.`).WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("needs_arbitration"))
+	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE item_id = .+ AND id <> .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+finished_items.=finished_items \+ 1.+ WHERE id = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).WillReturnResult(sqlmock.NewResult(41, 1))
+	mock.ExpectCommit()
+
+	got, err := Apply(db, ApplyInput{SubmissionID: 42, Verdict: "approve", ReviewerID: 9, Roles: []string{"admin"}})
+	if err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+	if got.Status != statemachine.StateApproved || got.Stage != StageFinal {
+		t.Fatalf("Apply result = %+v, want approved/final", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // 中间级 approve(已存在 N<2 条 approve)只记录 human_reviews + stage 推进,
 // submission 停留在 human_reviewing,不动 task_items / tasks。
 func TestApplyIntermediateApproveStaysHumanReviewing(t *testing.T) {

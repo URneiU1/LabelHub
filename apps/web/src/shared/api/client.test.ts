@@ -81,6 +81,12 @@ describe('task management client wrappers', () => {
       rewardConfig: { amount: 0.3, unit: '元/条' },
       distribution: 'quota',
       quotaPerUser: 100,
+      overlapCount: 3,
+      overlapCoveragePct: 50,
+      leaseTimeoutMinutes: 45,
+      reviewSamplingPct: 20,
+      dailySubmissionLimitPerLabeler: 12,
+      humanReviewEnabled: true,
       deadline: '2026-06-01T15:59:00.000Z',
     })
 
@@ -95,6 +101,12 @@ describe('task management client wrappers', () => {
       rewardConfig: { amount: 0.3, unit: '元/条' },
       distribution: 'quota',
       quotaPerUser: 100,
+      overlapCount: 3,
+      overlapCoveragePct: 50,
+      leaseTimeoutMinutes: 45,
+      reviewSamplingPct: 20,
+      dailySubmissionLimitPerLabeler: 12,
+      humanReviewEnabled: true,
       deadline: '2026-06-01T15:59:00.000Z',
     })
   })

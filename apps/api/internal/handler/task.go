@@ -78,6 +78,7 @@ type createTaskRequest struct {
 	LeaseTimeoutMinutes            *int             `json:"leaseTimeoutMinutes"`
 	ReviewSamplingPct              *int             `json:"reviewSamplingPct"`
 	DailySubmissionLimitPerLabeler *int             `json:"dailySubmissionLimitPerLabeler"`
+	HumanReviewEnabled             *bool            `json:"humanReviewEnabled"`
 	Deadline                       *model.NullTime  `json:"deadline"`
 }
 
@@ -95,6 +96,7 @@ type updateTaskRequest struct {
 	LeaseTimeoutMinutes            *int             `json:"leaseTimeoutMinutes"`
 	ReviewSamplingPct              *int             `json:"reviewSamplingPct"`
 	DailySubmissionLimitPerLabeler *int             `json:"dailySubmissionLimitPerLabeler"`
+	HumanReviewEnabled             *bool            `json:"humanReviewEnabled"`
 	Deadline                       *model.NullTime  `json:"deadline"`
 }
 
@@ -211,6 +213,9 @@ func (h TaskHandler) CreateTask(c *gin.Context) {
 	if req.DailySubmissionLimitPerLabeler != nil {
 		task.DailySubmissionLimitPerLabeler = *req.DailySubmissionLimitPerLabeler
 	}
+	if req.HumanReviewEnabled != nil {
+		task.HumanReviewEnabled = *req.HumanReviewEnabled
+	}
 	if req.Deadline != nil {
 		task.Deadline = *req.Deadline
 	}
@@ -281,6 +286,9 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 	}
 	if req.DailySubmissionLimitPerLabeler != nil {
 		updates["daily_submission_limit_per_labeler"] = *req.DailySubmissionLimitPerLabeler
+	}
+	if req.HumanReviewEnabled != nil {
+		updates["human_review_enabled"] = *req.HumanReviewEnabled
 	}
 	if req.Tags != nil {
 		tags, valid := validateOptionalJSON(c, req.Tags, "tags")

@@ -163,6 +163,12 @@ export type Task = {
   rewardConfig?: string | null
   distribution?: string
   quotaPerUser?: number
+  overlapCount?: number
+  overlapCoveragePct?: number
+  leaseTimeoutMinutes?: number
+  reviewSamplingPct?: number
+  dailySubmissionLimitPerLabeler?: number
+  humanReviewEnabled?: boolean
   deadline?: string | null
   publishedAt?: string | null
 }
@@ -177,6 +183,12 @@ export type TaskInfoInput = {
   rewardConfig?: unknown
   distribution?: TaskDistribution
   quotaPerUser?: number
+  overlapCount?: number
+  overlapCoveragePct?: number
+  leaseTimeoutMinutes?: number
+  reviewSamplingPct?: number
+  dailySubmissionLimitPerLabeler?: number
+  humanReviewEnabled?: boolean
   deadline?: string | null
 }
 
@@ -223,6 +235,12 @@ function buildTaskInfoBody(input: TaskInfoInput): Record<string, unknown> {
   if (input.rewardConfig !== undefined) body.rewardConfig = input.rewardConfig
   if (input.distribution !== undefined) body.distribution = input.distribution
   if (input.quotaPerUser !== undefined) body.quotaPerUser = input.quotaPerUser
+  if (input.overlapCount !== undefined) body.overlapCount = input.overlapCount
+  if (input.overlapCoveragePct !== undefined) body.overlapCoveragePct = input.overlapCoveragePct
+  if (input.leaseTimeoutMinutes !== undefined) body.leaseTimeoutMinutes = input.leaseTimeoutMinutes
+  if (input.reviewSamplingPct !== undefined) body.reviewSamplingPct = input.reviewSamplingPct
+  if (input.dailySubmissionLimitPerLabeler !== undefined) body.dailySubmissionLimitPerLabeler = input.dailySubmissionLimitPerLabeler
+  if (input.humanReviewEnabled !== undefined) body.humanReviewEnabled = input.humanReviewEnabled
   if (input.deadline !== undefined) body.deadline = input.deadline
   return body
 }

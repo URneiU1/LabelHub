@@ -10,7 +10,7 @@
 //   - 中间级 approve(第 1、2 次):INSERT human_reviews(stage)+ INSERT audit_logs,
 //     submission 停留在 human_reviewing(乐观锁确认未被抢先终态化)。
 //   - 终审 approve(第 3 次):INSERT human_reviews + UPDATE submissions(approved + approved_at)
-//     + UPDATE task_items(finished)+ UPDATE tasks(finished_items += 1)+ INSERT audit_logs。
+//   - UPDATE task_items(finished)+ UPDATE tasks(finished_items += 1)+ INSERT audit_logs。
 //   - reject(任意 stage):同终态路径但少 task.finished_items 那一步,落到 rejected。
 //   - revise(任意 stage):INSERT human_reviews + UPDATE submissions(revising)+ INSERT audit_logs,
 //     不动 task_items / tasks。
@@ -32,8 +32,9 @@ import (
 
 // task_items.status 字面值。review service 自带一份避免反向依赖 handler 包。
 const (
-	itemStatusClaimed  = "claimed"
-	itemStatusFinished = "finished"
+	itemStatusClaimed          = "claimed"
+	itemStatusFinished         = "finished"
+	itemStatusNeedsArbitration = "needs_arbitration"
 )
 
 // RequiredHumanReviewLevels 多级人工审核的总级数:初审 → 复审 → 终审。
@@ -134,7 +135,8 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			}
 			return err
 		}
-		if submission.Status != statemachine.StateHumanReviewing {
+		isArbitration := submission.Status == statemachine.StateNeedsArbitration
+		if submission.Status != statemachine.StateHumanReviewing && !isArbitration {
 			return ErrInvalidTransition
 		}
 		if submission.CurrentRevisionID == nil {
@@ -150,15 +152,20 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 		// approve 路径下,前 RequiredHumanReviewLevels-1 次只记录 human_reviews 并停在 human_reviewing,
 		// 第 RequiredHumanReviewLevels 次才真正推到 approved。
 		var approveCount int64
-		if err := tx.Model(&model.HumanReview{}).
-			Where("submission_id = ? AND revision_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, "approve").
-			Count(&approveCount).Error; err != nil {
-			return err
+		if !isArbitration {
+			if err := tx.Model(&model.HumanReview{}).
+				Where("submission_id = ? AND revision_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, "approve").
+				Count(&approveCount).Error; err != nil {
+				return err
+			}
 		}
 		stage, _ := StageForApproveCount(int(approveCount))
+		if isArbitration {
+			stage = StageFinal
+		}
 
 		// 中间级 approve:advance 一级,不变更 submission 状态。
-		isFinalApprove := humanVerdict == "approve" && int(approveCount) >= RequiredHumanReviewLevels-1
+		isFinalApprove := humanVerdict == "approve" && (isArbitration || int(approveCount) >= RequiredHumanReviewLevels-1)
 		isIntermediateApprove := humanVerdict == "approve" && !isFinalApprove
 
 		// 只有真正发生状态变更的路径才校验状态机(中间级 approve 不变状态,跳过)。
@@ -186,7 +193,7 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			// 中间级 approve:只 advance stage,submission 停留在 human_reviewing。
 			// 用乐观锁 WHERE status 保证并发安全(虽然此处不改 status,仍需确认未被其他 reviewer 抢先终态化)。
 			res := tx.Model(&model.Submission{}).
-				Where("id = ? AND status = ?", submission.ID, statemachine.StateHumanReviewing).
+				Where("id = ? AND status = ?", submission.ID, submission.Status).
 				Update("updated_at", now)
 			if res.Error != nil {
 				return res.Error
@@ -215,7 +222,7 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 
 		updates := UpdatesFor(to, humanVerdict, now)
 		res := tx.Model(&model.Submission{}).
-			Where("id = ? AND status = ?", submission.ID, statemachine.StateHumanReviewing).
+			Where("id = ? AND status = ?", submission.ID, submission.Status).
 			Updates(updates)
 		if res.Error != nil {
 			return res.Error
@@ -224,7 +231,16 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			return ErrConcurrentWrite
 		}
 		if to == statemachine.StateApproved || to == statemachine.StateRejected {
-			res := tx.Model(&model.TaskItem{}).Where("id = ? AND status = ?", submission.ItemID, itemStatusClaimed).Updates(map[string]any{
+			expectedItemStatus := itemStatusClaimed
+			if isArbitration {
+				expectedItemStatus = itemStatusNeedsArbitration
+				if err := tx.Model(&model.Submission{}).
+					Where("item_id = ? AND id <> ? AND status = ?", submission.ItemID, submission.ID, statemachine.StateNeedsArbitration).
+					Updates(map[string]any{"status": statemachine.StateRejected, "human_verdict": "reject"}).Error; err != nil {
+					return err
+				}
+			}
+			res := tx.Model(&model.TaskItem{}).Where("id = ? AND status = ?", submission.ItemID, expectedItemStatus).Updates(map[string]any{
 				"status":      itemStatusFinished,
 				"finished_at": now,
 			})

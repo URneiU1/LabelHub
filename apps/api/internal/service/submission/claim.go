@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	ItemStatusAvailable = "available"
-	ItemStatusClaimed   = "claimed"
-	TaskStatusPublished = "published"
+	ItemStatusAvailable        = "available"
+	ItemStatusClaimed          = "claimed"
+	ItemStatusNeedsArbitration = "needs_arbitration"
+	TaskStatusPublished        = "published"
 
 	DistributionFirstCome = "first_come"
 	DistributionAssigned  = "assigned"
@@ -84,10 +85,15 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 			return err
 		}
 
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("task_id = ? AND status = ?", task.ID, ItemStatusAvailable).
-			Order("id").
-			First(&item).Error; err != nil {
+		itemQuery := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("task_id = ? AND status = ?", task.ID, ItemStatusAvailable)
+		if overlapEnabled(task) {
+			itemQuery = itemQuery.
+				Where("NOT EXISTS (SELECT 1 FROM submissions WHERE submissions.item_id = task_items.id AND submissions.labeler_id = ?)", input.LabelerID).
+				Where("(SELECT COUNT(*) FROM submissions WHERE submissions.item_id = task_items.id AND submissions.status <> ?) < CASE WHEN MOD(task_items.id, 100) < ? THEN ? ELSE 1 END",
+					statemachine.StateDraft, task.OverlapCoveragePct, task.OverlapCount)
+		}
+		if err := itemQuery.Order("id").First(&item).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrNoAvailableItem
 			}

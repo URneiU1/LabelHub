@@ -13,6 +13,7 @@ import (
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 	"labelhub.local/llmreview"
+	"labelhub.local/reviewsampling"
 )
 
 func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error {
@@ -284,7 +285,8 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 	toState := "human_reviewing"
 	event := "ai_done"
-	if result.Verdict == "pass" && !meta.HumanReviewEnabled {
+	if result.Verdict == "pass" && (!meta.HumanReviewEnabled ||
+		!reviewsampling.ShouldReview(meta.TaskID, meta.ItemID, meta.LabelerID, meta.ReviewSamplingPct)) {
 		toState = "approved"
 		event = "ai_auto_approved"
 		res, err := tx.ExecContext(ctx,
@@ -427,15 +429,17 @@ func lockedSubmissionState(ctx context.Context, tx *sql.Tx, submissionID uint64)
 type aiCompletionMeta struct {
 	TaskID             uint64
 	ItemID             uint64
+	LabelerID          uint64
 	HumanReviewEnabled bool
+	ReviewSamplingPct  int
 }
 
 func lockedAICompletionMeta(ctx context.Context, tx *sql.Tx, submissionID uint64) (aiCompletionMeta, error) {
 	var meta aiCompletionMeta
 	err := tx.QueryRowContext(ctx,
-		`SELECT s.task_id, s.item_id, t.human_review_enabled FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? FOR UPDATE`,
+		`SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? FOR UPDATE`,
 		submissionID,
-	).Scan(&meta.TaskID, &meta.ItemID, &meta.HumanReviewEnabled)
+	).Scan(&meta.TaskID, &meta.ItemID, &meta.LabelerID, &meta.HumanReviewEnabled, &meta.ReviewSamplingPct)
 	return meta, err
 }
 

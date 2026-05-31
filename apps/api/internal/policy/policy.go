@@ -26,9 +26,10 @@ const (
 // reviewerReadableSubmissionStatuses:reviewer 角色允许查看的 submission 状态白名单。
 // 草稿 / 提交中 / AI 审中 / 修订中 都属于 labeler 私域,reviewer 无权窥探 raw payload。
 var reviewerReadableSubmissionStatuses = map[string]struct{}{
-	statemachine.StateHumanReviewing: {},
-	statemachine.StateApproved:       {},
-	statemachine.StateRejected:       {},
+	statemachine.StateHumanReviewing:   {},
+	statemachine.StateNeedsArbitration: {},
+	statemachine.StateApproved:         {},
+	statemachine.StateRejected:         {},
 }
 
 // HasRole 判断 claims 是否携带指定角色。nil-safe。

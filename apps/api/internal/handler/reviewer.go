@@ -127,7 +127,8 @@ type retryAIReviewResponse struct {
 }
 
 var reviewerQueueAllowedStatuses = map[string]struct{}{
-	statemachine.StateHumanReviewing: {},
+	statemachine.StateHumanReviewing:   {},
+	statemachine.StateNeedsArbitration: {},
 }
 
 // reviewStageInfo 暴露 submission 当前所处的人工审核级别给前端展示初审/复审/终审。
@@ -172,8 +173,8 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 	status := c.DefaultQuery("status", statemachine.StateHumanReviewing)
 	if _, ok := reviewerQueueAllowedStatuses[status]; !ok {
 		httpx.ErrorWithDetails(c, http.StatusForbidden, "FORBIDDEN",
-			"reviewer queue only exposes human_reviewing",
-			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing}})
+			"reviewer queue only exposes reviewable submissions",
+			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing, statemachine.StateNeedsArbitration}})
 		return
 	}
 	claims, _ := middleware.Claims(c)
@@ -494,7 +495,7 @@ func batchReviewErrorMessage(err error) string {
 	case errors.Is(err, review.ErrSubmissionNotFound):
 		return "submission not found"
 	case errors.Is(err, review.ErrInvalidTransition):
-		return "submission is not human_reviewing"
+		return "submission is not reviewable"
 	case errors.Is(err, review.ErrNoRevision):
 		return "submission has no revision"
 	case errors.Is(err, review.ErrForbidden):
@@ -555,40 +556,40 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 			return errAIRetryForbidden
 		}
 
-			var aiReviewRecord model.AIReview
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("submission_id = ? AND revision_id = ?", submission.ID, *submission.CurrentRevisionID).
-				Order("created_at DESC, id DESC").
-				First(&aiReviewRecord).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errAIRetryNoReview
-				}
-				return err
+		var aiReviewRecord model.AIReview
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("submission_id = ? AND revision_id = ?", submission.ID, *submission.CurrentRevisionID).
+			Order("created_at DESC, id DESC").
+			First(&aiReviewRecord).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAIRetryNoReview
 			}
-			if aiReviewRecord.Status != "failed" && aiReviewRecord.Status != "dead" {
-				return errAIRetryReviewState
-			}
+			return err
+		}
+		if aiReviewRecord.Status != "failed" && aiReviewRecord.Status != "dead" {
+			return errAIRetryReviewState
+		}
 
-			var prompt model.AIPromptConfig
-			if err := tx.Where("task_id = ? AND version = ?", task.ID, aiReviewRecord.PromptVersion).First(&prompt).Error; err != nil {
-				return errAIRetryPromptInvalid
-			}
-			if !llmreview.AllowedModelName(prompt.Model) {
-				return errAIRetryPromptInvalid
-			}
-			key := reviewerAIReviewIdempotencyKey(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version)
-			if key != aiReviewRecord.IdempotencyKey {
-				return errAIRetryKeyMismatch
-			}
-			payload, err := reviewerAIReviewTaskPayload(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version, key)
-			if err != nil {
-				return err
-			}
+		var prompt model.AIPromptConfig
+		if err := tx.Where("task_id = ? AND version = ?", task.ID, aiReviewRecord.PromptVersion).First(&prompt).Error; err != nil {
+			return errAIRetryPromptInvalid
+		}
+		if !llmreview.AllowedModelName(prompt.Model) {
+			return errAIRetryPromptInvalid
+		}
+		key := reviewerAIReviewIdempotencyKey(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version)
+		if key != aiReviewRecord.IdempotencyKey {
+			return errAIRetryKeyMismatch
+		}
+		payload, err := reviewerAIReviewTaskPayload(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version, key)
+		if err != nil {
+			return err
+		}
 
-			if err := tx.Model(&model.AIReview{}).
-				Where("id = ? AND status IN ?", aiReviewRecord.ID, []string{"failed", "dead"}).
-				Updates(map[string]any{
-					"status":        "pending",
+		if err := tx.Model(&model.AIReview{}).
+			Where("id = ? AND status IN ?", aiReviewRecord.ID, []string{"failed", "dead"}).
+			Updates(map[string]any{
+				"status":        "pending",
 				"verdict":       nil,
 				"overall_score": nil,
 				"dimensions":    nil,
@@ -603,19 +604,19 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 			}).Error; err != nil {
 			return err
 		}
-			result := tx.Model(&model.Submission{}).
-				Where("id = ? AND status = ? AND current_revision_id = ?", submission.ID, statemachine.StateHumanReviewing, *submission.CurrentRevisionID).
-				Updates(map[string]any{
-					"status":     statemachine.StateAIReviewing,
-					"ai_verdict": nil,
-					"ai_score":   nil,
-				})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return review.ErrConcurrentWrite
-			}
+		result := tx.Model(&model.Submission{}).
+			Where("id = ? AND status = ? AND current_revision_id = ?", submission.ID, statemachine.StateHumanReviewing, *submission.CurrentRevisionID).
+			Updates(map[string]any{
+				"status":     statemachine.StateAIReviewing,
+				"ai_verdict": nil,
+				"ai_score":   nil,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return review.ErrConcurrentWrite
+		}
 		if err := tx.Create(&model.OutboxEvent{
 			Topic:   "ai:review",
 			Payload: payload,
@@ -631,28 +632,28 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 			ActorType:  "user",
 			ActorID:    &claims.UserID,
 			Event:      "ai_retry",
-				Payload: map[string]any{
-					"ai_review_id":    aiReviewRecord.ID,
-					"idempotency_key": key,
-					"prompt_version":  prompt.Version,
-				},
+			Payload: map[string]any{
+				"ai_review_id":    aiReviewRecord.ID,
+				"idempotency_key": key,
+				"prompt_version":  prompt.Version,
+			},
 		}); err != nil {
 			return err
 		}
 
-			aiReviewRecord.Status = "pending"
-			aiReviewRecord.Verdict = nil
-			aiReviewRecord.OverallScore = nil
-			aiReviewRecord.Dimensions = nil
-			aiReviewRecord.Reason = model.NullString{}
-			aiReviewRecord.RawResponse = nil
-			aiReviewRecord.TokensInput = 0
-			aiReviewRecord.TokensOutput = 0
-			aiReviewRecord.LatencyMS = 0
-			aiReviewRecord.RetryCount = 0
-			aiReviewRecord.ErrorMsg = model.NullString{}
-			aiReviewRecord.FinishedAt = model.NullTime{}
-			aiReview, err := reviewerAIReviewResponseFromModel(aiReviewRecord, &prompt)
+		aiReviewRecord.Status = "pending"
+		aiReviewRecord.Verdict = nil
+		aiReviewRecord.OverallScore = nil
+		aiReviewRecord.Dimensions = nil
+		aiReviewRecord.Reason = model.NullString{}
+		aiReviewRecord.RawResponse = nil
+		aiReviewRecord.TokensInput = 0
+		aiReviewRecord.TokensOutput = 0
+		aiReviewRecord.LatencyMS = 0
+		aiReviewRecord.RetryCount = 0
+		aiReviewRecord.ErrorMsg = model.NullString{}
+		aiReviewRecord.FinishedAt = model.NullTime{}
+		aiReview, err := reviewerAIReviewResponseFromModel(aiReviewRecord, &prompt)
 		if err != nil {
 			return err
 		}

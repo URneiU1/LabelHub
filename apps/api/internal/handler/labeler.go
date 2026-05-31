@@ -70,9 +70,11 @@ func (h LabelerHandler) ListMyTaskItems(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list submissions")
 		return
 	}
-	subByItem := make(map[uint64]model.Submission, len(subs))
+	mineByItem := make(map[uint64]model.Submission, len(subs))
 	for _, s := range subs {
-		subByItem[s.ItemID] = s
+		if s.LabelerID == claims.UserID {
+			mineByItem[s.ItemID] = s
+		}
 	}
 
 	out := make([]labelerTaskItem, 0, len(items))
@@ -83,17 +85,17 @@ func (h LabelerHandler) ListMyTaskItems(c *gin.Context) {
 			ext := it.ExternalID.String
 			entry.ExternalID = &ext
 		}
-		switch sub, has := subByItem[it.ID]; {
-		case has && sub.LabelerID == claims.UserID:
+		switch sub, has := mineByItem[it.ID]; {
+		case has:
 			entry.Status = sub.Status
 			entry.Mine = true
 			sid := sub.ID
 			entry.SubmissionID = &sid
-		case has:
-			entry.Status = "taken"
 		case it.ClaimedBy != nil && *it.ClaimedBy == claims.UserID:
 			entry.Status = "claimed"
 			entry.Mine = true
+		case it.Status != submission.ItemStatusAvailable:
+			entry.Status = "taken"
 		default:
 			entry.Status = "available"
 		}
@@ -170,7 +172,7 @@ func (h LabelerHandler) GetItem(c *gin.Context) {
 	// 查 submission(可能不存在);policy.CanReadItem 需要它来判定 reviewer 是否有权限看。
 	var submissionPtr *model.Submission
 	var submission model.Submission
-	if err := h.db.Where("item_id = ?", item.ID).First(&submission).Error; err == nil {
+	if err := submissionQueryForItem(h.db, c, item.ID).First(&submission).Error; err == nil {
 		submissionPtr = &submission
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")

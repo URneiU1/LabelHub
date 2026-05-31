@@ -9,11 +9,14 @@ require (
 	go.uber.org/zap v1.28.0
 	labelhub.local/exporter v0.0.0
 	labelhub.local/llmreview v0.0.0
+	labelhub.local/reviewsampling v0.0.0
 )
 
 replace labelhub.local/exporter => ../../pkg/exporter
 
 replace labelhub.local/llmreview => ../../pkg/llmreview
+
+replace labelhub.local/reviewsampling => ../../pkg/reviewsampling
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

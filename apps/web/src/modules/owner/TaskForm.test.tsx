@@ -37,7 +37,7 @@ describe('TaskForm', () => {
     mockUpdateTask.mockReset()
   })
 
-  it('creates a task with serialized tags, reward, distribution, quota and deadline', async () => {
+  it('creates a task with content, distribution and quality policies', async () => {
     const user = userEvent.setup()
     mockCreateTask.mockResolvedValue(savedTask)
     const onSaved = vi.fn()
@@ -50,6 +50,16 @@ describe('TaskForm', () => {
     await user.click(screen.getByRole('button', { name: '添加标签' }))
     await user.type(screen.getByLabelText('task_reward_amount'), '0.3')
     await user.type(screen.getByLabelText('task_quota_per_user'), '100')
+    await user.clear(screen.getByLabelText('task_overlap_count'))
+    await user.type(screen.getByLabelText('task_overlap_count'), '3')
+    await user.clear(screen.getByLabelText('task_overlap_coverage_pct'))
+    await user.type(screen.getByLabelText('task_overlap_coverage_pct'), '50')
+    await user.clear(screen.getByLabelText('task_lease_timeout_minutes'))
+    await user.type(screen.getByLabelText('task_lease_timeout_minutes'), '45')
+    await user.clear(screen.getByLabelText('task_review_sampling_pct'))
+    await user.type(screen.getByLabelText('task_review_sampling_pct'), '20')
+    await user.clear(screen.getByLabelText('task_daily_submission_limit'))
+    await user.type(screen.getByLabelText('task_daily_submission_limit'), '12')
     await user.click(screen.getByRole('button', { name: '分发策略 配额抢单' }))
     await user.click(screen.getByRole('button', { name: '创建任务' }))
 
@@ -63,6 +73,12 @@ describe('TaskForm', () => {
     expect(input.rewardConfig).toEqual({ amount: 0.3, unit: '元/条' })
     expect(input.distribution).toBe('quota')
     expect(input.quotaPerUser).toBe(100)
+    expect(input.overlapCount).toBe(3)
+    expect(input.overlapCoveragePct).toBe(50)
+    expect(input.leaseTimeoutMinutes).toBe(45)
+    expect(input.reviewSamplingPct).toBe(20)
+    expect(input.dailySubmissionLimitPerLabeler).toBe(12)
+    expect(input.humanReviewEnabled).toBe(true)
     expect(onSaved).toHaveBeenCalledWith(savedTask, true)
   })
 

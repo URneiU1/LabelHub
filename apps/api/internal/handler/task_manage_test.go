@@ -69,6 +69,7 @@ func TestCreateTaskPersistsBasicInfoFields(t *testing.T) {
 		"leaseTimeoutMinutes":            45,
 		"reviewSamplingPct":              30,
 		"dailySubmissionLimitPerLabeler": 80,
+		"humanReviewEnabled":             false,
 	}))
 
 	if rec.Code != http.StatusOK {
@@ -89,6 +90,9 @@ func TestCreateTaskPersistsBasicInfoFields(t *testing.T) {
 	}
 	if data["dailySubmissionLimitPerLabeler"].(float64) != 80 {
 		t.Fatalf("daily limit = %v", data["dailySubmissionLimitPerLabeler"])
+	}
+	if data["humanReviewEnabled"] != false {
+		t.Fatalf("humanReviewEnabled = %v", data["humanReviewEnabled"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

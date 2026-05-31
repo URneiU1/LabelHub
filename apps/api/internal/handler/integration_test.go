@@ -194,8 +194,8 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled"}).
-			AddRow(1, 1, "published", false, true))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled", "review_sampling_pct"}).
+			AddRow(1, 1, "published", false, true, 100))
 
 	claimedBy := uint64(7)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
@@ -205,8 +205,8 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 	mock.ExpectBegin()
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled"}).
-			AddRow(1, 1, "published", false, true))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled", "review_sampling_pct"}).
+			AddRow(1, 1, "published", false, true, 100))
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).

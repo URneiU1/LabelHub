@@ -64,7 +64,7 @@ type Task struct {
 	ReviewSamplingPct              int        `gorm:"default:100" json:"reviewSamplingPct"`
 	DailySubmissionLimitPerLabeler int        `json:"dailySubmissionLimitPerLabeler"`
 	AIReviewEnabled                bool       `gorm:"default:false" json:"aiReviewEnabled"`
-	HumanReviewEnabled             bool       `gorm:"default:true" json:"humanReviewEnabled"`
+	HumanReviewEnabled             bool       `json:"humanReviewEnabled"`
 	AIPromptID                     *uint64    `gorm:"column:ai_prompt_id" json:"aiPromptId"`
 	TotalItems                     int        `json:"totalItems"`
 	FinishedItems                  int        `json:"finishedItems"`

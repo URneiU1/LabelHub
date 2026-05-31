@@ -204,6 +204,34 @@ func TestReviewerQueue_ExposesReviewStage(t *testing.T) {
 	}
 }
 
+func TestReviewerQueue_ExposesNeedsArbitration(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+	revisionID := uint64(901)
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+LEFT JOIN task_reviewers`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(501, 1, 11, "needs_arbitration", revisionID))
+	mock.ExpectQuery(`(?is)^SELECT revision_id, COUNT\(\*\) AS total FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id", "total"}))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions?status=needs_arbitration", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	items := responseDataArray(t, rec)
+	if len(items) != 1 || items[0].(map[string]any)["status"] != "needs_arbitration" {
+		t.Fatalf("items = %v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // /reviewer/results 列出已定稿 submission,带 finalVerdict / reviewerId / aiScore。
 func TestReviewerResults_ListsFinalizedSubmissions(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)

@@ -70,6 +70,36 @@ func TestClaim_DailySubmissionLimitBlocksWhenReached(t *testing.T) {
 	}
 }
 
+func TestClaim_OverlapExcludesItemsAlreadySubmittedByLabeler(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "overlap_count", "overlap_coverage_pct"}).
+			AddRow(1, "published", 2, 100))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+NOT EXISTS.+submissions.+MOD.+SKIP LOCKED`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(8, 1, "available"))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
+		WillReturnResult(sqlmock.NewResult(902, 1))
+	mock.ExpectCommit()
+
+	result, err := Claim(db, ClaimInput{TaskID: 1, LabelerID: 5})
+	if err != nil {
+		t.Fatalf("claim errored: %v", err)
+	}
+	if result.Item.ID != 8 {
+		t.Fatalf("unexpected item: %+v", result.Item)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 // TestClaim_QuotaBlocksWhenLimitReached:quota 分发下,labeler 在本任务的 submission 数
 // 已达 QuotaPerUser 时拒绝领新题(ErrQuotaReached),不会再 SELECT available。
 func TestClaim_QuotaBlocksWhenLimitReached(t *testing.T) {

@@ -96,7 +96,7 @@ func templateForBundle(db *gorm.DB, task model.Task, submission model.Submission
 // labeler 的 ClaimItem / GetItem 两条路径都收敛到这里,保持 HTTP 响应结构一致。
 func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskItem) {
 	var submission model.Submission
-	submissionErr := db.Where("item_id = ?", item.ID).First(&submission).Error
+	submissionErr := submissionQueryForItem(db, c, item.ID).First(&submission).Error
 	if submissionErr != nil && !errors.Is(submissionErr, gorm.ErrRecordNotFound) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")
 		return
@@ -140,6 +140,17 @@ func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskIt
 		payload["warnings"] = []string{"template_missing"}
 	}
 	httpx.OK(c, payload)
+}
+
+func submissionQueryForItem(db *gorm.DB, c *gin.Context, itemID uint64) *gorm.DB {
+	query := db.Where("item_id = ?", itemID)
+	claims, _ := middleware.Claims(c)
+	if policy.HasRole(claims, policy.RoleLabeler) &&
+		!policy.HasRole(claims, policy.RoleReviewer) &&
+		!policy.HasRole(claims, policy.RoleAdmin) {
+		query = query.Where("labeler_id = ?", claims.UserID)
+	}
+	return query
 }
 
 func parseIDParam(c *gin.Context, name string) (uint64, bool) {

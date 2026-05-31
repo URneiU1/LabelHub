@@ -145,3 +145,101 @@ func TestSaveRejectsFirstSubmitAtDailyLimit(t *testing.T) {
 		t.Fatalf("expectations not met: %v", err)
 	}
 }
+
+func TestSaveOverlapWaitsForPeerAndReleasesItem(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "overlap_count", "overlap_coverage_pct"}).
+			AddRow(1, 2, 100))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateDraft))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(nil))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(101, 1))
+	mock.ExpectQuery(`(?is)^SELECT submission_revisions.answer FROM .submissions. JOIN submission_revisions`).
+		WillReturnRows(sqlmock.NewRows([]string{"answer"}))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, statemachine.StateSubmitted))
+	mock.ExpectCommit()
+
+	result, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"pass"}`),
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if result.Status != statemachine.StateSubmitted {
+		t.Fatalf("status = %s, want submitted", result.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestSaveAutoApprovesUnsampledSubmissionWithoutAI(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "review_sampling_pct", "human_review_enabled"}).
+			AddRow(1, 0, true))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateDraft))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(nil))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(101, 1))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, statemachine.StateApproved))
+	mock.ExpectCommit()
+
+	result, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"pass"}`),
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if result.Status != statemachine.StateApproved {
+		t.Fatalf("status = %s, want approved", result.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}

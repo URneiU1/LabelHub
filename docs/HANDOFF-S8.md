@@ -1,6 +1,6 @@
 # HANDOFF — Designer 重做 + S8 任务条例
 
-> 交接给下一个开发者。本文 = ①本会话已完成的工作（UI 换肤 + 数据看板丰富）②两个待办：**Designer 对齐设计稿 + 横向子导航**、**S8 任务条例（多人重复标注/租约/抽检/每日上限/发布冻结）**。
+> 交接给下一个开发者。本文 = ①已完成的 UI 换肤 + 数据看板丰富 ②已完成的 Designer 对齐 ③已完成的 S8 第一批任务条例 ④后续可选的 S8 第二批。
 > 部署/环境/历史背景先读 `docs/HANDOFF.md`；本文聚焦接下来要做的两件事。
 
 最后部署：上线在 **http://43.155.210.70**（`api`+`worker`+`web` 均最新）。部署方式 = rsync 工作树到 `ubuntu@43.155.210.70:/home/ubuntu/labelhub/`（`ssh -i ~/Downloads/labelhub.pem`），再 `docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml up -d --build <web|api worker>`。详见 `docs/HANDOFF.md`。
@@ -53,7 +53,7 @@ UI 从 Arco/Editorial 双皮统一为 **PetaV2 风格**，并把 Owner 导航改
 
 ---
 
-## 2. 待办二 · S8 任务条例（用户已定方案）
+## 2. 已完成 · S8 第一批任务条例
 
 给「任务」在 状态 / 分发策略 / 配额 之外，加质量与管控条例。**用户已明确分批与字段，照做即可。**
 
@@ -64,12 +64,12 @@ UI 从 Arco/Editorial 双皮统一为 **PetaV2 风格**，并把 Owner 导航改
 - 分发/领题逻辑：`apps/api/internal/service/submission/claim.go`（+ `claim_distribution_test.go`）——overlap / lease / sampling 都在这里挂钩。
 - 任务 CRUD handler：`apps/api/internal/handler/task.go`、`task_manage.go`。
 - 状态机：`apps/api/internal/statemachine/task.go`（终态 `ended`）——**发布冻结要在这里加约束**。
-- 迁移：`apps/api/internal/migration/`（golang-migrate，烤进镜像，api 启动时自动跑）→ 下一个文件 `009_*.up.sql/.down.sql`。新列加在这里。
+- 迁移：`apps/api/internal/migration/`（golang-migrate，烤进镜像，api 启动时自动跑）。本批新增 `009_task_policies` 与 `010_overlap_arbitration`。
 - 前端任务创建/编辑：`apps/web/src/modules/owner/TaskManagePanel.tsx`（抽屉式表单）。
 
 ### S8 第一批（必须做）
 
-> 进度（2026-06-01，本地）:`009_task_policies`、API 字段校验、发布后 `schema/distribution/overlap/review_sampling` 冻结、租约超时回收和每日提交上限已完成；overlap 仲裁、抽检与 Owner 表单继续推进。
+> 进度（2026-06-01，本地）:第一批全部完成，尚未部署。`009_task_policies` 增加任务策略列；`010_overlap_arbitration` 放宽 submission 唯一键并增加仲裁状态。
 
 1. **多人重复标注 + 共识仲裁**（核心展示能力，对标 Label Studio / Labelbox）
    - `overlap_count`：默认 `1`；高质量任务建议 `2` 或 `3`。
@@ -87,7 +87,14 @@ UI 从 Arco/Editorial 双皮统一为 **PetaV2 风格**，并把 Owner 导航改
    - 发布任务后锁定 `schema`、`distribution`、`overlap`、`review_sampling`。
    - **不能只是 UI 字段——后端状态机也必须拒绝修改**（在 `statemachine/task.go`）。需要改时复制任务建新版本。
 
-### S8 第二批（随后补）
+### 第一批实现边界
+- overlap 采用**顺序租约**，复用单一 `task_items.claimed_by`：上一位提交后题目释放回池，下一位再领；未另建并发占题表。
+- 覆盖率按 `item_id % 100` 确定性分桶；同题答案 canonical JSON 一致才派发审核，不一致转 `needs_arbitration`。
+- 仲裁队列用 `GET /reviewer/submissions?status=needs_arbitration`；资深审核一次终审，选中 submission 落终态，其余冲突 submission 收口为 rejected。
+- 抽检用共享 `pkg/reviewsampling` 确定性分桶，重试不会漂移。无 AI 时未抽中直接批准；有 AI 时只有 `pass` 且未抽中直通，`reject/uncertain` 始终进入人工审核。
+- Owner 表单已拆成「分发设置 / 质量设置 / 发布设置」，并接入人工审核开关。`humanReviewEnabled=false` 的持久化已修复。
+
+### S8 第二批（待办）
 - **准入门槛**：基于现有 golden samples，加 `min_accuracy_pct` + 资格测试。**前置依赖**：先把标注员的失败/重试/暂停流程做好。
 - **优先级**：放在**数据批次 / 单题**层级（`priority`），不要只做任务级。
 - **动态抽检**：低共识 / AI 低置信 / 新标注员 → 提高抽检率；稳定标注员 → 降低。
@@ -104,6 +111,6 @@ UI 从 Arco/Editorial 双皮统一为 **PetaV2 风格**，并把 Owner 导航改
 ## 3. 工程约定（接手必读）
 - **测试是验收门槛**：改完跑 `go test ./internal/...`（handler 用有序 sqlmock，新增查询要按顺序补 `mock.ExpectQuery`，正则注意 gorm 给字段加反引号 → 用 `.字段. ` 而非 `字段`）；前端 `pnpm -F web build && pnpm -F web lint && pnpm -F web test`。
 - 纯逻辑（分桶/聚合/共识判定）抽成纯函数单独 TDD（参考 `stats.go` 的 `buildConfusion`/`bucketScores`）。
-- 新列必须配 `009_*.up.sql` + `.down.sql`；api 启动自动迁移，所以 `up -d --build api` 即生效。
+- 新列必须配成对的 `NNN_*.up.sql` + `.down.sql`；api 启动自动迁移，所以 `up -d --build api` 即生效。
 - 提交：约定式前缀、无 AI 署名；每次改动在 `docs/CHANGELOG.md` 的「最近完成」追加一条。
 - 分发策略/配额/状态在 UI 已有（`TaskManagePanel`），新增条例并入同一抽屉的三区块。

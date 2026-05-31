@@ -67,3 +67,31 @@ func TestListMyTaskItemsMergesPerItemStatus(t *testing.T) {
 		t.Fatalf("expectations not met: %v", err)
 	}
 }
+
+func TestListMyTaskItemsKeepsReleasedOverlapItemAvailable(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(10, 1, "available"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(99, 1, 10, 6, "submitted"))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodGet, "/tasks/1/labeler/items", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	items := data["items"].([]any)
+	if got := items[0].(map[string]any)["status"]; got != "available" {
+		t.Fatalf("status = %v, want available", got)
+	}
+}
