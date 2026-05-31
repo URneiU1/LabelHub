@@ -110,7 +110,7 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
     <section style={panelStyle} aria-label="数据导出">
       <h3 style={headingStyle}>数据导出</h3>
 
-      <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-md)' }}>
+      <div id="ex-config" style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-md)' }}>
         {FORMATS.map((f) => (
           <button
             key={f}
@@ -159,7 +159,7 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
         {creating ? '导出入队中…' : '开始导出'}
       </button>
 
-      <table style={tableStyle}>
+      <table id="ex-history" style={tableStyle}>
         <thead>
           <tr>
             <th style={thStyle}>ID</th>

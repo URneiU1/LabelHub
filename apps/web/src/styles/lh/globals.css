@@ -255,6 +255,81 @@ button.lh-side-item--active {
   box-shadow: 0 2px 6px rgba(var(--lh-primary-rgb), 0.35);
 }
 
+/* ---------- Side sub-nav (expands under the active section) ---------- */
+.lh-side-item__caret {
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.45;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.lh-side-item--active .lh-side-item__caret {
+  transform: rotate(45deg);
+  opacity: 0.9;
+}
+
+.lh-side-subnav {
+  margin: 2px 0 8px 19px;
+  padding-left: 12px;
+  border-left: 1px solid var(--lh-border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lh-side-subitem {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: var(--lh-radius-sm);
+  font-size: 13px;
+  color: var(--lh-text-3);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.lh-side-subitem:hover {
+  background: var(--lh-bg-elev);
+  color: var(--lh-text-1);
+}
+
+.lh-side-subitem--active {
+  color: var(--lh-primary);
+  font-weight: 600;
+}
+
+/* 子项跳转时,目标区块短暂高亮(并留出滚动顶距,避免贴顶) */
+.lh-anchor-flash {
+  scroll-margin-top: 16px;
+  animation: lh-anchor-flash 1.2s ease-out;
+}
+
+@keyframes lh-anchor-flash {
+  0% {
+    box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0);
+  }
+  25% {
+    box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lh-anchor-flash {
+    animation: none;
+  }
+}
+
 /* ---------- Page heading ---------- */
 .lh-page-head {
   margin-bottom: 20px;

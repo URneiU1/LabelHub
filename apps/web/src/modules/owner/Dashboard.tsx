@@ -8,7 +8,7 @@ import ExportPanel from './ExportPanel'
 import ImportPanel from './ImportPanel'
 import ReviewResultsPanel from './ReviewResultsPanel'
 import TaskManagePanel from './TaskManagePanel'
-import { useOwnerSection } from '../../shared/state/ownerSection'
+import { useOwnerSection, useOwnerSubTarget } from '../../shared/state/ownerSection'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
 const StatsBoard = lazy(() => import('./StatsBoard'))
 
@@ -138,6 +138,7 @@ export default function OwnerDashboard() {
   // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
   // 分节由全局「工作区」侧栏(AppLayout)驱动,经共享 store 桥接。
   const detailSection = useOwnerSection()
+  const subTarget = useOwnerSubTarget()
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
@@ -347,6 +348,26 @@ export default function OwnerDashboard() {
       void loadDryRunHistory(selected.id, dryRunHistorySampleID(dryRunHistorySampleFilter))
     }
   }, [dryRunHistorySampleFilter, loadDryRunHistory, selected])
+
+  // 子侧栏点击 → 平滑滚动到面板内对应锚点并短暂高亮。锚点可能在懒加载子面板中,
+  // 元素尚未挂载时重试几次。
+  useEffect(() => {
+    if (!subTarget) return undefined
+    const anchor = subTarget.anchor
+    let attempts = 0
+    let timer = window.setTimeout(function tryScroll() {
+      const el = document.getElementById(anchor)
+      if (el) {
+        el.classList.add('lh-anchor-flash')
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        window.setTimeout(() => el.classList.remove('lh-anchor-flash'), 1200)
+        return
+      }
+      attempts += 1
+      if (attempts < 6) timer = window.setTimeout(tryScroll, 100)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [subTarget])
 
   function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
     seqRef.current += 1
@@ -901,7 +922,7 @@ export default function OwnerDashboard() {
                   <p style={mutedStyle}>
                     人工审核的初审 / 复审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
                   </p>
-                  <div style={controlStripStyle}>
+                  <div id="rv-summary" style={controlStripStyle}>
                     <MetricCell label="PROGRESS" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
                     <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
                   </div>
@@ -921,7 +942,7 @@ export default function OwnerDashboard() {
 
               {detailSection === 'ai' && (
                 <>
-              <div style={{ background: 'var(--lh-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--lh-border)' }}>
+              <div id="ai-baseline" style={{ background: 'var(--lh-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--lh-border)' }}>
                 <div style={aiSettingsRowStyle}>
                   <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)', textTransform: 'uppercase' }}>Baseline 说明</div>
                   <Button aria-label="保存 baseline" disabled={savingBaseline} loading={savingBaseline} onClick={() => void saveBaseline()} theme="light">保存 baseline</Button>
@@ -991,7 +1012,7 @@ export default function OwnerDashboard() {
                   保存配置
                 </Button>
 
-                <div style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
+                <div id="ai-dryrun" style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
                   <h4 style={{ ...subHeadingStyle, marginBottom: 'var(--space-md)' }}>AI Dry-run 测试</h4>
                   <div style={dryRunGridStyle}>
                     <label style={fieldStyle}>
@@ -1028,7 +1049,7 @@ export default function OwnerDashboard() {
                   )}
                 </div>
 
-                <div style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
+                <div id="ai-golden" style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
                   <div style={aiSettingsRowStyle}>
                     <h3 style={subHeadingStyle}>Golden Samples (评测集)</h3>
                     <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
@@ -1146,7 +1167,7 @@ export default function OwnerDashboard() {
                     </div>
                   ) : null}
 
-                  <div style={historyPanelStyle}>
+                  <div id="ai-history" style={historyPanelStyle}>
                     <div style={aiSettingsRowStyle}>
                       <h3 style={subHeadingStyle}>Dry-run 历史记录</h3>
                       <Button disabled={!selected || dryRunHistoryLoading} loading={dryRunHistoryLoading} onClick={() => selected && void loadDryRunHistory(selected.id, selectedHistorySampleID)} theme="light">

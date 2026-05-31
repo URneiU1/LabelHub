@@ -1,6 +1,13 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { clearToken, getCurrentUser, hasAnyRole } from '../api/client'
-import { OWNER_NAV_GROUPS, setOwnerSection, useOwnerSection } from '../state/ownerSection'
+import {
+  OWNER_NAV_GROUPS,
+  OWNER_SUB_NAV,
+  setOwnerSection,
+  setOwnerSubTarget,
+  useOwnerSection,
+  useOwnerSubTarget,
+} from '../state/ownerSection'
 
 interface NavItem {
   to: string
@@ -31,6 +38,7 @@ function primaryRole(roles: string[]): string {
 export default function AppLayout() {
   const navigate = useNavigate()
   const ownerSection = useOwnerSection()
+  const ownerSubTarget = useOwnerSubTarget()
   const user = getCurrentUser()
   const visibleNavItems = NAV_ITEMS.filter((item) => hasAnyRole(item.roles))
   // Owner/admin 的左栏是「工作区」三组分节(对齐 demo SideNav);分节由 ownerSection store 驱动,
@@ -71,21 +79,49 @@ export default function AppLayout() {
             OWNER_NAV_GROUPS.map((group) => (
               <nav className="lh-side-section" key={group.title} aria-label={group.title}>
                 <div className="lh-side-section__title">{group.title}</div>
-                {group.items.map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className={'lh-side-item' + (ownerSection === key ? ' lh-side-item--active' : '')}
-                    aria-current={ownerSection === key ? 'page' : undefined}
-                    onClick={() => {
-                      setOwnerSection(key)
-                      navigate('/owner')
-                    }}
-                  >
-                    <span className="lh-side-item__icon" />
-                    {label}
-                  </button>
-                ))}
+                {group.items.map(([key, label]) => {
+                  const isActive = ownerSection === key
+                  const subItems = OWNER_SUB_NAV[key]
+                  return (
+                    <div key={key}>
+                      <button
+                        type="button"
+                        className={'lh-side-item' + (isActive ? ' lh-side-item--active' : '')}
+                        aria-current={isActive ? 'page' : undefined}
+                        aria-expanded={subItems ? isActive : undefined}
+                        onClick={() => {
+                          setOwnerSection(key)
+                          navigate('/owner')
+                        }}
+                      >
+                        <span className="lh-side-item__icon" />
+                        {label}
+                        {subItems ? <span className="lh-side-item__caret" aria-hidden="true" /> : null}
+                      </button>
+                      {isActive && subItems ? (
+                        <div className="lh-side-subnav" role="group" aria-label={label + ' 子菜单'}>
+                          {subItems.map((sub) => (
+                            <button
+                              key={sub.anchor}
+                              type="button"
+                              className={
+                                'lh-side-subitem' +
+                                (ownerSubTarget?.anchor === sub.anchor ? ' lh-side-subitem--active' : '')
+                              }
+                              onClick={() => {
+                                setOwnerSection(key)
+                                navigate('/owner')
+                                setOwnerSubTarget(sub.anchor)
+                              }}
+                            >
+                              {sub.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </nav>
             ))
           ) : (
