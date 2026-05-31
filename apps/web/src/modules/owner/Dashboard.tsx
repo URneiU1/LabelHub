@@ -138,7 +138,7 @@ export default function OwnerDashboard() {
   // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
   // 分节由全局「工作区」侧栏(AppLayout)驱动,经共享 store 桥接。
   const detailSection = useOwnerSection()
-  const aiSub = useOwnerSubView()
+  const subView = useOwnerSubView()
   const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
@@ -902,7 +902,7 @@ export default function OwnerDashboard() {
                   <p style={mutedStyle}>
                     人工审核的初审 / 复审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
                   </p>
-                  <div id="rv-summary" style={controlStripStyle}>
+                  <div style={controlStripStyle}>
                     <MetricCell label="PROGRESS" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
                     <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
                   </div>
@@ -918,10 +918,14 @@ export default function OwnerDashboard() {
                   <StatsBoard taskId={selected.id} />
                 </Suspense>
               )}
-              {detailSection === 'export' && <ExportPanel taskId={selected.id} />}
+              {detailSection === 'export' && (
+                <div className="lh-sub-views" data-sub={subView ?? 'all'}>
+                  <ExportPanel taskId={selected.id} />
+                </div>
+              )}
 
               {detailSection === 'ai' && (
-                <div className="lh-ai-sub" data-sub={aiSub ?? 'all'}>
+                <div className="lh-sub-views" data-sub={subView ?? 'all'}>
               <div id="ai-baseline" style={{ background: 'var(--lh-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--lh-border)' }}>
                 <div style={aiSettingsRowStyle}>
                   <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)', textTransform: 'uppercase' }}>Baseline 说明</div>

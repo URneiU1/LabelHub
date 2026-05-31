@@ -93,7 +93,7 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
     <section aria-label="数据看板" style={boardStyle}>
       <h3 style={headingStyle}>数据看板</h3>
       <div style={gridStyle}>
-        <div id="st-progress" style={cardStyle} aria-label="进度">
+        <div style={cardStyle} aria-label="进度">
           <span style={cardTitleStyle}>进度</span>
           <strong style={bigNumberStyle}>{stats.progress.finished}/{stats.progress.total}</strong>
           <div style={progressTrackStyle} aria-hidden="true">
@@ -101,12 +101,12 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
           </div>
         </div>
 
-        <div id="st-pass" style={cardStyle} aria-label="通过率">
+        <div style={cardStyle} aria-label="通过率">
           <span style={cardTitleStyle}>通过率</span>
           <strong style={bigNumberStyle}>{(stats.passRate * 100).toFixed(1)}%</strong>
         </div>
 
-        <div id="st-status" style={cardStyle} aria-label="状态分布">
+        <div style={cardStyle} aria-label="状态分布">
           <span style={cardTitleStyle}>状态分布</span>
           <div style={chartBoxStyle}><VChart spec={statusSpec} /></div>
         </div>
@@ -116,7 +116,7 @@ export default function StatsBoard({ taskId }: StatsBoardProps) {
           <div style={chartBoxStyle}><VChart spec={aiSpec} /></div>
         </div>
 
-        <div id="st-dim" style={{ ...cardStyle, gridColumn: '1 / -1' }} aria-label="维度均分">
+        <div style={{ ...cardStyle, gridColumn: '1 / -1' }} aria-label="维度均分">
           <span style={cardTitleStyle}>各维度均分</span>
           <div style={chartBoxStyle}><VChart spec={dimSpec} /></div>
         </div>

@@ -175,7 +175,7 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
 
   return (
     <div className="lh-vflex" style={{ gap: 18 }}>
-      <div id="ds-file" className="taskform__field">
+      <div className="taskform__field">
         <label className="taskform__label">文件导入(.json / .jsonl / .xlsx)</label>
         <input
           ref={fileInputRef}
@@ -189,7 +189,7 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
         {uploading ? <span className="lh-muted lh-text-12">上传解析中…</span> : null}
       </div>
 
-      <div id="ds-json" className="taskform__field">
+      <div className="taskform__field">
         <label className="taskform__label">JSON 粘贴导入</label>
         <textarea
           aria-label="import_json_text"
@@ -221,7 +221,7 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
         )}
       </div>
 
-      <div id="ds-items" className="taskform__field">
+      <div className="taskform__field">
         <div className="lh-hflex" style={{ justifyContent: 'space-between' }}>
           <label className="taskform__label" style={{ marginBottom: 0 }}>批量编辑题目 payload</label>
           <button type="button" aria-label="加载题目列表" disabled={loadingItems} className="lh-btn lh-btn--sm" onClick={() => void loadItems(true)}>

@@ -55,7 +55,7 @@ export default function ReviewResultsPanel({ taskId }: ReviewResultsPanelProps) 
   const shown = onlyDisagreed ? results.filter((result) => result.agreed === false) : results
 
   return (
-    <div id="rv-results" style={{ marginTop: 'var(--space-lg)' }} aria-label="逐条质检结果">
+    <div style={{ marginTop: 'var(--space-lg)' }} aria-label="逐条质检结果">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-md)' }}>
         <h4 style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--lh-text-1)' }}>逐条质检结果</h4>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)', color: 'var(--lh-text-2)' }}>

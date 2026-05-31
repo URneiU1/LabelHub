@@ -42,6 +42,10 @@ export const OWNER_SUB_NAV: Partial<Record<OwnerSection, ReadonlyArray<OwnerSubI
     { key: 'golden', label: '评测集' },
     { key: 'history', label: '试跑历史' },
   ],
+  export: [
+    { key: 'config', label: '导出配置' },
+    { key: 'history', label: '导出历史' },
+  ],
 }
 
 export const DEFAULT_SECTION: OwnerSection = 'ai'
