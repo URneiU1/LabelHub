@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/model"
@@ -86,5 +87,61 @@ func TestResubmitClearedFieldsWipesVerdicts(t *testing.T) {
 		if value != nil {
 			t.Errorf("%s must be nil(写入 NULL),got %v", field, value)
 		}
+	}
+}
+
+func TestLockClaimedItemRejectsExpiredLease(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 6, 1, 4, 0, 0, 0, time.UTC)
+	previousNow := NowUTC
+	NowUTC = func() time.Time { return now }
+	defer func() { NowUTC = previousNow }()
+
+	labelerID := uint64(5)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by", "claimed_at"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID, now.Add(-31*time.Minute)))
+
+	_, err := lockClaimedItem(db, model.Task{ID: 1, LeaseTimeoutMinutes: 30}, 7, labelerID)
+	if !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("expected ErrLeaseExpired, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestSaveRejectsFirstSubmitAtDailyLimit(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "daily_submission_limit_per_labeler"}).
+			AddRow(1, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateDraft))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectRollback()
+
+	_, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"x"}`),
+	})
+	if !errors.Is(err, ErrDailySubmissionLimitReached) {
+		t.Fatalf("expected ErrDailySubmissionLimitReached, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
 	}
 }

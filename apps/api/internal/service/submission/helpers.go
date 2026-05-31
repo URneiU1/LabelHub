@@ -16,6 +16,11 @@ import (
 // 单测时按需替换。
 var NowUTC = func() time.Time { return time.Now().UTC() }
 
+var (
+	ErrLeaseExpired                = errors.New("submission: item lease expired")
+	ErrDailySubmissionLimitReached = errors.New("submission: daily submission limit reached")
+)
+
 // ResubmitClearedFields:revising → submit 时同事务必须把 ai_verdict / ai_score
 // / human_verdict 三字段清空,否则旧 AI 判定会污染新一轮。同样 status / submitted_at 在这里设置。
 // 导出以便单测复用(原 handler 包就在 s1_test.go 里测过这条契约)。
@@ -63,10 +68,10 @@ func lockTask(tx *gorm.DB, taskID uint64) (model.Task, error) {
 	return task, err
 }
 
-func lockClaimedItem(tx *gorm.DB, taskID uint64, itemID uint64, labelerID uint64) (model.TaskItem, error) {
+func lockClaimedItem(tx *gorm.DB, task model.Task, itemID uint64, labelerID uint64) (model.TaskItem, error) {
 	var item model.TaskItem
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND task_id = ?", itemID, taskID).
+		Where("id = ? AND task_id = ?", itemID, task.ID).
 		First(&item).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -77,7 +82,47 @@ func lockClaimedItem(tx *gorm.DB, taskID uint64, itemID uint64, labelerID uint64
 	if item.Status != ItemStatusClaimed || item.ClaimedBy == nil || *item.ClaimedBy != labelerID {
 		return model.TaskItem{}, ErrItemNotClaimed
 	}
+	if leaseExpired(item.ClaimedAt, task.LeaseTimeoutMinutes, NowUTC()) {
+		return model.TaskItem{}, ErrLeaseExpired
+	}
 	return item, nil
+}
+
+func releaseExpiredClaims(tx *gorm.DB, task model.Task) error {
+	if task.LeaseTimeoutMinutes <= 0 {
+		return nil
+	}
+	cutoff := NowUTC().Add(-time.Duration(task.LeaseTimeoutMinutes) * time.Minute)
+	return tx.Model(&model.TaskItem{}).
+		Where("task_id = ? AND status = ? AND claimed_at IS NOT NULL AND claimed_at < ?", task.ID, ItemStatusClaimed, cutoff).
+		Updates(map[string]any{
+			"status":     ItemStatusAvailable,
+			"claimed_by": nil,
+			"claimed_at": nil,
+		}).Error
+}
+
+func leaseExpired(claimedAt model.NullTime, timeoutMinutes int, now time.Time) bool {
+	return timeoutMinutes > 0 && claimedAt.Valid &&
+		claimedAt.Time.Before(now.Add(-time.Duration(timeoutMinutes)*time.Minute))
+}
+
+func enforceDailySubmissionLimit(tx *gorm.DB, task model.Task, labelerID uint64) error {
+	if task.DailySubmissionLimitPerLabeler <= 0 {
+		return nil
+	}
+	now := NowUTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var count int64
+	if err := tx.Model(&model.Submission{}).
+		Where("task_id = ? AND labeler_id = ? AND submitted_at >= ?", task.ID, labelerID, dayStart).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count >= int64(task.DailySubmissionLimitPerLabeler) {
+		return ErrDailySubmissionLimitReached
+	}
+	return nil
 }
 
 func templateVersionForTask(tx *gorm.DB, task model.Task) (int, error) {

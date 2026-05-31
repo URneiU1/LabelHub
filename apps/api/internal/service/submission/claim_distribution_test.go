@@ -3,11 +3,72 @@ package submission
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"labelhub-api/internal/statemachine"
 )
+
+func TestClaim_ReleasesExpiredClaimsBeforeServingNextAvailableItem(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 6, 1, 4, 0, 0, 0, time.UTC)
+	previousNow := NowUTC
+	NowUTC = func() time.Time { return now }
+	defer func() { NowUTC = previousNow }()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "lease_timeout_minutes"}).
+			AddRow(1, "published", 30))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE task_id = .+ AND status = .+ AND claimed_at IS NOT NULL AND claimed_at <`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+SKIP LOCKED`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(7, 1, "available"))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
+		WillReturnResult(sqlmock.NewResult(901, 1))
+	mock.ExpectCommit()
+
+	result, err := Claim(db, ClaimInput{TaskID: 1, LabelerID: 5})
+	if err != nil {
+		t.Fatalf("claim errored: %v", err)
+	}
+	if result.Item.ID != 7 {
+		t.Fatalf("unexpected item: %+v", result.Item)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestClaim_DailySubmissionLimitBlocksWhenReached(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "daily_submission_limit_per_labeler"}).
+			AddRow(1, "published", 2))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+claimed_by`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectRollback()
+
+	_, err := Claim(db, ClaimInput{TaskID: 1, LabelerID: 5})
+	if !errors.Is(err, ErrDailySubmissionLimitReached) {
+		t.Fatalf("expected ErrDailySubmissionLimitReached, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
 
 // TestClaim_QuotaBlocksWhenLimitReached:quota 分发下,labeler 在本任务的 submission 数
 // 已达 QuotaPerUser 时拒绝领新题(ErrQuotaReached),不会再 SELECT available。

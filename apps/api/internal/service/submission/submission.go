@@ -51,7 +51,7 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 		if err != nil {
 			return err
 		}
-		item, err := lockClaimedItem(tx, task.ID, input.Item.ID, input.UserID)
+		item, err := lockClaimedItem(tx, task, input.Item.ID, input.UserID)
 		if err != nil {
 			return err
 		}
@@ -60,6 +60,11 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			return err
 		}
 		from := sub.Status
+		if !input.Draft && from == statemachine.StateDraft {
+			if err := enforceDailySubmissionLimit(tx, task, input.UserID); err != nil {
+				return err
+			}
+		}
 
 		revisionNo, err := nextRevisionNo(tx, sub.ID)
 		if err != nil {

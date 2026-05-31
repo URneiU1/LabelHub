@@ -144,6 +144,8 @@ func (h LabelerHandler) ClaimItem(c *gin.Context) {
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "没有可领取的题目")
 	case errors.Is(err, submission.ErrQuotaReached):
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "已达到本任务的领取配额")
+	case errors.Is(err, submission.ErrDailySubmissionLimitReached):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "已达到今日提交上限")
 	case errors.Is(err, submission.ErrNotAssigned):
 		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "你未被指派到该任务")
 	case errors.Is(err, submission.ErrClaimRaceLost):
@@ -251,6 +253,10 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 		switch {
 		case errors.Is(err, submission.ErrItemNotClaimed):
 			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "item is not claimed by current user")
+		case errors.Is(err, submission.ErrLeaseExpired):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", "题目租约已过期，请重新领取")
+		case errors.Is(err, submission.ErrDailySubmissionLimitReached):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", "已达到今日提交上限")
 		case errors.Is(err, submission.ErrInvalidSubmit):
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
 		case errors.Is(err, submission.ErrDraftAfterSubmit):

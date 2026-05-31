@@ -53,6 +53,9 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 			return err
 		}
 		result.Task = task
+		if err := releaseExpiredClaims(tx, task); err != nil {
+			return err
+		}
 
 		var item model.TaskItem
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -75,6 +78,9 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 
 		// 分发策略约束(仅作用于"领新题"路径;已认领的题目重新拉取不受限,见上方早返回)。
 		if err := enforceDistribution(tx, task, input.LabelerID); err != nil {
+			return err
+		}
+		if err := enforceDailySubmissionLimit(tx, task, input.LabelerID); err != nil {
 			return err
 		}
 

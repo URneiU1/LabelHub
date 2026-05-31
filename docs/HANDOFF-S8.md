@@ -69,7 +69,7 @@ UI 从 Arco/Editorial 双皮统一为 **PetaV2 风格**，并把 Owner 导航改
 
 ### S8 第一批（必须做）
 
-> 进度（2026-06-01，本地）:`009_task_policies`、API 字段校验和发布后 `schema/distribution/overlap/review_sampling` 冻结已完成；领题/提交行为与 Owner 表单继续推进。
+> 进度（2026-06-01，本地）:`009_task_policies`、API 字段校验、发布后 `schema/distribution/overlap/review_sampling` 冻结、租约超时回收和每日提交上限已完成；overlap 仲裁、抽检与 Owner 表单继续推进。
 
 1. **多人重复标注 + 共识仲裁**（核心展示能力，对标 Label Studio / Labelbox）
    - `overlap_count`：默认 `1`；高质量任务建议 `2` 或 `3`。
