@@ -65,27 +65,37 @@ func (h TaskHandler) Register(api gin.IRouter) {
 }
 
 type createTaskRequest struct {
-	Title               string           `json:"title" binding:"required"`
-	Description         *string          `json:"description"`
-	RichDescription     *json.RawMessage `json:"richDescription"`
-	Tags                *json.RawMessage `json:"tags"`
-	RewardConfig        *json.RawMessage `json:"rewardConfig"`
-	BaselineDescription string           `json:"baselineDescription"`
-	Distribution        *string          `json:"distribution"`
-	QuotaPerUser        *int             `json:"quotaPerUser"`
-	Deadline            *model.NullTime  `json:"deadline"`
+	Title                          string           `json:"title" binding:"required"`
+	Description                    *string          `json:"description"`
+	RichDescription                *json.RawMessage `json:"richDescription"`
+	Tags                           *json.RawMessage `json:"tags"`
+	RewardConfig                   *json.RawMessage `json:"rewardConfig"`
+	BaselineDescription            string           `json:"baselineDescription"`
+	Distribution                   *string          `json:"distribution"`
+	QuotaPerUser                   *int             `json:"quotaPerUser"`
+	OverlapCount                   *int             `json:"overlapCount"`
+	OverlapCoveragePct             *int             `json:"overlapCoveragePct"`
+	LeaseTimeoutMinutes            *int             `json:"leaseTimeoutMinutes"`
+	ReviewSamplingPct              *int             `json:"reviewSamplingPct"`
+	DailySubmissionLimitPerLabeler *int             `json:"dailySubmissionLimitPerLabeler"`
+	Deadline                       *model.NullTime  `json:"deadline"`
 }
 
 // updateTaskRequest:基本信息编辑。所有字段可选,只更新出现的字段(指针/RawMessage 区分"未传"与"传 null")。
 type updateTaskRequest struct {
-	Title           *string          `json:"title"`
-	Description     *string          `json:"description"`
-	RichDescription *json.RawMessage `json:"richDescription"`
-	Tags            *json.RawMessage `json:"tags"`
-	RewardConfig    *json.RawMessage `json:"rewardConfig"`
-	Distribution    *string          `json:"distribution"`
-	QuotaPerUser    *int             `json:"quotaPerUser"`
-	Deadline        *model.NullTime  `json:"deadline"`
+	Title                          *string          `json:"title"`
+	Description                    *string          `json:"description"`
+	RichDescription                *json.RawMessage `json:"richDescription"`
+	Tags                           *json.RawMessage `json:"tags"`
+	RewardConfig                   *json.RawMessage `json:"rewardConfig"`
+	Distribution                   *string          `json:"distribution"`
+	QuotaPerUser                   *int             `json:"quotaPerUser"`
+	OverlapCount                   *int             `json:"overlapCount"`
+	OverlapCoveragePct             *int             `json:"overlapCoveragePct"`
+	LeaseTimeoutMinutes            *int             `json:"leaseTimeoutMinutes"`
+	ReviewSamplingPct              *int             `json:"reviewSamplingPct"`
+	DailySubmissionLimitPerLabeler *int             `json:"dailySubmissionLimitPerLabeler"`
+	Deadline                       *model.NullTime  `json:"deadline"`
 }
 
 type importItemsRequest struct {
@@ -164,6 +174,9 @@ func (h TaskHandler) CreateTask(c *gin.Context) {
 		Status:              statemachine.TaskDraft,
 		BaselineDescription: model.StringFrom(req.BaselineDescription),
 		Distribution:        distribution,
+		OverlapCount:        1,
+		LeaseTimeoutMinutes: 30,
+		ReviewSamplingPct:   100,
 		RichDescription:     richDescription,
 		Tags:                tags,
 		RewardConfig:        rewardConfig,
@@ -179,6 +192,24 @@ func (h TaskHandler) CreateTask(c *gin.Context) {
 			return
 		}
 		task.QuotaPerUser = *req.QuotaPerUser
+	}
+	if !validateTaskPolicyFields(c, req.OverlapCount, req.OverlapCoveragePct, req.LeaseTimeoutMinutes, req.ReviewSamplingPct, req.DailySubmissionLimitPerLabeler) {
+		return
+	}
+	if req.OverlapCount != nil {
+		task.OverlapCount = *req.OverlapCount
+	}
+	if req.OverlapCoveragePct != nil {
+		task.OverlapCoveragePct = *req.OverlapCoveragePct
+	}
+	if req.LeaseTimeoutMinutes != nil {
+		task.LeaseTimeoutMinutes = *req.LeaseTimeoutMinutes
+	}
+	if req.ReviewSamplingPct != nil {
+		task.ReviewSamplingPct = *req.ReviewSamplingPct
+	}
+	if req.DailySubmissionLimitPerLabeler != nil {
+		task.DailySubmissionLimitPerLabeler = *req.DailySubmissionLimitPerLabeler
 	}
 	if req.Deadline != nil {
 		task.Deadline = *req.Deadline
@@ -198,6 +229,13 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 	}
 	var req updateTaskRequest
 	if !bindLimitedJSON(c, &req, maxTaskInfoBytes) {
+		return
+	}
+	if statemachine.TaskPoliciesFrozen(task.Status) && hasFrozenTaskPolicyUpdate(req) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", "published task policies are frozen; copy the task to create a new version")
+		return
+	}
+	if !validateTaskPolicyFields(c, req.OverlapCount, req.OverlapCoveragePct, req.LeaseTimeoutMinutes, req.ReviewSamplingPct, req.DailySubmissionLimitPerLabeler) {
 		return
 	}
 
@@ -228,6 +266,21 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 	}
 	if req.Deadline != nil {
 		updates["deadline"] = *req.Deadline
+	}
+	if req.OverlapCount != nil {
+		updates["overlap_count"] = *req.OverlapCount
+	}
+	if req.OverlapCoveragePct != nil {
+		updates["overlap_coverage_pct"] = *req.OverlapCoveragePct
+	}
+	if req.LeaseTimeoutMinutes != nil {
+		updates["lease_timeout_minutes"] = *req.LeaseTimeoutMinutes
+	}
+	if req.ReviewSamplingPct != nil {
+		updates["review_sampling_pct"] = *req.ReviewSamplingPct
+	}
+	if req.DailySubmissionLimitPerLabeler != nil {
+		updates["daily_submission_limit_per_labeler"] = *req.DailySubmissionLimitPerLabeler
 	}
 	if req.Tags != nil {
 		tags, valid := validateOptionalJSON(c, req.Tags, "tags")
@@ -265,6 +318,31 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"task": task})
+}
+
+func hasFrozenTaskPolicyUpdate(req updateTaskRequest) bool {
+	return req.Distribution != nil ||
+		req.OverlapCount != nil ||
+		req.OverlapCoveragePct != nil ||
+		req.ReviewSamplingPct != nil
+}
+
+func validateTaskPolicyFields(c *gin.Context, overlapCount, overlapCoveragePct, leaseTimeoutMinutes, reviewSamplingPct, dailySubmissionLimit *int) bool {
+	switch {
+	case overlapCount != nil && (*overlapCount < 1 || *overlapCount > 10):
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "overlapCount must be between 1 and 10")
+	case overlapCoveragePct != nil && (*overlapCoveragePct < 0 || *overlapCoveragePct > 100):
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "overlapCoveragePct must be between 0 and 100")
+	case leaseTimeoutMinutes != nil && (*leaseTimeoutMinutes < 1 || *leaseTimeoutMinutes > 10080):
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "leaseTimeoutMinutes must be between 1 and 10080")
+	case reviewSamplingPct != nil && (*reviewSamplingPct < 0 || *reviewSamplingPct > 100):
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "reviewSamplingPct must be between 0 and 100")
+	case dailySubmissionLimit != nil && *dailySubmissionLimit < 0:
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "dailySubmissionLimitPerLabeler must be >= 0")
+	default:
+		return true
+	}
+	return false
 }
 
 // validateOptionalJSON:把可选的原始 JSON 字段转成 *string(json 列存储)。

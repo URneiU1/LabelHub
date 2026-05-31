@@ -46,27 +46,32 @@ func (RefreshToken) TableName() string { return "refresh_tokens" }
 // 3. tasks
 // ============================================================
 type Task struct {
-	ID                  uint64     `gorm:"primaryKey" json:"id"`
-	OwnerID             uint64     `json:"ownerId"`
-	Title               string     `gorm:"size:200" json:"title"`
-	Description         NullString `json:"description"`
-	RichDescription     *string    `gorm:"type:json" json:"richDescription"`
-	Tags                *string    `gorm:"type:json" json:"tags"`
-	RewardConfig        *string    `gorm:"type:json" json:"rewardConfig"`
-	BaselineDescription NullString `json:"baselineDescription"`
-	Status              string     `gorm:"default:draft" json:"status"`
-	TemplateID          *uint64    `json:"templateId"`
-	Distribution        string     `gorm:"default:first_come" json:"distribution"`
-	QuotaPerUser        int        `json:"quotaPerUser"`
-	AIReviewEnabled     bool       `gorm:"default:false" json:"aiReviewEnabled"`
-	HumanReviewEnabled  bool       `gorm:"default:true" json:"humanReviewEnabled"`
-	AIPromptID          *uint64    `gorm:"column:ai_prompt_id" json:"aiPromptId"`
-	TotalItems          int        `json:"totalItems"`
-	FinishedItems       int        `json:"finishedItems"`
-	Deadline            NullTime   `json:"deadline"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
-	PublishedAt         NullTime   `json:"publishedAt"`
+	ID                             uint64     `gorm:"primaryKey" json:"id"`
+	OwnerID                        uint64     `json:"ownerId"`
+	Title                          string     `gorm:"size:200" json:"title"`
+	Description                    NullString `json:"description"`
+	RichDescription                *string    `gorm:"type:json" json:"richDescription"`
+	Tags                           *string    `gorm:"type:json" json:"tags"`
+	RewardConfig                   *string    `gorm:"type:json" json:"rewardConfig"`
+	BaselineDescription            NullString `json:"baselineDescription"`
+	Status                         string     `gorm:"default:draft" json:"status"`
+	TemplateID                     *uint64    `json:"templateId"`
+	Distribution                   string     `gorm:"default:first_come" json:"distribution"`
+	QuotaPerUser                   int        `json:"quotaPerUser"`
+	OverlapCount                   int        `gorm:"default:1" json:"overlapCount"`
+	OverlapCoveragePct             int        `json:"overlapCoveragePct"`
+	LeaseTimeoutMinutes            int        `gorm:"default:30" json:"leaseTimeoutMinutes"`
+	ReviewSamplingPct              int        `gorm:"default:100" json:"reviewSamplingPct"`
+	DailySubmissionLimitPerLabeler int        `json:"dailySubmissionLimitPerLabeler"`
+	AIReviewEnabled                bool       `gorm:"default:false" json:"aiReviewEnabled"`
+	HumanReviewEnabled             bool       `gorm:"default:true" json:"humanReviewEnabled"`
+	AIPromptID                     *uint64    `gorm:"column:ai_prompt_id" json:"aiPromptId"`
+	TotalItems                     int        `json:"totalItems"`
+	FinishedItems                  int        `json:"finishedItems"`
+	Deadline                       NullTime   `json:"deadline"`
+	CreatedAt                      time.Time  `json:"createdAt"`
+	UpdatedAt                      time.Time  `json:"updatedAt"`
+	PublishedAt                    NullTime   `json:"publishedAt"`
 }
 
 // ============================================================

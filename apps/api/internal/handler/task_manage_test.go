@@ -58,12 +58,17 @@ func TestCreateTaskPersistsBasicInfoFields(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks", map[string]any{
-		"title":        "标注任务",
-		"description":  "请仔细标注",
-		"tags":         []string{"nlp", "zh"},
-		"rewardConfig": map[string]any{"perItem": 0.5},
-		"distribution": "quota",
-		"quotaPerUser": 10,
+		"title":                          "标注任务",
+		"description":                    "请仔细标注",
+		"tags":                           []string{"nlp", "zh"},
+		"rewardConfig":                   map[string]any{"perItem": 0.5},
+		"distribution":                   "quota",
+		"quotaPerUser":                   10,
+		"overlapCount":                   3,
+		"overlapCoveragePct":             25,
+		"leaseTimeoutMinutes":            45,
+		"reviewSamplingPct":              30,
+		"dailySubmissionLimitPerLabeler": 80,
 	}))
 
 	if rec.Code != http.StatusOK {
@@ -75,6 +80,36 @@ func TestCreateTaskPersistsBasicInfoFields(t *testing.T) {
 	}
 	if data["quotaPerUser"].(float64) != 10 {
 		t.Fatalf("quotaPerUser = %v", data["quotaPerUser"])
+	}
+	if data["overlapCount"].(float64) != 3 || data["overlapCoveragePct"].(float64) != 25 {
+		t.Fatalf("overlap policy = %v/%v", data["overlapCount"], data["overlapCoveragePct"])
+	}
+	if data["leaseTimeoutMinutes"].(float64) != 45 || data["reviewSamplingPct"].(float64) != 30 {
+		t.Fatalf("lease/review policy = %v/%v", data["leaseTimeoutMinutes"], data["reviewSamplingPct"])
+	}
+	if data["dailySubmissionLimitPerLabeler"].(float64) != 80 {
+		t.Fatalf("daily limit = %v", data["dailySubmissionLimitPerLabeler"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestUpdateTaskRejectsFrozenPolicyChangeAfterPublish(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "published")
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPut, "/tasks/1", map[string]any{
+		"reviewSamplingPct": 10,
+	}))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

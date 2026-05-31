@@ -53,3 +53,14 @@ func TestTaskTransitions(t *testing.T) {
 		t.Error("TaskTargetFor on terminal/no-transition should be false")
 	}
 }
+
+func TestTaskPoliciesFrozen(t *testing.T) {
+	if TaskPoliciesFrozen(TaskDraft) {
+		t.Fatal("draft task policies must remain editable")
+	}
+	for _, status := range []string{TaskPublished, TaskPaused, TaskEnded} {
+		if !TaskPoliciesFrozen(status) {
+			t.Fatalf("task policies must be frozen after publish, status=%s", status)
+		}
+	}
+}

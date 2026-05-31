@@ -68,3 +68,9 @@ func TaskTransitions() []Transition {
 	}
 	return items
 }
+
+// TaskPoliciesFrozen:任务一旦发布,影响标注口径的配置必须冻结。
+// paused / ended 仍属于已发布生命周期,不能绕过冻结重新改口径。
+func TaskPoliciesFrozen(status string) bool {
+	return status != TaskDraft
+}
