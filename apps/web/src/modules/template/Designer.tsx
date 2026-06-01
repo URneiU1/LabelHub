@@ -248,6 +248,12 @@ export default function TemplateDesigner() {
   const canEdit = isLatest && !schemaError && !taskMismatch
   const saveDisabled = saving || !canEdit || validationErrors.length > 0 || fields.length === 0
   const canvasTabsField = fields.find((field) => field.widget === 'Tabs') ?? null
+  // 画布按子导航 tab 切换内容:基础信息=全部顶层字段(可编辑,与原行为一致,分页组仍在此可选中编辑);
+  // 内容 tab=该分页 tab 的字段(只读预览,编辑走右侧已选中的分页组属性面板)。
+  const isBaseCanvasTab = activeCanvasTab === 'base'
+  const activeTabIndex = isBaseCanvasTab ? -1 : Number(activeCanvasTab.replace('tab-', ''))
+  const baseCanvasFields = fields
+  const activeTabFields = (!isBaseCanvasTab && canvasTabsField ? (canvasTabsField.tabs?.[activeTabIndex]?.fields ?? []) : []) as DraftField[]
 
   function appendField(widget: WidgetType) {
     if (!canEdit) return
@@ -542,42 +548,77 @@ export default function TemplateDesigner() {
                   handleCanvasDrop(event, null)
                 }}
               >
-                {fields.length === 0 ? (
-                  <EmptyCanvasDiagram />
-                ) : fields.map((field, index) => (
-                  <CanvasField
-                    key={field._draftId}
-                    field={field}
-                    errors={validationErrorsByDraftId.get(field._draftId) ?? []}
-                    isFirst={index === 0}
-                    isLast={index === fields.length - 1}
-                    previewPayload={previewPayloadResult.payload}
-                    selected={field._draftId === selectedId}
-                    dragging={field._draftId === draggingFieldId}
-                    disabled={!canEdit}
-                    onSelect={() => setSelectedId(field._draftId)}
-                    onCopy={() => copyField(field._draftId)}
-                    onDelete={() => deleteField(field._draftId)}
-                    onMoveDown={() => moveField(field._draftId, 1)}
-                    onMoveUp={() => moveField(field._draftId, -1)}
-                    onDragEnd={() => setDraggingFieldId(null)}
-                    onDragOver={(event) => {
-                      if (!canEdit) return
-                      event.preventDefault()
-                      event.dataTransfer.dropEffect = draggingFieldId ? 'move' : 'copy'
-                    }}
-                    onDragStart={(event) => {
-                      if (!canEdit) return
-                      event.dataTransfer.effectAllowed = 'move'
-                      event.dataTransfer.setData('text/plain', field._draftId)
-                      setDraggingFieldId(field._draftId)
-                    }}
-                    onDrop={(event) => {
-                      event.stopPropagation()
-                      handleCanvasDrop(event, field._draftId)
-                    }}
-                  />
-                ))}
+                {isBaseCanvasTab ? (
+                  baseCanvasFields.length === 0 ? (
+                    <EmptyCanvasDiagram />
+                  ) : baseCanvasFields.map((field, index) => (
+                    <CanvasField
+                      key={field._draftId}
+                      field={field}
+                      errors={validationErrorsByDraftId.get(field._draftId) ?? []}
+                      isFirst={index === 0}
+                      isLast={index === baseCanvasFields.length - 1}
+                      previewPayload={previewPayloadResult.payload}
+                      selected={field._draftId === selectedId}
+                      dragging={field._draftId === draggingFieldId}
+                      disabled={!canEdit}
+                      onSelect={() => setSelectedId(field._draftId)}
+                      onCopy={() => copyField(field._draftId)}
+                      onDelete={() => deleteField(field._draftId)}
+                      onMoveDown={() => moveField(field._draftId, 1)}
+                      onMoveUp={() => moveField(field._draftId, -1)}
+                      onDragEnd={() => setDraggingFieldId(null)}
+                      onDragOver={(event) => {
+                        if (!canEdit) return
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = draggingFieldId ? 'move' : 'copy'
+                      }}
+                      onDragStart={(event) => {
+                        if (!canEdit) return
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', field._draftId)
+                        setDraggingFieldId(field._draftId)
+                      }}
+                      onDrop={(event) => {
+                        event.stopPropagation()
+                        handleCanvasDrop(event, field._draftId)
+                      }}
+                    />
+                  ))
+                ) : activeTabFields.length === 0 ? (
+                  <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                    该 Tab 暂无字段。在右侧「属性 · 分页组」中为此 Tab 添加字段。
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                      只读预览 · 编辑此 Tab 的字段请在右侧「属性 · 分页组」中操作
+                    </div>
+                    {activeTabFields.map((child, index) => (
+                      <CanvasField
+                        key={child._draftId ?? `${child.name}-${index}`}
+                        field={child}
+                        errors={[]}
+                        isFirst={index === 0}
+                        isLast={index === activeTabFields.length - 1}
+                        previewPayload={previewPayloadResult.payload}
+                        selected={false}
+                        dragging={false}
+                        disabled
+                        readOnly
+                        onSelect={() => undefined}
+                        onCopy={() => undefined}
+                        onDelete={() => undefined}
+                        onMoveDown={() => undefined}
+                        onMoveUp={() => undefined}
+                        onDragEnd={() => undefined}
+                        onDragOver={() => undefined}
+                        onDragStart={() => undefined}
+                        onDrop={() => undefined}
+                      />
+                    ))}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -606,6 +647,7 @@ function CanvasField({
   selected,
   dragging,
   disabled,
+  readOnly = false,
   onSelect,
   onCopy,
   onDelete,
@@ -624,6 +666,7 @@ function CanvasField({
   selected: boolean
   dragging: boolean
   disabled: boolean
+  readOnly?: boolean
   onSelect: () => void
   onCopy: () => void
   onDelete: () => void
@@ -646,7 +689,7 @@ function CanvasField({
       <span aria-hidden="true" style={leftPortStyle} />
       <span aria-hidden="true" style={rightPortStyle} />
       <div style={{ ...canvasItemHeaderStyle, background: selected ? 'var(--color-bg)' : '#fafafa' }}>
-        <button type="button" aria-label={`select ${field.name}`} onClick={onSelect} style={selectFieldButtonStyle}>
+        <button type="button" aria-label={`select ${field.name}`} onClick={readOnly ? undefined : onSelect} style={selectFieldButtonStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
             <strong style={{ fontSize: 'var(--text-base)', color: selected ? 'var(--color-accent)' : 'var(--color-text)' }}>{field.name}</strong>
             <span style={{ fontSize: 11, padding: '1px 6px', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 4, color: 'var(--color-text-muted)' }}>{widgetLabels[field.widget]}</span>
@@ -654,15 +697,17 @@ function CanvasField({
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{field.label}</span>
           <span className="canvas-field__meta">字段名: <span className="canvas-field__meta-strong">{field.name}</span> · {widgetLabels[field.widget]}</span>
         </button>
-        <div style={fieldActionsStyle}>
-          <Button size="small" theme="light" disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
-          <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
-            <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>↑</Button>
-            <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>↓</Button>
+        {readOnly ? null : (
+          <div style={fieldActionsStyle}>
+            <Button size="small" theme="light" disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
+            <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
+              <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>↑</Button>
+              <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>↓</Button>
+            </div>
+            <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>复制</Button>
+            <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger">删除</Button>
           </div>
-          <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>复制</Button>
-          <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger">删除</Button>
-        </div>
+        )}
       </div>
       {errors.length > 0 ? (
         <div aria-label={`validation ${field.name}`} style={fieldErrorListStyle}>
