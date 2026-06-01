@@ -1,11 +1,14 @@
 /* Template Designer responsive shell.
-   1920: full three columns (palette | canvas | property).
-   1280: palette + canvas, property panel wraps full-width below the canvas.
-   narrow: single column stack. */
+   The grid lives inside the global shell, so usable width = viewport - 220px
+   side nav - 64px main padding. Three narrowed columns (180 + 360 + 300 + gaps)
+   need ~872px of grid width, i.e. viewport >= ~1156px.
+   >=1200: full three columns (palette | canvas | property panel on the right).
+   <=1199: palette + canvas, property panel wraps full-width below the canvas.
+   <=768:  single column stack. */
 
 .template-designer-grid {
   display: grid;
-  grid-template-columns: 200px minmax(420px, 1fr) 320px;
+  grid-template-columns: 180px minmax(360px, 1fr) 300px;
   gap: var(--space-md);
   align-items: start;
 }
@@ -133,7 +136,7 @@
   padding: 12px 16px 0;
 }
 
-@media (max-width: 1599px) {
+@media (max-width: 1199px) {
   .template-designer-grid {
     grid-template-columns: 180px minmax(0, 1fr);
   }
