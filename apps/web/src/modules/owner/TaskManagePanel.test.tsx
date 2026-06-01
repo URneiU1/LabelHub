@@ -59,6 +59,20 @@ describe('TaskManagePanel', () => {
     expect(screen.getByText('4 / 10')).toBeInTheDocument()
   })
 
+  it('selects a task row from the keyboard', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <TaskManagePanel tasks={[draftTask]} selected={null} onSelect={onSelect} onTaskSaved={vi.fn()} onTasksChanged={vi.fn()} />,
+    )
+
+    const selectButton = screen.getByRole('button', { name: '选择任务 商品标题清洗 v3' })
+    selectButton.focus()
+    await user.keyboard('{Enter}')
+
+    expect(onSelect).toHaveBeenCalledWith(draftTask)
+  })
+
   it('publishes a draft task via the state-machine transition', async () => {
     const user = userEvent.setup()
     mockTransitionTask.mockResolvedValue({ ...draftTask, status: 'published' })

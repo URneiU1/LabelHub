@@ -109,12 +109,18 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                 <tr
                   key={task.id}
                   className={selected?.id === task.id ? 'tasks-table__row--active' : ''}
-                  onClick={() => onSelect(task)}
-                  style={{ cursor: 'pointer' }}
                 >
                   <td>
-                    <div className="tasks-table__title">{task.title}</div>
-                    <div className="tasks-table__meta">{task.id} · {taskStatusLabel(task.status)}</div>
+                    <button
+                      type="button"
+                      aria-label={`选择任务 ${task.title}`}
+                      aria-pressed={selected?.id === task.id}
+                      className="tasks-table__select"
+                      onClick={() => onSelect(task)}
+                    >
+                      <span className="tasks-table__title">{task.title}</span>
+                      <span className="tasks-table__meta">{task.id} · {taskStatusLabel(task.status)}</span>
+                    </button>
                   </td>
                   <td><StatusBadge status={task.status} label={taskStatusLabel(task.status)} /></td>
                   <td>{distributionLabel(task.distribution ?? 'first_come')}</td>

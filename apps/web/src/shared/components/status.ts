@@ -10,6 +10,7 @@ export const statusMeta: Record<string, StatusMeta> = {
   submitted: { label: '已提交', tone: 'submitted' },
   ai_reviewing: { label: 'AI 预审', tone: 'ai' },
   human_reviewing: { label: '人工审核', tone: 'human' },
+  needs_arbitration: { label: '待仲裁', tone: 'revising' },
   approved: { label: '已通过', tone: 'approved' },
   rejected: { label: '已拒绝', tone: 'rejected' },
   revising: { label: '待修改', tone: 'revising' },

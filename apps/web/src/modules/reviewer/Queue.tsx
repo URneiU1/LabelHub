@@ -8,12 +8,22 @@ import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
 import StatusBadge from '../../shared/components/StatusBadge'
 import AIVerdictPanel from './AIVerdictPanel'
+import ArbitrationQueue from './ArbitrationQueue'
 import ReviewResults from './ReviewResults'
 import { resolveStage } from './stage'
 import '../../styles/lh/humanreview.css'
 import '../../styles/lh/aireview.css'
 
-type ReviewerView = 'workbench' | 'results'
+type ReviewerView = 'workbench' | 'arbitration' | 'results'
+
+// M-10:演示样例数据只在显式 ?demo=1 时启用,默认队列为空就展示空状态,
+// 不再用假 demo 顶替真实队列(否则会掩盖仲裁队列不可见、且假"审核成功"误导演示者)。
+function isDemoMode() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  return new URLSearchParams(window.location.search).has('demo')
+}
 
 type ReviewResponse = {
   submission_id: number
@@ -364,8 +374,10 @@ export default function ReviewerQueue() {
   const ruleLoadSeq = useRef(0)
   // 详情加载用独立序号,和规则面板的 ruleLoadSeq 解耦:开关「规则配置」不应误失效正在加载的详情。
   const detailLoadSeq = useRef(0)
-  // 顶部视图切换:审核工作台 / 审核结果列表。
+  // 顶部视图切换:审核工作台 / 仲裁 / 审核结果列表。
   const [view, setView] = useState<ReviewerView>('workbench')
+  // 演示样例只在显式 ?demo=1 时启用,默认空队列展示空状态(M-10)。
+  const demoMode = useMemo(() => isDemoMode(), [])
 
   const loadQueue = useCallback(async () => {
     try {
@@ -393,15 +405,18 @@ export default function ReviewerQueue() {
     if (submissions.length > 0) {
       return submissions.map((submission) => ({ kind: 'real', submission }))
     }
-    return demoItems.map((item) => ({ kind: 'demo', item }))
-  }, [submissions])
+    if (demoMode) {
+      return demoItems.map((item) => ({ kind: 'demo', item }))
+    }
+    return []
+  }, [submissions, demoMode])
 
   const selectedDemo = demoItems.find((item) => item.id === selectedDemoId) ?? demoItems[1]
   const selectedDemoDetail = useMemo(() => getDemoReviewDetail(selectedDemo.id), [selectedDemo.id])
   const schema = useMemo(() => parseBundleSchema(detail), [detail])
   const payload = useMemo(() => parsePayload(detail?.item?.payload), [detail?.item?.payload])
   const answer = useMemo<AnswerValue>(() => parseAnswer(detail?.revision?.answer), [detail?.revision?.answer])
-  const showingDemo = submissions.length === 0 && !selected && !detail
+  const showingDemo = demoMode && submissions.length === 0 && !selected && !detail
   const retryDisabled = !showingDemo && (!selected || !canRetryAIReview(detail?.aiReview))
   const selectedRule = useMemo(() => {
     if (ruleConfigs.length > 0) {
@@ -592,6 +607,7 @@ export default function ReviewerQueue() {
           <p style={pageSubTitleStyle}>异步消费提交数据 → 按评分维度调用 LLM 结构化输出 → 通过 / 打回 / 转人工复核</p>
         </div>
         <div className="lh-page-header-actions" style={headerActionsStyle}>
+          {showingDemo ? <span style={demoBadgeStyle}>演示数据 · DEMO</span> : null}
           {showingDemo ? <span style={modelPillStyle}>Agent v2.3 · 模型 doubao-pro-32k</span> : null}
           <Button loading={ruleLoading} onClick={() => void openRuleConfig()} theme="light">规则配置</Button>
           <Button disabled={retryDisabled} loading={retryingAI} onClick={() => void retryAIReview()} theme="light">失败重跑</Button>
@@ -599,26 +615,39 @@ export default function ReviewerQueue() {
       </header>
 
       <div className="hr-side__tabs" role="tablist" style={viewTabsStyle}>
-        <span
+        <button
+          type="button"
           role="tab"
           aria-selected={view === 'workbench'}
           className={`hr-side__tab${view === 'workbench' ? ' hr-side__tab--active' : ''}`}
           onClick={() => setView('workbench')}
         >
           审核工作台
-        </span>
-        <span
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'arbitration'}
+          className={`hr-side__tab${view === 'arbitration' ? ' hr-side__tab--active' : ''}`}
+          onClick={() => setView('arbitration')}
+        >
+          仲裁
+        </button>
+        <button
+          type="button"
           role="tab"
           aria-selected={view === 'results'}
           className={`hr-side__tab${view === 'results' ? ' hr-side__tab--active' : ''}`}
           onClick={() => setView('results')}
         >
           审核结果
-        </span>
+        </button>
       </div>
 
       {view === 'results' ? (
         <ReviewResults onOpenResult={(result) => { void openResultDetail(result) }} />
+      ) : view === 'arbitration' ? (
+        <ArbitrationQueue />
       ) : (
         <div className="hr-shell" style={shellStyle}>
           <aside className="hr-side" style={hrSideStyle}>
@@ -652,6 +681,9 @@ export default function ReviewerQueue() {
               </div>
             ) : null}
             <div>
+              {queueItems.length === 0 && !showingDemo ? (
+                <EmptyState title="队列为空" body="当前没有待人工审核的提交。" variant="empty" />
+              ) : null}
               {queueItems.map((item) => (
                 <QueueCard
                   key={item.kind === 'real' ? item.submission.id : item.item.id}
@@ -1381,6 +1413,14 @@ const modelPillStyle: CSSProperties = {
   ...neutralPillStyle,
   color: '#7c3aed',
   background: '#f3e8ff',
+}
+
+// M-10:演示模式醒目标识,提醒看到的是样例数据而非真实队列。
+const demoBadgeStyle: CSSProperties = {
+  ...neutralPillStyle,
+  color: '#f97316',
+  background: '#fff7ed',
+  border: '1px solid #f97316',
 }
 
 const detailShellStyle: CSSProperties = {

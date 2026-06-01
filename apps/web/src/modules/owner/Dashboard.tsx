@@ -13,10 +13,6 @@ import { useOwnerSection, useOwnerSubView } from '../../shared/state/ownerSectio
 const StatsBoard = lazy(() => import('./StatsBoard'))
 
 type TaskListResponse = Task[]
-type ExportResponse = {
-  task: Task
-  rows: Array<Record<string, unknown>>
-}
 type AIPromptConfig = {
   id: number
   version: number
@@ -139,7 +135,6 @@ export default function OwnerDashboard() {
   // 分节由全局「工作区」侧栏(AppLayout)驱动,经共享 store 桥接。
   const detailSection = useOwnerSection()
   const subView = useOwnerSubView()
-  const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
   const [aiReviewEnabled, setAIReviewEnabled] = useState(false)
@@ -395,7 +390,6 @@ export default function OwnerDashboard() {
     if (task.id === selectedTaskIdRef.current) return
     selectedTaskIdRef.current = task.id
     taskActionGeneration.current += 1
-    setExportRows([])
     setPrompts([])
     setActivePromptId(null)
     setAIReviewEnabled(false)
@@ -421,16 +415,6 @@ export default function OwnerDashboard() {
     resetGoldenSampleFormToDefaults()
     setBaselineDraft(task.baselineDescription ?? '')
     setSelected(task)
-  }
-
-  async function exportJSON(taskId: number) {
-    try {
-      const data = await apiGet<ExportResponse>(`/tasks/${taskId}/export/json`)
-      setExportRows(data.rows)
-      Toast.success(`导出 ${data.rows.length} 条 approved 数据`)
-    } catch (error) {
-      Toast.error(error instanceof Error ? error.message : '导出失败')
-    }
   }
 
   async function savePrompt() {
@@ -865,7 +849,6 @@ export default function OwnerDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h2 style={{ ...headingStyle, fontSize: 'var(--text-h1)' }}>{selected.title}</h2>
                   <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-                    <Button onClick={() => void exportJSON(selected.id)} theme="light">导出数据</Button>
                     <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>模板 Designer</a>
                   </div>
                 </div>
@@ -1238,11 +1221,6 @@ export default function OwnerDashboard() {
               </section>
                 </div>
               )}
-              {exportRows.length > 0 ? (
-                <pre style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: 'var(--lh-bg)', overflow: 'auto', maxHeight: 260, borderRadius: 'var(--radius-md)', border: '1px solid var(--lh-border)' }}>
-                  {JSON.stringify(exportRows.slice(0, 3), null, 2)}
-                </pre>
-              ) : null}
             </>
           ) : null}
           {detailSection !== 'tasks' && !selected && (

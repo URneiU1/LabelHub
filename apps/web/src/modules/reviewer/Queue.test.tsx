@@ -69,6 +69,8 @@ describe('ReviewerQueue schema runtime flow', () => {
     mockListReviewResults.mockReset()
     mockListReviewResults.mockResolvedValue({ results: [], nextCursor: '', hasMore: false })
     mockApiPost.mockResolvedValue({ submission_id: 501, status: 'approved', stage: 'final' })
+    // M-10:demo 仅在显式 ?demo=1 下启用,默认清掉 URL 上的 demo 开关。
+    window.history.replaceState(null, '', '/reviewer')
   })
 
   it('batch approves selected submissions through the real batch endpoint', async () => {
@@ -103,13 +105,16 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
   })
 
-  it('switches demo detail content when selecting different demo submissions', async () => {
+  it('switches demo detail content when selecting different demo submissions (explicit ?demo=1)', async () => {
     const user = userEvent.setup()
+    // M-10:demo 数据只在显式 ?demo=1 下出现,并带醒目「演示数据 · DEMO」标识。
+    window.history.replaceState(null, '', '/reviewer?demo=1')
     mockApiGet.mockResolvedValue([])
 
     render(<ReviewerQueue />)
 
     expect(await screen.findByText('AI 自动预审队列')).toBeInTheDocument()
+    expect(screen.getByText('演示数据 · DEMO')).toBeInTheDocument()
     expect(screen.getAllByText('重跑 86 分 → 建议通过').length).toBeGreaterThan(0)
 
     await user.click(screen.getByText('真无线主动降噪耳机 Pro Max 2026 款'))
@@ -117,6 +122,33 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getAllByText('预审 88 分 → 建议通过').length).toBeGreaterThan(0)
     expect(screen.queryAllByText('重跑 86 分 → 建议通过')).toHaveLength(0)
     expect(screen.getByText(/AI 预审 · 本轮重跑结果/)).toBeInTheDocument()
+  })
+
+  it('shows an empty state instead of fake demo when the queue is empty and demo is off (M-10)', async () => {
+    mockApiGet.mockResolvedValue([])
+
+    render(<ReviewerQueue />)
+
+    // 默认(无 ?demo=1):空队列展示空状态,绝不顶替成假 demo。
+    expect(await screen.findByText('队列为空')).toBeInTheDocument()
+    expect(screen.queryByText('AI 自动预审队列')).not.toBeInTheDocument()
+    expect(screen.queryByText('演示数据 · DEMO')).not.toBeInTheDocument()
+    expect(screen.queryByText('真无线主动降噪耳机 Pro Max 2026 款')).not.toBeInTheDocument()
+  })
+
+  it('switches reviewer views from the keyboard', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockResolvedValue([])
+
+    render(<ReviewerQueue />)
+
+    await screen.findByText('队列为空')
+    const arbitrationTab = screen.getByRole('tab', { name: '仲裁' })
+    arbitrationTab.focus()
+    await user.keyboard('{Enter}')
+
+    expect(arbitrationTab).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText('仲裁队列')).toBeInTheDocument()
   })
 
   it('opens submission detail and renders historical template as read-only', async () => {

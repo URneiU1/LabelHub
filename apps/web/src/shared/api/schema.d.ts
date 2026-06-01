@@ -37,7 +37,180 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["Error"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update task metadata and draft-only policy fields */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    taskId: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateTaskRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated task */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Envelope"] & {
+                            data?: {
+                                task?: components["schemas"]["Task"];
+                            };
+                        };
+                    };
+                };
+                409: components["responses"]["Error"];
+                422: components["responses"]["Error"];
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish a draft task and freeze its dataset and policy fields */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    taskId: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["TaskEnvelope"];
+                409: components["responses"]["Error"];
+                422: components["responses"]["Error"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause a published task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    taskId: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["TaskEnvelope"];
+                422: components["responses"]["Error"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    taskId: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["TaskEnvelope"];
+                422: components["responses"]["Error"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End a published or paused task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    taskId: components["parameters"]["TaskId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["TaskEnvelope"];
                 401: components["responses"]["Error"];
+                422: components["responses"]["Error"];
             };
         };
         delete?: never;
@@ -196,7 +369,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tasks/{taskId}/items/{itemId}/save": {
+    "/tasks/{taskId}/items/{itemId}/draft": {
         parameters: {
             query?: never;
             header?: never;
@@ -271,7 +444,10 @@ export interface paths {
         /** List submissions waiting for reviewer action */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Use needs_arbitration for the overlap conflict queue. */
+                    status?: "human_reviewing" | "needs_arbitration";
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -368,6 +544,52 @@ export interface paths {
             };
             responses: {
                 200: components["responses"]["Submission"];
+                400: components["responses"]["Error"];
+                422: components["responses"]["Error"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reviews/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply one review verdict to up to 50 submissions */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BatchReviewRequest"];
+                };
+            };
+            responses: {
+                /** @description Per-submission review results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Envelope"] & {
+                            data?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
                 400: components["responses"]["Error"];
                 422: components["responses"]["Error"];
             };
@@ -689,7 +911,16 @@ export interface components {
             id: number;
             ownerId: number;
             title: string;
-            status: string;
+            /** @enum {string} */
+            status: "draft" | "published" | "paused" | "ended";
+            /** @enum {string} */
+            distribution: "first_come" | "assigned" | "quota";
+            quotaPerUser: number;
+            overlapCount: number;
+            overlapCoveragePct: number;
+            leaseTimeoutMinutes: number;
+            reviewSamplingPct: number;
+            dailySubmissionLimitPerLabeler: number;
             aiReviewEnabled?: boolean;
             humanReviewEnabled?: boolean;
             totalItems?: number;
@@ -699,6 +930,28 @@ export interface components {
             title: string;
             description?: string;
             tags?: string[];
+            /** @enum {string} */
+            distribution?: "first_come" | "assigned" | "quota";
+            quotaPerUser?: number;
+            overlapCount?: number;
+            overlapCoveragePct?: number;
+            leaseTimeoutMinutes?: number;
+            reviewSamplingPct?: number;
+            dailySubmissionLimitPerLabeler?: number;
+            humanReviewEnabled?: boolean;
+        };
+        UpdateTaskRequest: {
+            title?: string;
+            description?: string;
+            /** @enum {string} */
+            distribution?: "first_come" | "assigned" | "quota";
+            quotaPerUser?: number;
+            overlapCount?: number;
+            overlapCoveragePct?: number;
+            leaseTimeoutMinutes?: number;
+            reviewSamplingPct?: number;
+            dailySubmissionLimitPerLabeler?: number;
+            humanReviewEnabled?: boolean;
         };
         TaskItem: {
             id: number;
@@ -707,7 +960,8 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             } | string;
-            status: string;
+            /** @enum {string} */
+            status: "available" | "claimed" | "finished" | "needs_arbitration";
         };
         TaskTemplate: {
             id: number;
@@ -737,8 +991,9 @@ export interface components {
             id: number;
             taskId: number;
             itemId: number;
+            labelerId?: number;
             /** @enum {string} */
-            status: "draft" | "submitted" | "ai_reviewing" | "human_reviewing" | "revising" | "approved" | "rejected";
+            status: "draft" | "submitted" | "ai_reviewing" | "human_reviewing" | "needs_arbitration" | "consensus_evidence" | "revising" | "approved" | "rejected";
             currentRevisionId?: number | null;
             /** @enum {string|null} */
             aiVerdict?: "pass" | "reject" | "uncertain" | null;
@@ -767,6 +1022,12 @@ export interface components {
             [key: string]: unknown;
         };
         ReviewRequest: {
+            /** @enum {string} */
+            verdict: "approve" | "reject" | "revise";
+            reason?: string;
+        };
+        BatchReviewRequest: {
+            submission_ids: number[];
             /** @enum {string} */
             verdict: "approve" | "reject" | "revise";
             reason?: string;
@@ -806,6 +1067,19 @@ export interface components {
                 name?: string;
                 avg?: number;
             }[];
+            confusion?: {
+                ai?: string;
+                human?: string;
+                count?: number;
+            }[];
+            scoreBuckets?: {
+                label?: string;
+                count?: number;
+            }[];
+            completionTrend?: {
+                date?: string;
+                count?: number;
+            }[];
         };
     };
     responses: {
@@ -826,6 +1100,19 @@ export interface components {
             content: {
                 "application/json": components["schemas"]["Envelope"] & {
                     data?: components["schemas"]["Submission"];
+                };
+            };
+        };
+        /** @description Task snapshot */
+        TaskEnvelope: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Envelope"] & {
+                    data?: {
+                        task?: components["schemas"]["Task"];
+                    };
                 };
             };
         };

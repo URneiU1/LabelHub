@@ -364,6 +364,7 @@ export type Submission = {
   id: number
   taskId: number
   itemId: number
+  labelerId?: number | null
   status: string
   aiVerdict?: string | null
   aiScore?: number | null
