@@ -95,7 +95,7 @@ func TestMarkRunningReturnsFalseForFinalizedDuplicateTask(t *testing.T) {
 		PromptVersion:  2,
 		IdempotencyKey: "idem",
 	}
-	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'`).
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'.+started_at = \?`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: deterministicEvaluator{}}

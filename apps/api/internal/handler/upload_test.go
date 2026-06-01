@@ -11,7 +11,39 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"labelhub-api/internal/auth"
+	"labelhub-api/internal/model"
 )
+
+// M-05:被授权的 reviewer 应能下载 needs_arbitration submission 的证据附件。
+// 直接测 canDownloadUpload 的授权判定,避开磁盘文件不存在导致的 FileAttachment 404。
+func TestCanDownloadUploadAllowsAssignedReviewerForArbitration(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	// reviewer 被指派到该 task(task_reviewers 命中)。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 附件挂在该 task 下一个 needs_arbitration submission 的 revision 上 → 命中状态白名单。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submission_revisions. JOIN submissions.+status IN`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	h := UploadHandler{db: db}
+	revID := uint64(901)
+	allowed, err := h.canDownloadUpload(
+		&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}},
+		model.Task{ID: 1, OwnerID: 99},
+		model.UploadedFile{ID: 301, TaskID: 1, CreatedBy: 8, SubmissionRevisionID: &revID},
+	)
+	if err != nil {
+		t.Fatalf("canDownloadUpload error: %v", err)
+	}
+	if !allowed {
+		t.Fatal("assigned reviewer should be allowed to download needs_arbitration evidence")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
 
 // storageKey 必须能去重:相邻调用产出不同 key,因为含纳秒时间戳。
 func TestStorageKeyUnique(t *testing.T) {

@@ -144,6 +144,7 @@ func TestReviewSubmission_RejectAtSecondStageGoesRejected(t *testing.T) {
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET.+finished_items \+ 1`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).WillReturnResult(sqlmock.NewResult(41, 1))
 	mock.ExpectCommit()
 

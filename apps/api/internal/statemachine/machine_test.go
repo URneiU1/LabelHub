@@ -21,6 +21,7 @@ func TestAllPlannedTransitions(t *testing.T) {
 		{StateHumanReviewing, EventRevise, StateRevising},
 		{StateRevising, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventConsensusConflict, StateNeedsArbitration},
+		{StateSubmitted, EventConsensusEvidence, StateConsensusEvidence},
 		{StateNeedsArbitration, EventApprove, StateApproved},
 		{StateNeedsArbitration, EventReject, StateRejected},
 		{StateSubmitted, EventSamplingAutoApproved, StateApproved},
@@ -84,6 +85,7 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		StateAIReviewing,
 		StateHumanReviewing,
 		StateNeedsArbitration,
+		StateConsensusEvidence,
 		StateApproved,
 		StateRejected,
 		StateRevising,
@@ -97,6 +99,7 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		EventAIAutoApproved,
 		EventAIFailMax,
 		EventConsensusConflict,
+		EventConsensusEvidence,
 		EventSamplingAutoApproved,
 		EventApprove,
 		EventReject,
@@ -121,8 +124,8 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 }
 
 func TestTransitionTableCoversPlan(t *testing.T) {
-	if got := len(Transitions()); got != 15 {
-		t.Fatalf("Transitions() len = %d, want 15", got)
+	if got := len(Transitions()); got != 16 {
+		t.Fatalf("Transitions() len = %d, want 16", got)
 	}
 }
 
@@ -147,6 +150,7 @@ func plannedTransitions() []plannedTransition {
 		{StateHumanReviewing, EventRevise, StateRevising},
 		{StateRevising, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventConsensusConflict, StateNeedsArbitration},
+		{StateSubmitted, EventConsensusEvidence, StateConsensusEvidence},
 		{StateNeedsArbitration, EventApprove, StateApproved},
 		{StateNeedsArbitration, EventReject, StateRejected},
 		{StateSubmitted, EventSamplingAutoApproved, StateApproved},

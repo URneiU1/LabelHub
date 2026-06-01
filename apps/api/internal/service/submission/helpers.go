@@ -90,13 +90,22 @@ func lockClaimedItem(tx *gorm.DB, task model.Task, itemID uint64, labelerID uint
 	return item, nil
 }
 
+// releaseExpiredClaims 只回收仍处于编辑态(draft / revising)的过期认领。
+//
+// 已提交进入审核管线的题目(submission 状态为 submitted / ai_reviewing /
+// human_reviewing / needs_arbitration)绝不回收:它们的 claimed_at 在领取时就固定、
+// 提交时不刷新,审核耗时一旦超过 lease_timeout_minutes 就会"过期",若一并回收会被
+// 第二位标注员重新领取,而旧的 AI / 人审完成逻辑只按 item 仍为 claimed 终结,
+// 会把后来重领的题目误判为 finished(见 H-01)。租约只服务"领了但没提交就撂挑子"的场景。
 func releaseExpiredClaims(tx *gorm.DB, task model.Task) error {
 	if task.LeaseTimeoutMinutes <= 0 {
 		return nil
 	}
 	cutoff := NowUTC().Add(-time.Duration(task.LeaseTimeoutMinutes) * time.Minute)
+	editableStates := []string{statemachine.StateDraft, statemachine.StateRevising}
 	return tx.Model(&model.TaskItem{}).
-		Where("task_id = ? AND status = ? AND claimed_at IS NOT NULL AND claimed_at < ?", task.ID, ItemStatusClaimed, cutoff).
+		Where("task_id = ? AND status = ? AND claimed_at IS NOT NULL AND claimed_at < ? AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.item_id = task_items.id AND s.labeler_id = task_items.claimed_by AND s.status NOT IN ?)",
+			task.ID, ItemStatusClaimed, cutoff, editableStates).
 		Updates(map[string]any{
 			"status":     ItemStatusAvailable,
 			"claimed_by": nil,

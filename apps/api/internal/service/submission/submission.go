@@ -88,12 +88,17 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}
 		}
 		overlap := overlapConsensus
-		if !input.Draft && requiredOverlapForItem(task, item.ID) > 1 {
+		overlapRequired := !input.Draft && requiredOverlapForItem(task, item.ID) > 1
+		if overlapRequired {
+			excludedFields, err := loadFileUploadFieldNames(tx, task.ID, sub.TemplateVersion)
+			if err != nil {
+				return err
+			}
 			priorAnswers, err := priorOverlapAnswers(tx, item.ID, sub.ID)
 			if err != nil {
 				return err
 			}
-			overlap = decideOverlapOutcome(task, item.ID, priorAnswers, input.AnswerRaw)
+			overlap = decideOverlapOutcome(task, item.ID, priorAnswers, input.AnswerRaw, excludedFields)
 		}
 		aiPlan := aiReviewPlan{}
 		if !input.Draft && overlap == overlapConsensus {
@@ -158,6 +163,11 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			return err
 		}
 		if !input.Draft && overlap == overlapConsensus {
+			if overlapRequired {
+				if err := transitionConsensusPeers(tx, item.ID, sub.ID); err != nil {
+					return err
+				}
+			}
 			if err := createPendingAIReview(tx, sub, revision, aiPlan); err != nil {
 				return err
 			}

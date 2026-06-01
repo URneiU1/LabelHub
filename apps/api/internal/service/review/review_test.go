@@ -139,7 +139,10 @@ func TestApplyArbitrationApproveFinishesItemInOneStep(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("needs_arbitration"))
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE item_id = .+ AND id <> .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT .id. FROM .submissions. WHERE item_id = .+ AND id <> .+ AND status = .+ ORDER BY id ASC FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(43))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id IN .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).WillReturnResult(sqlmock.NewResult(40, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+finished_items.=finished_items \+ 1.+ WHERE id = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).WillReturnResult(sqlmock.NewResult(41, 1))
@@ -225,7 +228,7 @@ func TestStageForApproveCount(t *testing.T) {
 	}
 }
 
-func TestApplyRejectFinishesItemWithoutIncrementingFinishedItems(t *testing.T) {
+func TestApplyRejectFinishesItemAndIncrementsFinishedItems(t *testing.T) {
 	db, mock, sqlDB := newReviewMockDB(t)
 	defer sqlDB.Close()
 
@@ -237,6 +240,7 @@ func TestApplyRejectFinishesItemWithoutIncrementingFinishedItems(t *testing.T) {
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+finished_items.=finished_items \+ 1.+ WHERE id = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).WillReturnResult(sqlmock.NewResult(41, 1))
 	mock.ExpectCommit()
 
@@ -266,6 +270,7 @@ func TestApplyRejectAtSecondStageGoesRejected(t *testing.T) {
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+finished_items.=finished_items \+ 1.+ WHERE id = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).WillReturnResult(sqlmock.NewResult(41, 1))
 	mock.ExpectCommit()
 

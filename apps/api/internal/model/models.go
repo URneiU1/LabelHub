@@ -190,6 +190,7 @@ type AIReview struct {
 	RetryCount     int        `json:"retryCount"`
 	ErrorMsg       NullString `json:"errorMsg"`
 	CreatedAt      time.Time  `json:"createdAt"`
+	StartedAt      NullTime   `json:"startedAt"`
 	FinishedAt     NullTime   `json:"finishedAt"`
 }
 

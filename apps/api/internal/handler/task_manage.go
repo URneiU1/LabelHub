@@ -31,6 +31,9 @@ func (h TaskHandler) BatchUpdateItems(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ensureTaskDraft(c, task) {
+		return
+	}
 	var req batchUpdateItemsRequest
 	if !bindLimitedJSON(c, &req, maxImportItemsBytes) {
 		return

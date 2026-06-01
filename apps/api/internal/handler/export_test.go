@@ -65,6 +65,19 @@ func TestCreateExport_RejectsBadFormat(t *testing.T) {
 	}
 }
 
+func TestLegacySyncJSONExportRouteIsRemoved(t *testing.T) {
+	db, _, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	r := ownerGin()
+	registerAllHandlers(r, db)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/export/json", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListExports_ReturnsHistory(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()

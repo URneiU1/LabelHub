@@ -113,6 +113,45 @@ func TestLockClaimedItemRejectsExpiredLease(t *testing.T) {
 	}
 }
 
+// H-01 回归:租约回收只能命中仍处于编辑态(draft/revising)的认领,
+// SQL 必须带 NOT EXISTS ... submissions ... status NOT IN(...) 守卫,
+// 否则审核中(ai_reviewing/human_reviewing/needs_arbitration)的题目会被一并回收,
+// 进而被第二位标注员重领、再被旧审核结果误终结。
+func TestReleaseExpiredClaimsGuardsAgainstReviewingItems(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 6, 1, 4, 0, 0, 0, time.UTC)
+	previousNow := NowUTC
+	NowUTC = func() time.Time { return now }
+	defer func() { NowUTC = previousNow }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET.+NOT EXISTS.+submissions.+status NOT IN`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	if err := releaseExpiredClaims(db, model.Task{ID: 1, LeaseTimeoutMinutes: 30}); err != nil {
+		t.Fatalf("releaseExpiredClaims returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// LeaseTimeoutMinutes<=0 时回收逻辑直接早返回,不发任何 SQL。
+func TestReleaseExpiredClaimsNoopWhenLeaseDisabled(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	if err := releaseExpiredClaims(db, model.Task{ID: 1, LeaseTimeoutMinutes: 0}); err != nil {
+		t.Fatalf("releaseExpiredClaims returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestSaveRejectsFirstSubmitAtDailyLimit(t *testing.T) {
 	db, mock, sqlDB := newSubmissionMockDB(t)
 	defer sqlDB.Close()
@@ -165,6 +204,9 @@ func TestSaveOverlapWaitsForPeerAndReleasesItem(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(nil))
 	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
 		WillReturnResult(sqlmock.NewResult(101, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 1, `{"fields":[]}`))
 	mock.ExpectQuery(`(?is)^SELECT submission_revisions.answer FROM .submissions. JOIN submission_revisions`).
 		WillReturnRows(sqlmock.NewRows([]string{"answer"}))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).

@@ -304,7 +304,9 @@ func (h UploadHandler) canDownloadUpload(claims *auth.Claims, task model.Task, u
 		Where("submission_revisions.id = ? AND submissions.task_id = ? AND submissions.status IN ?",
 			*uploaded.SubmissionRevisionID,
 			task.ID,
-			[]string{statemachine.StateHumanReviewing, statemachine.StateApproved, statemachine.StateRejected},
+			// M-05:needs_arbitration 也要可下载,否则仲裁 reviewer 看不到冲突 submission 的证据附件。
+			// task 级 reviewer 授权仍由上面的 canReviewTask 把关。
+			[]string{statemachine.StateHumanReviewing, statemachine.StateNeedsArbitration, statemachine.StateApproved, statemachine.StateRejected},
 		).
 		Count(&count).Error
 	return count > 0, err

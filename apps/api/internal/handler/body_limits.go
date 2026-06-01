@@ -17,6 +17,11 @@ const (
 	maxImportItemsBytes    = int64(8 * 1024 * 1024)
 	maxTaskInfoBytes       = int64(256 * 1024)
 	maxImportFileBytes     = int64(16 * 1024 * 1024)
+	maxAuthJSONBytes       = int64(8 * 1024)
+	maxInlineLLMBytes      = int64(128 * 1024)
+	maxReviewJSONBytes     = int64(16 * 1024)
+	maxExportConfigBytes   = int64(64 * 1024)
+	maxBaselineBytes       = int64(64 * 1024)
 
 	maxTemplateFields      = 80
 	maxTemplateOptions     = 50

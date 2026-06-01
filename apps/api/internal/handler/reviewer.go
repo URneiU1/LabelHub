@@ -383,8 +383,7 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 		return
 	}
 	var req reviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "verdict is required")
+	if !bindLimitedJSON(c, &req, maxReviewJSONBytes) {
 		return
 	}
 	if (req.Verdict == "reject" || req.Verdict == "revise") && len(strings.TrimSpace(req.Reason)) < 5 {
@@ -429,8 +428,7 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 // reject / revise 仍是一次到终态。每条结果带回 status + stage。
 func (h ReviewerHandler) BatchReview(c *gin.Context) {
 	var req batchReviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "submission_ids and verdict are required")
+	if !bindLimitedJSON(c, &req, maxReviewJSONBytes) {
 		return
 	}
 	submissionIDs, ok := normalizeBatchReviewIDs(c, req.SubmissionIDs)

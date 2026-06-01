@@ -48,8 +48,7 @@ func (h AuthHandler) Register(router gin.IRouter) {
 
 func (h AuthHandler) Login(c *gin.Context) {
 	var req loginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "username and password are required")
+	if !bindLimitedJSON(c, &req, maxAuthJSONBytes) {
 		return
 	}
 
@@ -67,8 +66,7 @@ func (h AuthHandler) Login(c *gin.Context) {
 
 func (h AuthHandler) Refresh(c *gin.Context) {
 	var req refreshRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "refreshToken is required")
+	if !bindLimitedJSON(c, &req, maxAuthJSONBytes) {
 		return
 	}
 

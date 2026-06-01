@@ -11,7 +11,7 @@
 //     submission 停留在 human_reviewing(乐观锁确认未被抢先终态化)。
 //   - 终审 approve(第 3 次):INSERT human_reviews + UPDATE submissions(approved + approved_at)
 //   - UPDATE task_items(finished)+ UPDATE tasks(finished_items += 1)+ INSERT audit_logs。
-//   - reject(任意 stage):同终态路径但少 task.finished_items 那一步,落到 rejected。
+//   - reject(任意 stage):同终态路径,落到 rejected。
 //   - revise(任意 stage):INSERT human_reviews + UPDATE submissions(revising)+ INSERT audit_logs,
 //     不动 task_items / tasks。
 package review
@@ -234,10 +234,37 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			expectedItemStatus := itemStatusClaimed
 			if isArbitration {
 				expectedItemStatus = itemStatusNeedsArbitration
-				if err := tx.Model(&model.Submission{}).
+				var siblingIDs []uint64
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.Submission{}).
 					Where("item_id = ? AND id <> ? AND status = ?", submission.ItemID, submission.ID, statemachine.StateNeedsArbitration).
-					Updates(map[string]any{"status": statemachine.StateRejected, "human_verdict": "reject"}).Error; err != nil {
+					Order("id ASC").
+					Pluck("id", &siblingIDs).Error; err != nil {
 					return err
+				}
+				if len(siblingIDs) > 0 {
+					res := tx.Model(&model.Submission{}).
+						Where("id IN ? AND status = ?", siblingIDs, statemachine.StateNeedsArbitration).
+						Updates(map[string]any{"status": statemachine.StateRejected, "human_verdict": "reject"})
+					if res.Error != nil {
+						return res.Error
+					}
+					if res.RowsAffected != int64(len(siblingIDs)) {
+						return ErrConcurrentWrite
+					}
+					for _, siblingID := range siblingIDs {
+						if err := audit.Write(tx, audit.LogEntry{
+							EntityType: "submission",
+							EntityID:   siblingID,
+							FromState:  statemachine.StateNeedsArbitration,
+							ToState:    statemachine.StateRejected,
+							ActorType:  "user",
+							ActorID:    &actorID,
+							Event:      "arbitration_sibling_rejected",
+							Payload:    map[string]any{"winner_submission_id": submission.ID},
+						}); err != nil {
+							return err
+						}
+					}
 				}
 			}
 			res := tx.Model(&model.TaskItem{}).Where("id = ? AND status = ?", submission.ItemID, expectedItemStatus).Updates(map[string]any{
@@ -250,14 +277,12 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			if res.RowsAffected != 1 {
 				return ErrConcurrentWrite
 			}
-			if to == statemachine.StateApproved {
-				res := tx.Model(&model.Task{}).Where("id = ?", submission.TaskID).Update("finished_items", gorm.Expr("finished_items + 1"))
-				if res.Error != nil {
-					return res.Error
-				}
-				if res.RowsAffected != 1 {
-					return ErrConcurrentWrite
-				}
+			res = tx.Model(&model.Task{}).Where("id = ?", submission.TaskID).Update("finished_items", gorm.Expr("finished_items + 1"))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return ErrConcurrentWrite
 			}
 		}
 		if err := audit.Write(tx, audit.LogEntry{

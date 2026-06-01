@@ -131,6 +131,164 @@ func TestMainFlowWithRealMySQLRedis(t *testing.T) {
 	assertExportSucceeded(t, db, record.ID)
 }
 
+// TestExpiredLeaseDoesNotReclaimItemUnderReview 是 H-01 的行为级回归。
+//
+// 审核中(submission 为 ai_reviewing / human_reviewing 等)的题目,其租约会随审核耗时
+// "过期",但绝不能被回收重领——否则旧的 AI / 人审结果会终结被他人重领的题目。
+// 只有"领了但仍在编辑(draft / revising)"的过期认领才允许回收。
+func TestExpiredLeaseDoesNotReclaimItemUnderReview(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "mock-model")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	db, sqlDB := startMySQL(t, ctx)
+	applyMigrations(t, ctx, sqlDB)
+	seedLeaseFlow(t, ctx, sqlDB)
+
+	task := loadTask(t, db)
+
+	// item 11:labeler 2 提交后进入 ai_reviewing,题目仍为 claimed。
+	var reviewItem model.TaskItem
+	if err := db.First(&reviewItem, 11).Error; err != nil {
+		t.Fatalf("load review item: %v", err)
+	}
+	submitted, err := submission.Save(db, submission.SaveInput{
+		Task: task, Item: reviewItem, AnswerRaw: []byte(`{"label":"x"}`), UserID: 2, Draft: false,
+	})
+	if err != nil {
+		t.Fatalf("submit review item: %v", err)
+	}
+	if submitted.Status != "ai_reviewing" {
+		t.Fatalf("submitted status = %q, want ai_reviewing", submitted.Status)
+	}
+
+	// item 12:labeler 2 仅存草稿(仍处于编辑态),作为"可回收"正对照。
+	var draftItem model.TaskItem
+	if err := db.First(&draftItem, 12).Error; err != nil {
+		t.Fatalf("load draft item: %v", err)
+	}
+	if _, err := submission.Save(db, submission.SaveInput{
+		Task: task, Item: draftItem, AnswerRaw: []byte(`{"label":"draft"}`), UserID: 2, Draft: true,
+	}); err != nil {
+		t.Fatalf("save draft item: %v", err)
+	}
+
+	// 把两个 item 的租约都置为已过期。
+	if _, err := sqlDB.ExecContext(ctx, `UPDATE task_items SET claimed_at = DATE_SUB(NOW(), INTERVAL 60 MINUTE) WHERE id IN (11, 12)`); err != nil {
+		t.Fatalf("expire leases: %v", err)
+	}
+
+	// labeler 99 领题:应回收并领到编辑态的 item 12;审核中的 item 11 不应被回收。
+	result, err := submission.Claim(db, submission.ClaimInput{TaskID: 1, LabelerID: 99})
+	if err != nil {
+		t.Fatalf("claim by labeler 99: %v", err)
+	}
+	if result.Item.ID != 12 {
+		t.Fatalf("labeler 99 claimed item %d, want 12 (the editable expired one)", result.Item.ID)
+	}
+
+	var afterReview model.TaskItem
+	if err := db.First(&afterReview, 11).Error; err != nil {
+		t.Fatalf("reload review item: %v", err)
+	}
+	if afterReview.Status != "claimed" || afterReview.ClaimedBy == nil || *afterReview.ClaimedBy != 2 {
+		t.Fatalf("review item was reclaimed: status=%q claimedBy=%v, want claimed by labeler 2", afterReview.Status, afterReview.ClaimedBy)
+	}
+
+	var afterDraft model.TaskItem
+	if err := db.First(&afterDraft, 12).Error; err != nil {
+		t.Fatalf("reload draft item: %v", err)
+	}
+	if afterDraft.Status != "claimed" || afterDraft.ClaimedBy == nil || *afterDraft.ClaimedBy != 99 {
+		t.Fatalf("editable item not reassigned: status=%q claimedBy=%v, want claimed by labeler 99", afterDraft.Status, afterDraft.ClaimedBy)
+	}
+}
+
+func seedLeaseFlow(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	statements := []string{
+		`INSERT INTO users (id, username, password_hash, display_name, status) VALUES
+			(1, 'owner1', 'x', 'Owner', 'active'),
+			(2, 'labeler1', 'x', 'Labeler', 'active'),
+			(99, 'labeler2', 'x', 'Labeler Two', 'active')`,
+		`INSERT INTO user_roles (user_id, role) VALUES (1, 'owner'), (2, 'labeler'), (99, 'labeler')`,
+		`INSERT INTO tasks (id, owner_id, title, baseline_description, status, ai_review_enabled, human_review_enabled, total_items, lease_timeout_minutes)
+			VALUES (1, 1, 'Lease Task', 'baseline', 'published', 1, 1, 2, 30)`,
+		`INSERT INTO task_templates (id, task_id, version, schema_json, created_by)
+			VALUES (101, 1, 1, '{"fields":[]}', 1)`,
+		`UPDATE tasks SET template_id = 101 WHERE id = 1`,
+		`INSERT INTO ai_prompt_configs (id, task_id, version, prompt_template, dimensions, pass_threshold, uncertain_min, model, created_by)
+			VALUES (33, 1, 1, 'review {{answer.label}}', '[{"name":"相关性"}]', 80, 60, 'mock-model', 1)`,
+		`UPDATE tasks SET ai_prompt_id = 33 WHERE id = 1`,
+		`INSERT INTO task_items (id, task_id, external_id, payload, status, claimed_by, claimed_at) VALUES
+			(11, 1, 'item-1', '{"question":"q1"}', 'claimed', 2, NOW()),
+			(12, 1, 'item-2', '{"question":"q2"}', 'claimed', 2, NOW())`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("seed statement failed: %v\n%s", err, stmt)
+		}
+	}
+}
+
+// TestOverlapArbitrationDownMigrationGuardsAgainstOverlapData 是 H-07 的回归。
+//
+// up 允许同一 item 多份 submission(overlap)。回滚要把唯一键收回单列 item_id,
+// 若存在重复 item_id,旧 down 会在 ADD UNIQUE 处中途抛 Duplicate entry。修复后的 down
+// 带前置守卫:有重复时在任何 DDL 之前清晰中止(不静默删数据);去重后回滚才放行。
+func TestOverlapArbitrationDownMigrationGuardsAgainstOverlapData(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	_, sqlDB := startMySQL(t, ctx)
+	applyMigrations(t, ctx, sqlDB)
+
+	seed := []string{
+		`INSERT INTO users (id, username, password_hash, display_name, status) VALUES
+			(1, 'owner1', 'x', 'Owner', 'active'),
+			(2, 'l1', 'x', 'Labeler 1', 'active'),
+			(3, 'l2', 'x', 'Labeler 2', 'active')`,
+		`INSERT INTO tasks (id, owner_id, title, baseline_description, status, total_items)
+			VALUES (1, 1, 'Overlap Task', 'baseline', 'published', 1)`,
+		`INSERT INTO task_items (id, task_id, external_id, payload, status)
+			VALUES (10, 1, 'item-1', '{}', 'available')`,
+		// 同一 item 的两份 submission(overlap):在 uk_item_labeler 下合法。
+		`INSERT INTO submissions (id, task_id, item_id, labeler_id, status) VALUES
+			(100, 1, 10, 2, 'submitted'),
+			(101, 1, 10, 3, 'submitted')`,
+	}
+	for _, stmt := range seed {
+		if _, err := sqlDB.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("seed failed: %v\n%s", err, stmt)
+		}
+	}
+
+	down, err := os.ReadFile(filepath.Join("..", "migration", "010_overlap_arbitration.down.sql"))
+	if err != nil {
+		t.Fatalf("read down migration: %v", err)
+	}
+
+	// 存在重复 item_id → 守卫必须中止回滚。
+	if _, err := sqlDB.ExecContext(ctx, string(down)); err == nil {
+		t.Fatal("down migration should abort when overlap submissions exist, but it succeeded")
+	}
+
+	// 守卫在任何 DDL 之前中止:uk_item_labeler 未被替换,故仍可再插一份不同 labeler 的 submission。
+	if _, err := sqlDB.ExecContext(ctx,
+		`INSERT INTO submissions (id, task_id, item_id, labeler_id, status) VALUES (102, 1, 10, 1, 'submitted')`); err != nil {
+		t.Fatalf("schema was partially changed before the guard aborted: %v", err)
+	}
+
+	// 归档/清除重复 submission(每个 item 只留一份)后,回滚应成功。
+	if _, err := sqlDB.ExecContext(ctx, `DELETE FROM submissions WHERE id IN (101, 102)`); err != nil {
+		t.Fatalf("cleanup duplicate submissions: %v", err)
+	}
+	if _, err := sqlDB.ExecContext(ctx, string(down)); err != nil {
+		t.Fatalf("down migration should succeed once each item_id is unique: %v", err)
+	}
+}
+
 func startMySQL(t *testing.T, ctx context.Context) (*gorm.DB, *sql.DB) {
 	t.Helper()
 	ctr, err := tcmysql.Run(ctx,

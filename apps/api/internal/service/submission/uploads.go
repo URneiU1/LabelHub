@@ -22,9 +22,58 @@ type fileUploadTemplateSchema struct {
 	Fields []fileUploadTemplateField `json:"fields"`
 }
 
+// fileUploadTemplateField 既覆盖叶子字段(name + widget),也覆盖容器字段:
+// Group 用 fields 嵌子字段,Tabs 用 tabs(每个 tab 各有 fields)。
+// 渲染器递归渲染 Group / Tabs,附件归属扫描必须同样递归,否则嵌套层里的
+// FileUpload 提交后不会绑定 revision,临时文件清理器会把真实证据当孤儿删掉(见 H-03)。
 type fileUploadTemplateField struct {
-	Name   string `json:"name"`
-	Widget string `json:"widget"`
+	Name   string                    `json:"name"`
+	Widget string                    `json:"widget"`
+	Fields []fileUploadTemplateField `json:"fields"`
+	Tabs   []fileUploadTemplateTab   `json:"tabs"`
+}
+
+type fileUploadTemplateTab struct {
+	Fields []fileUploadTemplateField `json:"fields"`
+}
+
+const (
+	widgetFileUpload = "FileUpload"
+	widgetGroup      = "Group"
+	widgetTabs       = "Tabs"
+)
+
+// collectFileUploadFieldNames 深度优先收集 schema 里所有 FileUpload 叶子字段的 name,
+// 递归进入 Group.fields 与 Tabs.tabs[].fields。按遍历顺序去重返回,保证归属扫描稳定。
+// 答案是扁平结构(渲染器把所有字段都按 name 写到答案根),因此用叶子 name 即可在答案里取值。
+func collectFileUploadFieldNames(fields []fileUploadTemplateField) []string {
+	names := make([]string, 0)
+	seen := make(map[string]struct{})
+	var walk func(fs []fileUploadTemplateField)
+	walk = func(fs []fileUploadTemplateField) {
+		for _, field := range fs {
+			switch field.Widget {
+			case widgetGroup:
+				walk(field.Fields)
+			case widgetTabs:
+				for _, tab := range field.Tabs {
+					walk(tab.Fields)
+				}
+			case widgetFileUpload:
+				name := strings.TrimSpace(field.Name)
+				if name == "" {
+					continue
+				}
+				if _, ok := seen[name]; ok {
+					continue
+				}
+				seen[name] = struct{}{}
+				names = append(names, name)
+			}
+		}
+	}
+	walk(fields)
+	return names
 }
 
 func attachUploadedFiles(tx *gorm.DB, task model.Task, sub model.Submission, revision model.SubmissionRevision, answerRaw []byte, userID uint64) error {
@@ -92,26 +141,14 @@ func uploadedFileKeys(tx *gorm.DB, taskID uint64, templateVersion int, answerRaw
 		return nil, nil
 	}
 
-	var template model.TaskTemplate
-	if err := tx.Where("task_id = ? AND version = ?", taskID, templateVersion).First(&template).Error; err != nil {
-		return nil, err
-	}
-
-	var schema fileUploadTemplateSchema
-	if err := json.Unmarshal([]byte(template.SchemaJSON), &schema); err != nil {
+	fieldNames, err := loadFileUploadFieldNames(tx, taskID, templateVersion)
+	if err != nil {
 		return nil, err
 	}
 
 	seen := make(map[string]struct{})
 	keys := make([]string, 0)
-	for _, field := range schema.Fields {
-		if field.Widget != "FileUpload" {
-			continue
-		}
-		name := strings.TrimSpace(field.Name)
-		if name == "" {
-			continue
-		}
+	for _, name := range fieldNames {
 		fieldKeys, err := keysFromUploadAnswer(answer[name])
 		if err != nil {
 			return nil, err
@@ -125,6 +162,18 @@ func uploadedFileKeys(tx *gorm.DB, taskID uint64, templateVersion int, answerRaw
 		}
 	}
 	return keys, nil
+}
+
+func loadFileUploadFieldNames(tx *gorm.DB, taskID uint64, templateVersion int) ([]string, error) {
+	var template model.TaskTemplate
+	if err := tx.Where("task_id = ? AND version = ?", taskID, templateVersion).First(&template).Error; err != nil {
+		return nil, err
+	}
+	var schema fileUploadTemplateSchema
+	if err := json.Unmarshal([]byte(template.SchemaJSON), &schema); err != nil {
+		return nil, err
+	}
+	return collectFileUploadFieldNames(schema.Fields), nil
 }
 
 func hasPotentialUploadValue(answer map[string]any) bool {

@@ -100,6 +100,27 @@ func TestResetStaleProcessingReturnsEventsToPending(t *testing.T) {
 	}
 }
 
+// H-04:冷却 failedRetryBackoff 后的 failed 事件应被重新置为 pending,
+// 给 Redis 瞬时抖动导致的入队失败一条自动恢复路径,而不是永久卡死。
+func TestRecoverFailedEventsRequeuesAfterBackoff(t *testing.T) {
+	db, mock, sqlDB := newOutboxMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^UPDATE .outbox_events. SET .+WHERE status = .+published_at IS NULL OR published_at <`).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectCommit()
+
+	publisher := Publisher{db: db}
+	if err := publisher.recoverFailedEvents(context.Background(), now); err != nil {
+		t.Fatalf("recoverFailedEvents returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestPublishEventUsesDeterministicTaskIDAndProcessingStatus(t *testing.T) {
 	db, mock, sqlDB := newOutboxMockDB(t)
 	defer sqlDB.Close()

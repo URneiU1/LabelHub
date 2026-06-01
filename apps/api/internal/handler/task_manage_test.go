@@ -120,6 +120,31 @@ func TestUpdateTaskRejectsFrozenPolicyChangeAfterPublish(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskRejectsFrozenPolicyWriteLostToConcurrentPublish(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "draft")
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status = .+`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPut, "/tasks/1", map[string]any{
+		"quotaPerUser": 20,
+	}))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 func TestCreateTaskRejectsInvalidDistribution(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
@@ -443,6 +468,26 @@ func TestImportItemsFileRejectsEmptyParse(t *testing.T) {
 	}
 }
 
+// H-02:发布后不得再导入条目(题集冻结),import-file 返回 409,不读文件不进事务。
+func TestImportItemsFileRejectedAfterPublish(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "published")
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, multipartImportRequest("/tasks/1/items/import-file", "data.json", "json", []byte(`[{"id":"a"}]`)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 // ---------- Batch update ----------
 
 func TestBatchUpdateItemsOverwritesScopedToTask(t *testing.T) {
@@ -473,6 +518,30 @@ func TestBatchUpdateItemsOverwritesScopedToTask(t *testing.T) {
 	data := responseData(t, rec)
 	if data["updated"].(float64) != 1 || data["requested"].(float64) != 2 {
 		t.Fatalf("updated/requested = %v / %v", data["updated"], data["requested"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+// H-02:发布后题集冻结,批量覆盖 payload 必须被拒(409),不进事务、不改任何行。
+func TestBatchUpdateItemsRejectedAfterPublish(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "published")
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/items/batch-update", map[string]any{
+		"items": []map[string]any{
+			{"itemId": 10, "payload": map[string]any{"text": "new10"}},
+		},
+	}))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

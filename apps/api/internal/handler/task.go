@@ -317,8 +317,18 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.Model(&model.Task{}).Where("id = ?", task.ID).Updates(updates).Error; err != nil {
+	query := h.db.Model(&model.Task{}).Where("id = ?", task.ID)
+	frozenPolicyUpdate := hasFrozenTaskPolicyUpdate(req)
+	if frozenPolicyUpdate {
+		query = query.Where("status = ?", statemachine.TaskDraft)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update task")
+		return
+	}
+	if frozenPolicyUpdate && result.RowsAffected != 1 {
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "task status changed concurrently, please refresh")
 		return
 	}
 	if err := h.db.First(&task, task.ID).Error; err != nil {
@@ -330,6 +340,7 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 
 func hasFrozenTaskPolicyUpdate(req updateTaskRequest) bool {
 	return req.Distribution != nil ||
+		req.QuotaPerUser != nil ||
 		req.OverlapCount != nil ||
 		req.OverlapCoveragePct != nil ||
 		req.ReviewSamplingPct != nil
@@ -469,7 +480,10 @@ func (h TaskHandler) UpdateBaseline(c *gin.Context) {
 		return
 	}
 	var req updateBaselineRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.BaselineDescription == nil {
+	if !bindLimitedJSON(c, &req, maxBaselineBytes) {
+		return
+	}
+	if req.BaselineDescription == nil {
 		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "baselineDescription is required")
 		return
 	}
@@ -558,6 +572,9 @@ func (h TaskHandler) ListItems(c *gin.Context) {
 func (h TaskHandler) ImportItems(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
 	if !ok {
+		return
+	}
+	if !ensureTaskDraft(c, task) {
 		return
 	}
 	var req importItemsRequest

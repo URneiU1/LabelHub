@@ -3,14 +3,15 @@ package statemachine
 import "fmt"
 
 const (
-	StateDraft            = "draft"
-	StateSubmitted        = "submitted"
-	StateAIReviewing      = "ai_reviewing"
-	StateHumanReviewing   = "human_reviewing"
-	StateNeedsArbitration = "needs_arbitration"
-	StateRevising         = "revising"
-	StateApproved         = "approved"
-	StateRejected         = "rejected"
+	StateDraft             = "draft"
+	StateSubmitted         = "submitted"
+	StateAIReviewing       = "ai_reviewing"
+	StateHumanReviewing    = "human_reviewing"
+	StateNeedsArbitration  = "needs_arbitration"
+	StateConsensusEvidence = "consensus_evidence"
+	StateRevising          = "revising"
+	StateApproved          = "approved"
+	StateRejected          = "rejected"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	EventAIAutoApproved       = "ai_auto_approved"
 	EventAIFailMax            = "ai_fail_max"
 	EventConsensusConflict    = "consensus_conflict"
+	EventConsensusEvidence    = "consensus_evidence"
 	EventSamplingAutoApproved = "sampling_auto_approved"
 	EventApprove              = "approve"
 	EventReject               = "reject"
@@ -45,6 +47,7 @@ var transitions = map[Key]Transition{
 	{StateSubmitted, EventEnqueue}:              {From: StateSubmitted, Event: EventEnqueue, To: []string{StateAIReviewing}},
 	{StateSubmitted, EventSkipAI}:               {From: StateSubmitted, Event: EventSkipAI, To: []string{StateHumanReviewing}},
 	{StateSubmitted, EventConsensusConflict}:    {From: StateSubmitted, Event: EventConsensusConflict, To: []string{StateNeedsArbitration}},
+	{StateSubmitted, EventConsensusEvidence}:    {From: StateSubmitted, Event: EventConsensusEvidence, To: []string{StateConsensusEvidence}},
 	{StateSubmitted, EventSamplingAutoApproved}: {From: StateSubmitted, Event: EventSamplingAutoApproved, To: []string{StateApproved}},
 	{StateAIReviewing, EventAIDone}:             {From: StateAIReviewing, Event: EventAIDone, To: []string{StateApproved, StateHumanReviewing}},
 	{StateAIReviewing, EventAIAutoApproved}:     {From: StateAIReviewing, Event: EventAIAutoApproved, To: []string{StateApproved}},

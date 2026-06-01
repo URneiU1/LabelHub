@@ -174,8 +174,8 @@ func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
 
 func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload) (bool, error) {
 	res, err := h.db.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1 WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','failed')`,
-		payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1, started_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','failed')`,
+		time.Now().UTC(), payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
 	)
 	if err != nil {
 		return false, err

@@ -36,7 +36,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test Go workspace
-        run: go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview
+        run: go test ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview ./pkg/reviewsampling
+
+      - name: Vet Go workspace
+        run: go vet ./apps/api/... ./apps/ai-worker/... ./pkg/exporter ./pkg/llmreview ./pkg/reviewsampling
+
+      - name: Check generated OpenAPI types
+        run: |
+          cmp docs/openapi.yaml submission/api/openapi.yaml
+          pnpm -F web gen:api
+          git diff --exit-code -- apps/web/src/shared/api/schema.d.ts
 
       - name: Test web
         run: pnpm -F web test

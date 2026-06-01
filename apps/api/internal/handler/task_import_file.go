@@ -32,6 +32,9 @@ func (h TaskHandler) ImportItemsFile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ensureTaskDraft(c, task) {
+		return
+	}
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxImportFileBytes+4096)
 	fileHeader, err := c.FormFile("file")

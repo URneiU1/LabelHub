@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,8 +30,7 @@ type inlineLLMRequest struct {
 // InlineLLM:Sprint 1 mock 实现。返回固定字符串 + 模拟 800ms 延迟;Sprint 3 替换为豆包 Function Calling。
 func (h LLMHandler) InlineLLM(c *gin.Context) {
 	var req inlineLLMRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body")
+	if !bindLimitedJSON(c, &req, maxInlineLLMBytes) {
 		return
 	}
 	time.Sleep(800 * time.Millisecond)
