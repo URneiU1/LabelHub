@@ -1875,6 +1875,7 @@ const rightPortStyle: CSSProperties = {
 
 const fieldActionsStyle: CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
   gap: 8,
   alignItems: 'center',
 }
