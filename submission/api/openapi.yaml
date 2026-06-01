@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: LabelHub API
-  version: 0.5.0
-  description: Main-flow API contract for LabelHub S5 acceptance.
+  version: 0.8.0
+  description: Main-flow API contract for LabelHub S8 acceptance.
 servers:
   - url: /api/v1
 security:
@@ -27,6 +27,83 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthEnvelope'
         '400':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}:
+    put:
+      tags: [tasks]
+      summary: Update task metadata and draft-only policy fields
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          task:
+                            $ref: '#/components/schemas/Task'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/publish:
+    post:
+      tags: [tasks]
+      summary: Publish a draft task and freeze its dataset and policy fields
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/TaskEnvelope'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/pause:
+    post:
+      tags: [tasks]
+      summary: Pause a published task
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/TaskEnvelope'
+        '422':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/resume:
+    post:
+      tags: [tasks]
+      summary: Resume a paused task
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/TaskEnvelope'
+        '422':
+          $ref: '#/components/responses/Error'
+  /tasks/{taskId}/end:
+    post:
+      tags: [tasks]
+      summary: End a published or paused task
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          $ref: '#/components/responses/TaskEnvelope'
+        '422':
           $ref: '#/components/responses/Error'
         '401':
           $ref: '#/components/responses/Error'
@@ -116,7 +193,7 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
-  /tasks/{taskId}/items/{itemId}/save:
+  /tasks/{taskId}/items/{itemId}/draft:
     post:
       tags: [labeler]
       summary: Save a draft answer
@@ -150,6 +227,14 @@ paths:
     get:
       tags: [reviewer]
       summary: List submissions waiting for reviewer action
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Use needs_arbitration for the overlap conflict queue.
+          schema:
+            type: string
+            enum: [human_reviewing, needs_arbitration]
       responses:
         '200':
           description: Review queue
@@ -202,6 +287,33 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/Submission'
+        '400':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+  /reviews/batch:
+    post:
+      tags: [reviewer]
+      summary: Apply one review verdict to up to 50 submissions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchReviewRequest'
+      responses:
+        '200':
+          description: Per-submission review results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
         '400':
           $ref: '#/components/responses/Error'
         '422':
@@ -429,6 +541,20 @@ components:
                 properties:
                   data:
                     $ref: '#/components/schemas/Submission'
+    TaskEnvelope:
+      description: Task snapshot
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      task:
+                        $ref: '#/components/schemas/Task'
   schemas:
     Envelope:
       type: object
@@ -496,7 +622,7 @@ components:
             type: string
     Task:
       type: object
-      required: [id, ownerId, title, status]
+      required: [id, ownerId, title, status, distribution, quotaPerUser, overlapCount, overlapCoveragePct, leaseTimeoutMinutes, reviewSamplingPct, dailySubmissionLimitPerLabeler]
       properties:
         id:
           type: integer
@@ -506,6 +632,32 @@ components:
           type: string
         status:
           type: string
+          enum: [draft, published, paused, ended]
+        distribution:
+          type: string
+          enum: [first_come, assigned, quota]
+        quotaPerUser:
+          type: integer
+          minimum: 0
+        overlapCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+        overlapCoveragePct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        leaseTimeoutMinutes:
+          type: integer
+          minimum: 1
+          maximum: 10080
+        reviewSamplingPct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        dailySubmissionLimitPerLabeler:
+          type: integer
+          minimum: 0
         aiReviewEnabled:
           type: boolean
         humanReviewEnabled:
@@ -526,6 +678,67 @@ components:
           type: array
           items:
             type: string
+        distribution:
+          type: string
+          enum: [first_come, assigned, quota]
+        quotaPerUser:
+          type: integer
+          minimum: 0
+        overlapCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+        overlapCoveragePct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        leaseTimeoutMinutes:
+          type: integer
+          minimum: 1
+          maximum: 10080
+        reviewSamplingPct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        dailySubmissionLimitPerLabeler:
+          type: integer
+          minimum: 0
+        humanReviewEnabled:
+          type: boolean
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        distribution:
+          type: string
+          enum: [first_come, assigned, quota]
+        quotaPerUser:
+          type: integer
+          minimum: 0
+        overlapCount:
+          type: integer
+          minimum: 1
+          maximum: 10
+        overlapCoveragePct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        leaseTimeoutMinutes:
+          type: integer
+          minimum: 1
+          maximum: 10080
+        reviewSamplingPct:
+          type: integer
+          minimum: 0
+          maximum: 100
+        dailySubmissionLimitPerLabeler:
+          type: integer
+          minimum: 0
+        humanReviewEnabled:
+          type: boolean
     TaskItem:
       type: object
       required: [id, taskId, payload, status]
@@ -544,6 +757,7 @@ components:
             - type: string
         status:
           type: string
+          enum: [available, claimed, finished, needs_arbitration]
     TaskTemplate:
       type: object
       required: [id, taskId, version, schemaJson]
@@ -599,9 +813,11 @@ components:
           type: integer
         itemId:
           type: integer
+        labelerId:
+          type: integer
         status:
           type: string
-          enum: [draft, submitted, ai_reviewing, human_reviewing, revising, approved, rejected]
+          enum: [draft, submitted, ai_reviewing, human_reviewing, needs_arbitration, consensus_evidence, revising, approved, rejected]
         currentRevisionId:
           type: integer
           nullable: true
@@ -651,6 +867,20 @@ components:
       type: object
       required: [verdict]
       properties:
+        verdict:
+          type: string
+          enum: [approve, reject, revise]
+        reason:
+          type: string
+    BatchReviewRequest:
+      type: object
+      required: [submission_ids, verdict]
+      properties:
+        submission_ids:
+          type: array
+          maxItems: 50
+          items:
+            type: integer
         verdict:
           type: string
           enum: [approve, reject, revise]
@@ -723,3 +953,32 @@ components:
                 type: string
               avg:
                 type: number
+        confusion:
+          type: array
+          items:
+            type: object
+            properties:
+              ai:
+                type: string
+              human:
+                type: string
+              count:
+                type: integer
+        scoreBuckets:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              count:
+                type: integer
+        completionTrend:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+              count:
+                type: integer

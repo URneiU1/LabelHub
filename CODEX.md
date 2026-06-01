@@ -17,6 +17,7 @@ After every code-writing turn:
 
 ## Current Project State
 
+- 2026-06-01 P1 / P2 code-review closeout is complete. `docs/HANDOFF_P1_P2.md` is retained as an audited checklist and marked complete at the top; `docs/CHANGELOG.md` entry `p1-p2-codereview-closeout` records the implementation and verification. Remaining work is deployment-environment smoke coverage, not another pass over the checklist.
 - S0 and S1 are complete enough to support the S2 flow.
 - S2 Day1 backend template endpoints are in place.
 - S2 Day2 SchemaRenderer runtime is in place.
@@ -61,6 +62,7 @@ After every code-writing turn:
 
 ## Next Work
 
+- Run the production-environment checklist in `submission/DEMO_ENV.md`: explicit seed, TLS/CSP font loading, 413 boundary, three-role flow, and async JSONL export download.
 - S6 implementation plan is tracked in `docs/PLAN-S6-IMPL.md`. Day1 Editorial primitives are in place: `tokens.css` now uses Editorial console tokens, stable status colors, Semi CSS overrides, global focus-visible, skeleton/top-progress keyframes, and shared `StatusBadge`/`EmptyState`/`LoadingBlock`/`TopProgress` components with tests. Day2 status/empty/loading replacement has started across Owner Dashboard, ExportPanel, Labeler Plaza, and Reviewer Queue. Runtime Tabs now render a real tablist/tabpanel and preserve flat answers across tab switches. Day3 is complete: Designer now has a responsive `Designer.css` grid (1920 three-column / ≤1599 palette+canvas with the property panel wrapped full-width below / ≤768 single column) and a `NestedCanvasPreview` that renders Group/Tabs child fields as mini rows. Note: the imported `Designer.css` was missing from Codex's uncommitted work and broke the build until it was created this session, and the responsive grid class was misapplied to the palette instead of the property panel (now fixed). Next S6 work is Day4 friendly error copy plus a11y quick wins.
 - Continue Designer implementation with canvas-level nested dragging and richer layout editing for Tabs/Group if contest polish requires it.
 - Run a seeded browser smoke for the S3 path: Owner prompt/golden dry-run, Labeler submit/revise, AI worker, Reviewer batch review, and Reviewer rule activation.

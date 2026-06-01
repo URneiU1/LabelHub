@@ -95,7 +95,12 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml config
 docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml up -d --build
 ```
 
-API 启动时**自动跑数据库迁移建表 + seed**,无需手动初始化。
+API 启动时**自动跑数据库迁移建表**。seed 是显式、幂等步骤，首次部署或需要恢复演示数据时执行:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml exec \
+  -e SEED_ALLOW_IN_PROD=true api seed
+```
 
 ---
 
@@ -118,7 +123,17 @@ curl -f https://<你的地址>/health        # → ok
 curl -f https://<你的地址>/api/v1/        # → API 正常响应
 ```
 
-浏览器打开 `https://<你的地址>`,用 `owner1 / pass` 登录即可开始评估。
+浏览器打开 `https://<你的地址>`,用 `owner1 / 123456` 登录即可开始评估。
+
+### 线上 5 分钟 dry-run 清单
+
+以下步骤基于当前 seed 数据，用于上线后快速确认主链路。线上数据可能因演示操作发生变化，不依赖固定数量断言。
+
+- [ ] 打开部署地址，使用 `owner1 / 123456` 登录，确认 `qa_quality` 任务列表、统计卡片和趋势图可见。
+- [ ] 使用 `labeler1 / 123456` 登录，领取一条任务并提交；确认页面进入下一条待标注项。
+- [ ] 使用 `reviewer1 / 123456` 登录，确认人工审核队列可打开，`仲裁` tab 可点击且可用键盘聚焦切换。
+- [ ] 回到 owner 账号，创建 JSONL 异步导出；确认导出任务完成后可下载。
+- [ ] 刷新页面并检查浏览器控制台；确认字体加载、API 请求和页面渲染无 CSP 或 413 异常。
 
 ---
 

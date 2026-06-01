@@ -33,83 +33,92 @@ After every code change, update project documentation before the final handoff:
 <claude-mem-context>
 # Memory Context
 
-# [LabelHub] recent context, 2026-05-29 6:19pm GMT+8
+# [LabelHub] recent context, 2026-06-01 3:58am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (10,303t read) | 524,726t work | 98% savings
+Stats: 50 obs (7,977t read) | 469,885t work | 98% savings
 
-### May 29, 2026
-5003 12:49a 🔵 5174 demo nav 元素是 DIV 而非 NAV 标签，选择器需用 div.lh-demo-nav
-5004 " 🔴 发现 5174 UI Bug：demo nav 与发布抽屉底部 CTA 按钮发生视觉遮挡重叠
-5005 12:50a 🔵 5174 五页全量 Smoke Test 通过，但 demo nav 遮挡 bug 在所有页面普遍存在
-5006 " 🔵 /workbench 页标注提交 CTA 不受 demo nav 遮挡，按钮位于页面滚动区 y:784
-5007 12:51a 🔵 LabelHub 完整 monorepo 文件结构揭露，5174 UI 不在主仓库内
-5008 12:52a 🔵 labelhub-ui-demo 项目路径确认为 ~/labelhub-ui-demo/，独立于主仓库，LabelHub 内存在 packages/ui-kit
-5009 " 🔵 labelhub-ui-demo 源码结构定位完成，demo nav 遮挡 bug 根源在 globals.css 第 422 行
-5010 12:53a 🔵 demo nav 遮挡 bug 根因：tasks-drawer z-index(100) 低于 lh-demo-nav z-index(999)，导致 fixed 抽屉底部被压盖
-5011 " 🔵 labelhub-ui-demo 技术栈：React 19 + Vite 8 + ArcoDesign + Formily，左侧 sidebar 是静态装饰性 DIV
-5012 12:54a 🔵 designer.css 画布字段操作按钮无 z-index，demo nav 遮挡确认为布局高度问题而非层级冲突
-5013 " 🔵 labelhub-ui-demo 全部可滚动主内容区均缺少 padding-bottom，统一修复路径已确定
-5014 12:55a 🔴 labelhub-ui-demo 修复 demo nav 遮挡并升级左侧 sidebar 为可路由 NavLink
-5015 " ✅ labelhub-ui-demo 代码变更通过 apply_patch 落地，pnpm build + lint 验证启动中
-5016 12:56a 🔴 labelhub-ui-demo 左侧导航无法点击跳转
-5017 " 🟣 labelhub-ui-demo 补全三个缺失路由页面
-5018 " 🔴 labelhub-ui-demo 底部 demo 导航遮挡页面内容
-5019 " 🔵 pnpm lint 零错误通过，pnpm build 因沙盒无法写入 node_modules/.tmp/ 失败（非代码问题）
-5020 " ✅ labelhub-ui-demo pnpm build 成功，产物 918 模块 233ms 构建完成
-5021 " 🔵 本地 Playwright 浏览器二进制未安装，需执行 npx playwright install 才能跑 headless 验证
-5022 12:57a 🔵 沙盒环境禁止启动外部 Chrome 进程，headless playwright 验证只能用 Codex 内置浏览器
-5023 12:58a 🔵 globalThis.uiTab 的 playwright/cua/content 子对象无可调用方法，IAB tab 需要重新获取
-5024 " 🔵 Codex IAB tab 原型方法：goto/back/forward/reload/close/screenshot/title/url 是直接方法，playwright 通过子对象访问
-5025 " 🔵 Codex IAB tab.dom_cua 和 tab.cua 的完整方法集
-5026 12:59a 🟣 SideNav 升级验证成功：左侧导航现在渲染为带 href 的 &lt;a&gt; NavLink，七个路由全部可点击
-5027 " 🔵 Codex 内置浏览器会话 API 结构
-5028 " 🔵 LabelHub UI Demo Vite 生产构建成功
-5029 " 🔵 Playwright headless 在 Codex macOS 环境不可用
-5030 " 🔵 dom_cua.click(node_id) 在 tab.goto() 后失败：每次导航后 node_id 会重新分配，需重新调用 get_visible_dom
-5031 " 🔵 dom_cua.click() 正确签名为 click({ node_id: N }) 对象形式，而非直接传整数
-5032 1:00a 🔵 dom_cua.click 接受字符串 node_id 但返回 "Node does not have a layout object"（stale）；cua.click 需要坐标 {x, y}
-5033 " 🔵 Codex IAB tab 完整 API 文档：tab.dev 只有 logs，tab.content 有 export/exportGsuite
-5034 " 🔵 tab.screenshot() 返回原始 JPEG 字节对象（43,259 字节），不是 base64 字符串或 Blob
-5035 1:04a 🔴 labelhub-ui-demo nav overlap fix verified via geometry recheck
-5301 4:10p 🔵 LabelHub 生产部署文档完整记录
-5302 " 🔵 LabelHub 项目完整架构与技术亮点
-5329 4:41p 🔵 LabelHub 部署文档已存在
-5330 4:42p 🔵 LabelHub 生产部署架构：Caddy + Docker Compose
-5331 " 🔵 LabelHub 生产部署完整 SOP（VPS Docker Compose）
-S711 用户询问云服务器部署方案（字节AI全栈挑战赛 LabelHub 项目） (May 29 at 4:43 PM)
-S712 LabelHub 比赛第 5 条要求：可访问的演示环境说明文档（任意云平台部署） (May 29 at 4:47 PM)
-5332 4:51p 🔵 LabelHub 比赛要求：可访问演示环境说明文档
-5333 " 🔵 LabelHub submission 目录结构已存在完整提交物
-5334 4:54p 🔵 LabelHub submission/README.md 完整交付清单与待补齐项
-5335 4:55p 🔵 DEPLOY.md 无公网演示 URL，需补充云平台实际部署地址
-5336 4:57p 🟣 新建 submission/DEMO_ENV.md 满足比赛第 5 条可访问演示环境说明要求
-S713 LabelHub 比赛演示环境：选择云平台部署方案（免备案 + 国内评委可访问） (May 29 at 4:57 PM)
-S714 LabelHub 演示环境：评估用树莓派 + Cloudflare Tunnel 替代云服务器方案 (May 29 at 5:00 PM)
-S715 字节 AI 全栈挑战赛 LabelHub — 选定腾讯云并获取完整部署参数与上机指引 (May 29 at 5:01 PM)
-5337 5:18p ⚖️ 选定腾讯云作为云服务商
-S716 字节 AI 挑战赛 LabelHub demo 云服务器规格评估 — 2核2G3M 是否够用 (May 29 at 5:19 PM)
-S717 字节 AI 全栈挑战赛 LabelHub — 云服务器配置选型咨询（2C4G 30M 是否够用） (May 29 at 5:31 PM)
-5338 5:39p 🔵 LabelHub 字节挑战赛交付包现状盘点
-5339 5:40p 🔵 LabelHub 演示服务器最低规格要求 2核4G，2G内存不达标
-5340 " 🔵 DEMO_SCRIPT 与 seed 密码不一致：脚本写 pass，实际代码是 123456
-5341 " 🔵 LabelHub S0-S7 完整开发迭代记录（2026-05-22 至 2026-05-29）
-5342 5:41p ✅ LabelHub 交付文档同步更新：新增 DEMO_ENV.md、修正密码、修正任务名
-5343 " 🔴 apply_patch 在 DEMO_SCRIPT.md 失败：简版摘要行与实际详细脚本内容不匹配
-S718 镜像选择建议：Ubuntu 还是 Ubuntu + Docker (May 29 at 5:47 PM)
-S719 首尔节点云服务器选择确认 — 流量、备案、延迟评估 (May 29 at 5:51 PM)
-S720 字节 AI 全栈挑战赛 LabelHub 部署服务器选址：首尔 vs 曼谷 (May 29 at 5:56 PM)
-**Investigated**: 两个候选云服务器地区（首尔 vs 曼谷）对 LabelHub demo 的适配性，从两个关键维度评估：评委访问体验（大陆用户）和 AI worker 调用豆包/火山引擎延迟
+### May 31, 2026
+S769 LabelHub owner 审核结果质检反馈闭环功能实现 — 用户要求"做你推荐的"，即将 Owner「审核结果」节从薄回显升级为逐条 AI vs 人工判定对比面板。 (May 31 at 9:33 PM)
+S770 Redesign LabelHub UI to match PetaV2 style; work executed comprehensive navigation architecture refactoring as prerequisite (URL-routed sections, in-page sub-tabs, CSS-based filtering) (May 31 at 10:00 PM)
+S771 Redesign LabelHub Owner navigation from single-page internal section switching to URL-based independent page routing, matching PetaV2 style conventions; verify all existing tests remain passing (May 31 at 11:15 PM)
+S772 LabelHub Owner 后台「数据导出」分节拆分为「导出配置/导出历史」子页，并泛化子页过滤机制 (May 31 at 11:19 PM)
+### Jun 1, 2026
+S773 用户询问数据导出页面是否已拆分为标签页 (Jun 1 at 12:18 AM)
+S774 LabelHub Owner 后台「数据导出」分节去掉"全部"标签，只保留两个子页标签 (Jun 1 at 12:56 AM)
+S775 LabelHub「数据导出」分节去掉"全部"标签，只保留「导出配置」和「导出历史」两个子页标签 (Jun 1 at 2:37 AM)
+5885 2:37a ✅ 生产端 /owner/export 重定向到 /owner/export/config 验证成功
+5886 " ✅ 生产端 export 分节 UI 全链路验证通过
+5887 2:38a ✅ LabelHub Sprint 进度更新：Sprint 6 进行中，1-5 已完成
+5888 " ✅ CHANGELOG.md 追加 owner-export-no-overview 条目
+5889 " ✅ CHANGELOG commit 72a5266 提交，近三条 commit 序列确认
+S776 LabelHub 数据看板丰富方案调研与规划 (Jun 1 at 2:38 AM)
+5890 2:57a 🔵 LabelHub StatsBoard 现有实现结构
+5891 2:58a 🔵 API stats 端点实现文件位置确认
+5892 " 🔵 LabelHub stats.go 完整实现细节
+5893 " 🔵 Submission 和 AIReview 模型可用字段确认
+5894 " 🔵 LabelHub 全量数据模型结构速览
+5895 2:59a 🔵 HumanReview 有 Stage 字段，支持多阶段审核
+S777 全仓代码审查 LabelHub 项目 (Jun 1 at 2:59 AM)
+5896 3:07a 🔵 LabelHub stats_test.go 测试覆盖结构
+5897 3:08a 🟣 LabelHub stats.go 新增混淆矩阵、分桶、趋势三个响应字段
+5898 " 🟣 stats.go 接入 buildConfusion 填充混淆矩阵响应字段
+5899 3:09a 🟣 TaskStats 新增 AI 评分分桶与每日完成趋势两条 SQL 查询
+5900 " 🟣 实现 buildConfusion 和 bucketScores 两个纯函数
+5901 " 🟣 stats_test.go 扩展集成测试覆盖混淆矩阵、分桶、趋势三个新字段
+5902 " 🟣 新增 TestBuildConfusion 和 TestBucketScores 纯函数单元测试
+5903 " 🔵 stats 测试失败：ai_score 查询被 sqlmock 拒绝返回 500
+5904 3:10a 🔴 修复 sqlmock ai_score 正则不匹配 GORM 反引号问题
+5905 " 🔴 stats handler 全部 4 个测试修复后通过
+5906 3:11a 🔵 StatsBoard.tsx 当前仅渲染 5 个卡片，三个新字段尚未接入前端
+5907 3:12a 🟣 StatsBoard.tsx 扩展 TaskStats 类型接入三个新字段
+5908 " 🟣 StatsBoard.tsx 重构图表 spec 并准备混淆矩阵渲染数据
+5909 " 🟣 StatsBoard.tsx 全面重构看板布局，新增 KPI 行、混淆矩阵热力表和三个新图表卡
+5910 3:13a 🟣 StatsBoard.tsx 补全新布局所需 CSS 常量，移除废弃进度条样式
+5911 " 🟣 LabelHub stats 看板扩展全链路验证通过
+5912 3:14a 🔵 前端 vitest 运行失败，退出码 1
+5913 " 🔵 StatsBoard 测试失败：mock 数据缺少三个新字段导致 .map() 报错
+5914 3:15a 🔵 StatsBoard.test.tsx 与新组件有四处不兼容，需同步更新
+5915 " 🔴 StatsBoard.tsx 对三个新字段和 dimensionAverages 加防御性空值默认
+5916 3:16a 🔴 StatsBoard.test.tsx mock 补全三个新字段，组件 confMap/confMax 改用防御变量
+5917 " 🔴 StatsBoard.test.tsx 第一个测试用例更新 aria-label 断言和通过率格式
+5918 " 🟣 LabelHub stats 看板全栈扩展完整通过所有验证
+5919 3:17a 🟣 stats 看板扩展 commit 并触发生产部署
+5920 3:18a 🔵 LabelHub Template Designer 结构概览
+5921 3:19a 🟣 stats 看板扩展成功部署到生产环境
+5922 3:20a 🔵 生产 stats API 实测：新三字段正常返回，发现两处细节问题
+5923 " 🔵 生产看板页面浏览器验证全部通过
+5924 " 🔵 生产 /owner/stats 页面截图验证看板完整渲染
+5925 3:21a 🔵 生产混淆矩阵真实数据验证：pass/approve=7，pass/reject=2
+5926 3:25a 🔵 LabelHub 项目完成开发，进入代码审查阶段
+5927 3:26a ⚖️ LabelHub 标注质量机制字段选型决策
+5928 3:27a 🔵 LabelHub 项目未初始化 CodeGraph 索引
+5929 3:29a ⚖️ LabelHub S8 质量控制功能规划 — Handoff 文档
+5930 " 🔵 LabelHub Template Designer 现有版本控制与只读机制
+5931 3:30a 🔵 LabelHub API 架构盘点：状态机、分发逻辑、迁移文件位置
+5932 3:31a ✅ LabelHub S8 Handoff 文档创建完成
+5933 3:32a ✅ CLAUDE.md 更新：S8 交接入口指向 HANDOFF-S8.md
+5934 " ✅ S8 Handoff 文档提交入库
+S778 为 LabelHub S8 sprint 写 handoff 文档，说明已完成工作并为下一个开发者指定两项待办（Designer 重做 + S8 任务条例） (Jun 1 at 3:32 AM)
+**Investigated**: - 阅读了 Designer.tsx 渲染部分（第362-511行），确认现有三栏布局、LATEST/EDITABLE vs READONLY 双态、Fork 版本机制、右侧属性面板已有「基础/校验/联动」三标签
+    - 用 git log + grep 盘点了后端结构：状态机模块（statemachine/machine.go + task.go）、分发逻辑（service/submission/claim.go）、迁移文件（最新 008_task_status_add_ended）
+    - 确认 Task 模型已有 Deadline/Tags/HumanReviewEnabled/Distribution/QuotaPerUser/PublishedAt 等字段，S8 新字段只需从 009 起追加迁移
+    - 读取了 CLAUDE.md 现有 Current Handoff 区块，了解历史交接脉络（S4→S5→S6→S7）
 
-**Learned**: 首尔到中国大陆的网络路由比曼谷更成熟稳定；火山引擎豆包 API 节点在北京，首尔到大陆延迟更低；曼谷虽然离吉隆坡更近但用户自身延迟不是评审重点
+**Learned**: - LabelHub 前端版本控制模式已完备：isLatest 决定 EDITABLE/READONLY，READONLY 强制 Fork 新版本，与 S8「发布后冻结」设计方向一致，后端补状态机拒绝逻辑即可
+    - 分发/领题逻辑集中在 claim.go，overlap/lease/sampling 均应在此挂钩
+    - 导航 URL↔store 同步边界在 AppLayout.tsx，Dashboard.tsx 保持 router-free，改 Designer 时不得破坏这个边界
+    - 子页过滤用 CSS data-sub 属性，默认 all 既支持概览又保证 jsdom 测试通过
 
-**Completed**: 做出部署选址决策：选首尔。理由：评委在国内，AI worker 调豆包需低延迟到北京节点，首尔在这两点上均优于曼谷
+**Completed**: - 创建 docs/HANDOFF-S8.md：§0 本会话已完成工作（6 个 commit 表 + 关键设计边界）；§1 Designer 待办（现状 vs 设计稿差距，含画布 Tab 栏/顶部栏/物料分组/字段卡精修）；§2 S8 任务条例（第一批必做 5 项 + 第二批 3 项 + 任务创建页三区块 + 代码落点）；§3 工程约定（测试门槛/sqlmock 反引号坑/迁移规范）
+    - 更新 CLAUDE.md Current Handoff 顶部，插入 2026-06-01 指针条目指向 HANDOFF-S8.md
+    - commit 629780f：docs(handoff): write S8 handoff (Designer reskin + task policies)，2 文件 108 行新增，已提交到 feat/ui-reskin-s7-and-followups 分支
 
-**Next Steps**: 购买首尔云服务器 → 开放 80/443 端口 → SSH 进机器验证 docker compose → git clone 项目 → 将公网 IP 发给主会话继续部署
+**Next Steps**: 本会话已明确结束于 handoff 文档交付，两项待办（Designer 重做 + S8 任务条例实现）留给下一个开发者，代码未动。用户可选择在此会话继续开始其中一项，或留给新会话处理。
 
 
-Access 525k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 470k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

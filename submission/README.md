@@ -113,7 +113,7 @@ React 18 + TS strict + Semi Design (SPA, 角色路由)
 
 | 维度 | 实现 |
 |---|---|
-| **状态机驱动** | 任务 4 态 + 提交 7 态,所有跃迁走 `internal/statemachine.Transitions()`,100% 单测覆盖 |
+| **状态机驱动** | 任务 4 态 + 提交 9 态(含仲裁与共识证据),所有跃迁走 `internal/statemachine.Transitions()`,100% 单测覆盖 |
 | **Outbox 一致性** | 业务事务同写 `outbox_events`,后台 publisher 用 `FOR UPDATE SKIP LOCKED` + deterministic Asynq TaskID 防双投 |
 | **AI 预审幂等** | Worker `complete()/failover()` 双锁 + `RowsAffected != 1` 守每个状态跃迁 |
 | **熔断 + 限流** | Provider 5xx 连续 20 次/5 分钟自动熔断;dry-run 走 task-scoped quota;登录 IP token bucket |

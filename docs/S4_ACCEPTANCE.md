@@ -81,7 +81,7 @@ pnpm -F web test && pnpm -F web lint && pnpm -F web build                       
 make seed                                  # 幂等
 make api      # 终端 1
 make worker   # 终端 2  (worker 需 LLM 配置,见 §9;只验导出可 LLM_PROVIDER=mock)
-open http://localhost:5173                 # owner1 / pass:看板 → 配字段映射 → 4 格式各导一份 → 历史 succeeded → 下载
+open http://localhost:5173                 # owner1 / 123456:看板 → 配字段映射 → 4 格式各导一份 → 历史 succeeded → 下载
 ```
 
 ## 9. 已知 warning / 非阻塞遗留

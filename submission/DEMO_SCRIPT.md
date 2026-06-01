@@ -79,7 +79,7 @@
 - 按 **Ctrl/Cmd + Enter** 提交(展示快捷键)
 - 等 toast 提示 "已提交,AI 预审中"
 
-> "提交后业务事务同写 outbox 表,后台 publisher 用 SELECT FOR UPDATE SKIP LOCKED 把事件投到 Redis,AI Worker 拉走跑豆包。整个链路保证恰好一次。"
+> "提交后业务事务同写 outbox 表,后台 publisher 用 SELECT FOR UPDATE SKIP LOCKED 把事件投到 Redis,AI Worker 拉走跑豆包。整个链路是 durable outbox 加至少一次投递,消费端保证幂等。"
 
 ---
 
