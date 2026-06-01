@@ -88,11 +88,23 @@
 }
 
 .canvas-tab {
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -1px;
   padding: 10px 2px;
+  font: inherit;
   font-size: 14px;
   color: var(--lh-text-2);
-  border-bottom: 2px solid transparent;
   cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.canvas-tab:hover {
+  color: var(--lh-text-1);
 }
 
 .canvas-tab--active {
@@ -103,6 +115,11 @@
 
 .canvas-tab--add {
   color: var(--lh-text-3);
+  font-weight: 500;
+}
+
+.canvas-tab--add:hover {
+  color: var(--lh-primary);
 }
 
 .canvas-hint {
