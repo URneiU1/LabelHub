@@ -65,17 +65,17 @@ const widgetPrefixes: Record<WidgetType, string> = {
 }
 
 const widgetIcons: Record<WidgetType, string> = {
-  ShowItem: 'SHOW',
-  Group: '[]',
-  Tabs: 'TAB',
+  ShowItem: '◎',
+  Group: '[ ]',
+  Tabs: 'T',
   Input: 'Aa',
   TextArea: '¶',
   Radio: '◉',
   Tags: '#',
-  RichText: 'RT',
+  RichText: 'R',
   JSONEditor: '{}',
-  FileUpload: 'IMG',
-  LLMTrigger: 'AI',
+  FileUpload: '↑',
+  LLMTrigger: '✦',
 }
 
 const paletteGroups: Array<{ label: string, widgets: WidgetType[] }> = [

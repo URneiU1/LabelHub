@@ -78,6 +78,41 @@
 .template-designer-palette .palette-item {
   width: 100%;
   justify-content: flex-start;
+  height: auto;
+  padding: 8px 12px;
+}
+
+/* Semi Button 把子节点包在 .semi-button-content 里;在这层做 icon+label 的 flex+间距。 */
+.template-designer-palette .palette-item .semi-button-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.palette-item__icon {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--lh-primary-soft);
+  color: var(--lh-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.palette-item__icon--purple {
+  background: var(--lh-purple-soft);
+  color: var(--lh-purple);
+}
+
+.palette-item__icon--show {
+  background: var(--lh-bg-elev);
+  color: var(--lh-text-2);
 }
 
 .template-designer-field.canvas-field {
