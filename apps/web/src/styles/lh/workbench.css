@@ -287,6 +287,25 @@
   cursor: pointer;
 }
 
+/* 作答页常驻 AI 求助面板:沿用 wb-llm 紫卡视觉,叠加 loading/error/说明态。 */
+.wb-assist {
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+
+.wb-assist__loading {
+  color: var(--lh-purple);
+}
+
+.wb-assist__error {
+  color: var(--lh-danger);
+}
+
+.wb-assist__note {
+  font-size: 12px;
+  color: var(--lh-text-3);
+}
+
 .wb-footer {
   display: flex;
   align-items: center;

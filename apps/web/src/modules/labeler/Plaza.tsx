@@ -32,6 +32,12 @@ export default function LabelerPlaza() {
   const lastSavedDraftKey = useRef('')
   const autoSaveSeq = useRef(0)
 
+  // 常驻「AI 求助」:不依赖模板是否配置 LLMTrigger 字段,作答页底部固定入口。
+  const [assistOpen, setAssistOpen] = useState(false)
+  const [assistLoading, setAssistLoading] = useState(false)
+  const [assistText, setAssistText] = useState('')
+  const [assistError, setAssistError] = useState('')
+
   // 4.3 视图编排:plaza(任务广场 + 我的数据)与 answer(三列作答页)切换。
   const [view, setView] = useState<View>('plaza')
   const [plazaTab, setPlazaTab] = useState<PlazaTab>('tasks')
@@ -178,6 +184,29 @@ export default function LabelerPlaza() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // 调 /llm/inline 求助:把当前 schema 摘要 + 题目数据 + 当前答案作为不可信数据发给后端(后端再转豆包)。
+  // 不阻塞作答:用独立 loading,失败给中文友好提示,不打断表单填写。
+  async function askAssist() {
+    if (!bundle?.item) {
+      return
+    }
+    setAssistOpen(true)
+    setAssistLoading(true)
+    setAssistError('')
+    try {
+      const schemaSummary = schema.ok ? summarizeSchema(schema.schema) : '当前任务未配置可解析的标注模板。'
+      const data = await apiPost<{ text: string, provider: string }>('/llm/inline', {
+        prompt: '我在这道标注题上遇到困难,请结合题目要求给我答题思路和需要重点核对的点。',
+        input: { schema: schemaSummary, payload, answer },
+      })
+      setAssistText(data.text)
+    } catch (error) {
+      setAssistError(error instanceof Error ? error.message : 'AI 求助暂时不可用,请稍后再试。')
+    } finally {
+      setAssistLoading(false)
+    }
+  }
+
   const answerKey = useMemo(() => answerDraftKey(answer), [answer])
 
   useEffect(() => {
@@ -295,9 +324,20 @@ export default function LabelerPlaza() {
     setAutoSaveState('idle')
     autoSaveSeq.current += 1
     lastSavedDraftKey.current = ''
+    setAssistOpen(false)
+    setAssistText('')
+    setAssistError('')
     void loadTasks()
     void loadMySubmissions()
   }, [loadMySubmissions, loadTasks])
+
+  // 切题时清空上一题的 AI 求助结果,避免建议串题。与既有 autosave 效果同样的同步置态模式。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAssistOpen(false)
+    setAssistText('')
+    setAssistError('')
+  }, [bundle?.item?.id])
 
   // 提交/保存后刷新导航状态,保持左侧进度与状态点同步。仅在 bundle.submission?.status 变化时拉取。
   useEffect(() => {
@@ -404,11 +444,36 @@ export default function LabelerPlaza() {
               <div role="alert" className="wb-banner">{schema.message}</div>
             )}
 
+            {assistOpen ? (
+              <section className="wb-llm wb-assist" aria-label="AI 求助建议" aria-busy={assistLoading}>
+                <div className="wb-llm__head">
+                  <span className="wb-llm__title">✦ AI 求助 · 答题建议</span>
+                  <button
+                    type="button"
+                    className="wb-llm__regen"
+                    disabled={assistLoading}
+                    onClick={() => void askAssist()}
+                  >
+                    {assistLoading ? '生成中…' : '重新生成'}
+                  </button>
+                </div>
+                {assistLoading ? (
+                  <div className="wb-llm__body wb-assist__loading">正在为你分析这道题,请稍候…</div>
+                ) : assistError ? (
+                  <div className="wb-llm__body wb-assist__error" role="alert">{assistError}</div>
+                ) : (
+                  <div className="wb-llm__body">{assistText}</div>
+                )}
+                <div className="wb-assist__note">AI 仅提供思路提示,最终判断仍以你的标注为准。</div>
+              </section>
+            ) : null}
+
             <div className="wb-footer">
               <Button theme="light" onClick={() => stepItem(-1)}>← 上一题</Button>
               <Button theme="light" onClick={() => stepItem(1)}>下一题 →</Button>
               <Button theme="light" onClick={skipItem}>跳过</Button>
               <Button theme="light" onClick={() => Toast.info('已记录上报(演示)')}>报告题目</Button>
+              <Button theme="borderless" type="tertiary" loading={assistLoading} onClick={() => void askAssist()} title="遇到难题,让 AI 给点思路">✦ 遇到难题 · AI 求助</Button>
               <span className="wb-footer__shortcuts">{autoSaveText(autoSaveState)}</span>
               <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light">保存草稿</Button>
               <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} title="提交审核 (Ctrl/Cmd + Enter)">提交审核</Button>
@@ -491,6 +556,18 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
 
 function answerDraftKey(answer: AnswerValue) {
   return JSON.stringify(answer)
+}
+
+// summarizeSchema:给 AI 求助用的轻量模板摘要(标题 + 字段名/类型/是否必填),
+// 不把完整 schema JSON 塞进 prompt,既省 token 又减少注入面。
+function summarizeSchema(schema: TemplateSchema): string {
+  const fields = (schema.fields ?? [])
+    .map((field) => {
+      const flags = [field.widget, field.required ? '必填' : '选填'].filter(Boolean).join('/')
+      return `- ${field.label || field.name}(${flags})`
+    })
+    .join('\n')
+  return [`表单标题:${schema.title || '未命名'}`, '字段:', fields || '(无字段)'].join('\n')
 }
 
 function autoSaveText(state: 'idle' | 'saving' | 'saved' | 'failed') {
