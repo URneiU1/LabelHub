@@ -25,8 +25,10 @@ const (
 
 // reviewerReadableSubmissionStatuses:reviewer 角色允许查看的 submission 状态白名单。
 // 草稿 / 提交中 / AI 审中 / 修订中 都属于 labeler 私域,reviewer 无权窥探 raw payload。
+// manual_review 是 AI 可疑转人工复核态,本就要交给 reviewer 初审,必须可见。
 var reviewerReadableSubmissionStatuses = map[string]struct{}{
 	statemachine.StateHumanReviewing:   {},
+	statemachine.StateManualReview:     {},
 	statemachine.StateNeedsArbitration: {},
 	statemachine.StateApproved:         {},
 	statemachine.StateRejected:         {},
