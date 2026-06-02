@@ -63,7 +63,10 @@ func baseDSN() string {
 	if password == "" {
 		log.Fatal("DB_PASSWORD must be set")
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC",
+	// clientFoundRows=true:让 UPDATE 的 RowsAffected 返回"匹配行数"而非"实际变更行数"。
+	// 乐观锁守卫(如发布冻结字段的 `WHERE id=? AND status='draft'` + RowsAffected==1)依赖
+	// 匹配语义;否则把"值没变的 no-op 更新"误判成并发冲突返回 409(M-07)。集成测试 DSN 早已用此项。
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC&clientFoundRows=true",
 		getEnv("DB_USER", "labelhub"),
 		password,
 		getEnv("DB_HOST", "127.0.0.1"),
