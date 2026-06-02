@@ -259,6 +259,8 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "题目租约已过期，请重新领取")
 		case errors.Is(err, submission.ErrDailySubmissionLimitReached):
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "已达到今日提交上限")
+		case errors.Is(err, submission.ErrIncompleteAnswer):
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "答案不完整，请填写所有必填项 / Incomplete answer")
 		case errors.Is(err, submission.ErrInvalidSubmit):
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
 		case errors.Is(err, submission.ErrDraftAfterSubmit):

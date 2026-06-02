@@ -88,7 +88,12 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 			}
 		}
 		overlap := overlapConsensus
-		overlapRequired := !input.Draft && requiredOverlapForItem(task, item.ID) > 1
+		// overlap 共识是 labeler *首次提交* 的准入闸口,只在 from=draft 时判定。
+		// 一旦该 submission 过了共识进入审核管线、被 reviewer 打回(revise),其 resubmit
+		// (from=revising)不得再重跑 overlap——否则会把已归档的 consensus_evidence 同伴答案
+		// 重新拉来比较,把单纯的"改完重审"误判成 needs_arbitration / overlapWaiting(F-1)。
+		// revise 后的重提直接重走 AI/人工审核。
+		overlapRequired := !input.Draft && from == statemachine.StateDraft && requiredOverlapForItem(task, item.ID) > 1
 		if overlapRequired {
 			excludedFields, err := loadFileUploadFieldNames(tx, task.ID, sub.TemplateVersion)
 			if err != nil {
@@ -117,6 +122,9 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 		if !input.Draft {
 			if from != statemachine.StateDraft && from != statemachine.StateRevising {
 				return ErrInvalidSubmit
+			}
+			if err := validateSubmitAnswer(tx, task, sub.TemplateVersion, input.AnswerRaw); err != nil {
+				return err
 			}
 			if err := statemachine.Apply(from, statemachine.EventSubmit, statemachine.StateSubmitted); err != nil {
 				return fmt.Errorf("%w: %s --submit--> submitted", ErrInvalidTransition, from)

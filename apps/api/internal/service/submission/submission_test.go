@@ -236,6 +236,63 @@ func TestSaveOverlapWaitsForPeerAndReleasesItem(t *testing.T) {
 	}
 }
 
+// F-1 回归:overlap 任务上,被打回后的 revise-resubmit(from=revising)不得重跑 overlap 共识
+// (否则会把已归档的 consensus_evidence 同伴答案重新拉来比较,误判 needs_arbitration)。
+// 断言方式:任务虽配了 overlap(count=2,coverage=100),但因 from=revising,代码绝不发
+// priorOverlapAnswers 查询(此处不 mock 它);若 F-1 守卫失效,该查询会发出 → sqlmock 报"unexpected"。
+// 行为上 revise 重提直接走审核(此处 AI/人审都关 → 自动通过)。
+func TestSaveRevisingResubmitSkipsOverlapOnOverlapTask(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "overlap_count", "overlap_coverage_pct", "review_sampling_pct", "human_review_enabled", "ai_review_enabled"}).
+			AddRow(1, 2, 100, 0, false, false))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	// findOrCreateSubmission 命中一份 revising 提交(被 reviewer 打回后等待重提)。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateRevising))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(2))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(103, 1))
+	// 注意:这里没有 priorOverlapAnswers 的 SELECT —— overlap 被 from=revising 跳过。
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, statemachine.StateApproved))
+	mock.ExpectCommit()
+
+	result, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"fixed"}`),
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if result.Status != statemachine.StateApproved {
+		t.Fatalf("status = %s, want approved", result.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestSaveAutoApprovesUnsampledSubmissionWithoutAI(t *testing.T) {
 	db, mock, sqlDB := newSubmissionMockDB(t)
 	defer sqlDB.Close()
