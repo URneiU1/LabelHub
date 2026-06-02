@@ -77,6 +77,10 @@ apps/api/cmd/server/api
 apps/ai-worker/worker
 apps/ai-worker/cmd/worker/worker
 apps/ai-worker/cmd/worker/ai-worker
+# 仓库根的 go build 二进制产物(手动/make build 留下,23MB,不进 Git)
+/worker
+# 本地 scratch prompt(代码审查提示词草稿,非交付物)
+/goal.md
 
 # Go workspace cache
 go.work.sum
