@@ -48,6 +48,9 @@ export default function AppLayout() {
   const ownerWorkspace = hasAnyRole(['owner', 'admin'])
   const activeSection = isOwnerSection(params.section) ? params.section : undefined
   const subTabs = activeSection ? OWNER_SUB_NAV[activeSection] : undefined
+  // Template Designer is a focus-mode editor: hide the global side nav so the
+  // three-pane canvas gets the full width (route is /owner/tasks/:taskId/templates/:templateId).
+  const isDesigner = Boolean(params.templateId)
 
   useEffect(() => {
     if (!ownerWorkspace) return
@@ -84,7 +87,8 @@ export default function AppLayout() {
           </div>
         </div>
       </header>
-      <div className="lh-shell">
+      <div className={'lh-shell' + (isDesigner ? ' lh-shell--designer' : '')}>
+        {isDesigner ? null : (
         <aside className="lh-shell__side">
           {ownerWorkspace ? (
             OWNER_NAV_GROUPS.map((group) => (
@@ -139,6 +143,7 @@ export default function AppLayout() {
             </div>
           ) : null}
         </aside>
+        )}
         <main className="lh-shell__main">
           {subTabs && activeSection ? (
             <nav className="lh-subtabs" aria-label="子页面">
