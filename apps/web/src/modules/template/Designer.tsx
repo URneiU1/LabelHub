@@ -125,8 +125,11 @@ const designerExprParser = new ExprParser()
 export default function TemplateDesigner() {
   const { taskId, templateId } = useParams()
   const navigate = useNavigate()
+  // isNew:templateId === 'new' 进入空白新建态,不拉取已有模板,保存即创建该任务的第一个版本。
+  const isNew = templateId === 'new'
   const numericTaskId = Number(taskId)
-  const numericTemplateId = Number(templateId)
+  // 新建态用 0 占位(而非 NaN),让 isCurrentRoute 的 templateId 比较稳定;loadTemplate 在 isNew 分支提前返回,不会触发 <=0 无效判定。
+  const numericTemplateId = isNew ? 0 : Number(templateId)
   const [template, setTemplate] = useState<TaskTemplate | null>(null)
   const [schema, setSchema] = useState<TemplateSchema | null>(null)
   const [title, setTitle] = useState('')
@@ -164,6 +167,22 @@ export default function TemplateDesigner() {
     const routeTaskId = numericTaskId
     const routeTemplateId = numericTemplateId
     const isCurrentLoad = () => loadSeq.current === requestSeq
+
+    if (isNew) {
+      // 新建模式:跳过拉取,初始化一张空白可编辑模板,保存时走 POST /tasks/:id/templates 创建首版。
+      setTemplate(null)
+      setSchema({ title: '', layout: 'single_page', fields: [] })
+      setTitle('')
+      setFields([])
+      setSelectedId(null)
+      setIsLatest(true)
+      setLatestTemplateId(null)
+      setSchemaError(null)
+      setTaskMismatch(false)
+      setError('')
+      setLoading(false)
+      return
+    }
 
     if (!Number.isFinite(routeTemplateId) || routeTemplateId <= 0) {
       setTemplate(null)
@@ -228,7 +247,7 @@ export default function TemplateDesigner() {
         setLoading(false)
       }
     }
-  }, [numericTaskId, numericTemplateId])
+  }, [numericTaskId, numericTemplateId, isNew])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -515,12 +534,12 @@ export default function TemplateDesigner() {
             <span>/</span>
             <Link to={`/owner/tasks/${numericTaskId}/templates`}>模板搭建</Link>
             <span>/</span>
-            <span>T-{numericTaskId} · r{template?.version ?? '-'}</span>
+            <span>T-{numericTaskId} · {isNew ? '新建' : `r${template?.version ?? '-'}`}</span>
           </div>
           <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>模板搭建器（Designer）</h1>
           <div className="template-designer-subtitle">拖拽物料、配置联动与校验规则，发布后由标注工作台直接消费。</div>
           <div className="template-designer-version-row">
-             <span className="designer-version">当前版本 r{template?.version ?? '-'}</span>
+             <span className="designer-version">{isNew ? '新建模板' : `当前版本 r${template?.version ?? '-'}`}</span>
              <span className="designer-task-link">绑定任务 T-{numericTaskId}</span>
              <span className={isLatest ? 'template-designer-status template-designer-status--latest' : 'template-designer-status template-designer-status--readonly'}>{isLatest ? 'LATEST / EDITABLE' : 'READONLY'}</span>
           </div>

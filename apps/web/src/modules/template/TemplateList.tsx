@@ -34,8 +34,13 @@ export default function TemplateList() {
     <div style={pageStyle}>
       <div style={{ background: 'var(--color-surface)', padding: 'var(--space-lg) var(--space-xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
         <Link to="/owner" style={backLinkStyle}>← 返回 Owner 仪表盘</Link>
-        <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>模板版本管理</h1>
-        <p style={mutedStyle}>查看与管理当前任务的所有标注模板版本。最新的版本始终处于可编辑状态。</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
+          <div>
+            <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>模板版本管理</h1>
+            <p style={mutedStyle}>查看与管理当前任务的所有标注模板版本。最新的版本始终处于可编辑状态。</p>
+          </div>
+          <Link to={`/owner/tasks/${numericTaskId}/templates/new`} style={newTemplateButtonStyle}>+ 新建模板</Link>
+        </div>
       </div>
 
       {error ? <div role="alert" style={{ ...alertStyle, margin: 'var(--space-md) 0' }}>{error}</div> : null}
@@ -46,6 +51,7 @@ export default function TemplateList() {
         ) : templates.length === 0 ? (
           <div style={{ padding: 'var(--space-2xl)', textAlign: 'center', background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--color-border)' }}>
             <p style={mutedStyle}>当前任务暂无模板版本。</p>
+            <Link to={`/owner/tasks/${numericTaskId}/templates/new`} style={{ ...newTemplateButtonStyle, marginTop: 'var(--space-md)' }}>+ 新建第一个模板</Link>
           </div>
         ) : (
           <div style={listStyle}>
@@ -122,6 +128,18 @@ const backLinkStyle: CSSProperties = {
   textDecoration: 'none',
   fontWeight: 500,
   fontSize: 'var(--text-sm)',
+}
+
+const newTemplateButtonStyle: CSSProperties = {
+  display: 'inline-block',
+  padding: 'var(--space-sm) var(--space-lg)',
+  background: 'var(--color-accent)',
+  color: '#fff',
+  borderRadius: 'var(--radius-md)',
+  textDecoration: 'none',
+  fontWeight: 600,
+  fontSize: 'var(--text-sm)',
+  whiteSpace: 'nowrap',
 }
 
 const alertStyle: CSSProperties = {

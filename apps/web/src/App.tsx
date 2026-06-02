@@ -22,6 +22,7 @@ export default function App() {
             <Route path="/owner" element={<Navigate to="/owner/ai" replace />} />
             <Route path="/owner/export" element={<Navigate to="/owner/export/config" replace />} />
             <Route path="/owner/tasks/:taskId/templates" element={<RequireRole roles={['owner', 'admin']}><TemplateList /></RequireRole>} />
+            <Route path="/owner/tasks/:taskId/templates/new" element={<RequireRole roles={['owner', 'admin']}><TemplateDesigner /></RequireRole>} />
             <Route path="/owner/tasks/:taskId/templates/:templateId" element={<RequireRole roles={['owner', 'admin']}><TemplateDesigner /></RequireRole>} />
             <Route path="/owner/:section" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
             <Route path="/owner/:section/:sub" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />

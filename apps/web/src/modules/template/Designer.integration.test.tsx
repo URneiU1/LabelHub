@@ -820,6 +820,31 @@ describe('TemplateDesigner', () => {
     })
   })
 
+  it('creates a brand-new template from the /new route without loading an existing one', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      // 新建阶段不应拉取 /templates/new;navigate 到新建版本后才加载 /templates/21。
+      if (path === '/templates/21') return templateDetail(21, baseSchema, true)
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 21, taskId: 1, version: 1, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/1/templates/new')
+
+    // 新建态:空白可编辑画布,显示「新建模板」而非某个版本号。
+    await screen.findByText('新建模板')
+    await user.click(screen.getByRole('button', { name: 'Add Input' }))
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        fields: expect.arrayContaining([expect.objectContaining({ widget: 'Input' })]),
+      }))
+    })
+    // 新建阶段没有以 'new' 拉取任何模板。
+    expect(mockApiGet).not.toHaveBeenCalledWith('/templates/new')
+  })
+
   it('fails closed for historical templates whose task does not match the route', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
