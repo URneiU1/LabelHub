@@ -6,7 +6,7 @@ import EmptyState from '../../shared/components/EmptyState'
 import StatusBadge from '../../shared/components/StatusBadge'
 import { isSafeURL } from '../../shared/security/url'
 
-type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx'
+type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx' | 'md'
 
 type ExportRecord = {
   id: number
@@ -20,7 +20,7 @@ type ExportListResponse = { exports: ExportRecord[] }
 type CreateExportResponse = { id: number, status: string }
 type DownloadURLResponse = { url: string, expiresIn: number }
 
-const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx']
+const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx', 'md']
 const BASE_COLUMNS = ['submission_id', 'item_id', 'external_id', 'payload', 'answer']
 const REVIEW_COLUMNS = ['ai_review.verdict', 'ai_review.overall_score', 'ai_review.reason', 'human_review.verdict', 'human_review.reason']
 const POLL_INTERVAL_MS = 2000
