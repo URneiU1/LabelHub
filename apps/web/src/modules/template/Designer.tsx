@@ -1,10 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { Parser as ExprParser } from 'expr-eval'
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
 import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
+import SchemaRenderer from '../../renderer/SchemaRenderer'
 import { parseTemplateSchema } from '../../renderer/parser'
+import type { AnswerValue } from '../../renderer/types'
 import { widgetRegistry } from '../../renderer/widgets'
 import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type VisibleWhen, type WidgetType } from '../../renderer/types'
 import '../../styles/lh/designer.css'
@@ -88,8 +110,14 @@ const nestedWidgetTypes = widgetTypes.filter((widget) => widget !== 'Group' && w
 // Widgets that hold an answer value: visibleWhen / customRule are only meaningful on these.
 const advancedConfigWidgets: WidgetType[] = ['Input', 'TextArea', 'Radio', 'Tags', 'RichText', 'JSONEditor', 'FileUpload']
 
-// dataTransfer markers. A palette drop INSERTS a new widget; an existing-field drop REORDERS.
-const PALETTE_DRAG_PREFIX = 'labelhub/new-widget:'
+// @dnd-kit drag sources. A palette drag INSERTS a new widget; a canvas drag REORDERS.
+// active.data.current.source distinguishes them in onDragEnd.
+type PaletteDragData = { source: 'palette', widget: WidgetType }
+type CanvasDragData = { source: 'canvas', draftId: string }
+type DragData = PaletteDragData | CanvasDragData
+
+// id used by the canvas droppable so empty-canvas / below-last-field drops still land.
+const CANVAS_DROPPABLE_ID = 'canvas-droppable'
 
 // Shared parser used only to surface a non-blocking parse hint for customRule expr in the panel.
 const designerExprParser = new ExprParser()
@@ -114,10 +142,16 @@ export default function TemplateDesigner() {
   const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
-  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null)
+  // activeDrag:当前正在拖拽的来源(palette 新增 / canvas 重排),驱动 DragOverlay 预览与卡片半透明态。
+  const [activeDrag, setActiveDrag] = useState<DragData | null>(null)
   const [activeCanvasTab, setActiveCanvasTab] = useState('base')
   const [showSchemaPreview, setShowSchemaPreview] = useState(false)
+  // 预览面板有两种子模式:原始 JSON / 表单预览(标注员看到的最终可填写表单)。
+  const [previewMode, setPreviewMode] = useState<'json' | 'form'>('json')
+  // previewAnswer:表单预览里临时填写的答案,仅本地 state,不提交。
+  const [previewAnswer, setPreviewAnswer] = useState<AnswerValue>({})
   const loadSeq = useRef(0)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
   const routeRef = useRef({ taskId: numericTaskId, templateId: numericTemplateId })
 
   useEffect(() => {
@@ -247,6 +281,37 @@ export default function TemplateDesigner() {
   const validationErrorsByDraftId = useMemo(() => groupValidationErrorsByDraftId(validationErrors), [validationErrors])
   const canEdit = isLatest && !schemaError && !taskMismatch
   const saveDisabled = saving || !canEdit || validationErrors.length > 0 || fields.length === 0
+  // 表单预览:把当前设计的 schema 走渲染引擎解析,渲成标注员真正会看到的可填写表单。
+  // 配置非法(校验未通过)时 parse 仍可能成功,但若结构不可解析则给出提示。
+  const previewSchemaResult = useMemo(
+    () => parseTemplateSchema(JSON.stringify(buildTemplatePayload(title, fields, schema))),
+    [title, fields, schema],
+  )
+
+  // focusFirstError:校验未通过时,选中并滚动到首个出错字段,形成「校验不通过→回到配置」闭环。
+  // 返回是否存在错误(供保存前拦截判断)。
+  const focusFirstError = useCallback(() => {
+    if (validationErrors.length === 0) return false
+    const targetDraftId = validationErrors.find((item) => item.draftId)?.draftId
+    if (!targetDraftId) return true
+    // 出错字段若在某个分页 Tab 内,先切回基础信息画布(顶层字段都在那渲染),保证目标卡片可见。
+    setActiveCanvasTab('base')
+    setSelectedId(targetDraftId)
+    // 等画布按新选中态重渲染后再滚动定位。
+    window.requestAnimationFrame(() => {
+      const node = canvasRef.current?.querySelector(`[data-draft-id="${targetDraftId}"]`)
+      if (node instanceof HTMLElement) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+    return true
+  }, [validationErrors])
+
+  function handleSaveClick() {
+    // 出现校验错误时,先把用户带回首个出错字段,而不是静默禁用按钮。
+    if (focusFirstError()) return
+    void saveTemplate()
+  }
   const canvasTabsField = fields.find((field) => field.widget === 'Tabs') ?? null
   // 画布按子导航 tab 切换内容:基础信息=全部顶层字段(可编辑,与原行为一致,分页组仍在此可选中编辑);
   // 内容 tab=该分页 tab 的字段(只读预览,编辑走右侧已选中的分页组属性面板)。
@@ -289,11 +354,6 @@ export default function TemplateDesigner() {
     setFields((current) => reorderFieldByOffset(current, fieldId, direction))
   }
 
-  function moveFieldToDragTarget(fieldId: string, targetFieldId: string) {
-    if (!canEdit || fieldId === targetFieldId) return
-    setFields((current) => reorderFieldsToTarget(current, fieldId, targetFieldId))
-  }
-
   function insertWidgetBeforeTarget(widget: WidgetType, targetFieldId: string | null) {
     if (!canEdit) return
     setFields((current) => {
@@ -306,23 +366,42 @@ export default function TemplateDesigner() {
     })
   }
 
-  function handleCanvasDrop(event: DragEvent<HTMLElement>, targetFieldId: string | null) {
+  // 拖拽传感器:Pointer 带 8px 触发距离阈值,避免点击物料按钮(追加字段)被误判为拖拽;
+  // Keyboard 接 sortable 的方向键坐标算法,提供键盘可达性(本次迁移的主要收益)。
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  function handleDragStart(event: DragStartEvent) {
     if (!canEdit) return
-    event.preventDefault()
-    const transfer = event.dataTransfer.getData('text/plain')
-    if (transfer.startsWith(PALETTE_DRAG_PREFIX)) {
-      const widget = transfer.slice(PALETTE_DRAG_PREFIX.length) as WidgetType
-      if (widgetTypes.includes(widget)) {
-        insertWidgetBeforeTarget(widget, targetFieldId)
+    const data = event.active.data.current as DragData | undefined
+    setActiveDrag(data ?? null)
+  }
+
+  // onDragEnd 用 active.data.current.source 区分两类拖拽:
+  // - palette:在 over 目标字段前插入新 widget(over 为画布占位/空白时追加到末尾)。
+  // - canvas:把被拖字段移动到 over 目标字段的位置(reorderFieldsToTarget 保留「插到目标前」语义)。
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDrag(null)
+    if (!canEdit) return
+    const data = event.active.data.current as DragData | undefined
+    if (!data) return
+    const overId = event.over?.id
+    if (data.source === 'palette') {
+      const targetFieldId = !overId || overId === CANVAS_DROPPABLE_ID ? null : String(overId)
+      if (widgetTypes.includes(data.widget)) {
+        insertWidgetBeforeTarget(data.widget, targetFieldId)
       }
-      setDraggingFieldId(null)
       return
     }
-    const draggedId = draggingFieldId ?? transfer
-    if (draggedId && targetFieldId) {
-      moveFieldToDragTarget(draggedId, targetFieldId)
-    }
-    setDraggingFieldId(null)
+    // canvas 重排:over 落在另一张顶层字段卡上才移动,落到自身/画布空白不动。
+    if (!overId || overId === CANVAS_DROPPABLE_ID || overId === data.draftId) return
+    setFields((current) => reorderFieldsToTarget(current, data.draftId, String(overId)))
+  }
+
+  function handleDragCancel() {
+    setActiveDrag(null)
   }
 
   function updateSelected(patch: Partial<FieldSchema>) {
@@ -455,7 +534,8 @@ export default function TemplateDesigner() {
           {taskMismatch ? null : canEdit ? (
             <>
               <Button aria-label="Discard" disabled={saving} onClick={discardChanges} theme="light">重置修改</Button>
-              <Button aria-label="Save as new version" disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>保存并发布版本 r{(template?.version ?? 0) + 1}</Button>
+              {/* 仅校验未通过时不禁用按钮,改为点击时聚焦首个出错字段(闭环);其它阻断条件仍禁用。 */}
+              <Button aria-label="Save as new version" disabled={saving || !canEdit || fields.length === 0} loading={saving} theme="solid" onClick={handleSaveClick}>保存并发布版本 r{(template?.version ?? 0) + 1}</Button>
             </>
           ) : (
             <Button aria-label="Fork as new version" disabled={saving || !schema} loading={saving} theme="solid" onClick={() => void forkTemplate()}>Fork 为新版本</Button>
@@ -472,168 +552,225 @@ export default function TemplateDesigner() {
           {validationErrors.map((item) => <div key={`${item.field}-${item.message}`} style={{ fontSize: 13 }}>• {item.field}: {item.message}</div>)}
         </div>
       ) : null}
-      {showSchemaPreview ? <pre aria-label="schema preview" style={jsonPreviewStyle}>{JSON.stringify(buildTemplatePayload(title, fields, schema), null, 2)}</pre> : null}
-
-      <div className="template-designer-grid" style={{ marginTop: 'var(--space-lg)' }}>
-        <aside className="template-designer-palette" style={panelStyle}>
-          <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
-            <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
+      {showSchemaPreview ? (
+        <div aria-label="schema preview panel" style={{ margin: 'var(--space-md) 0' }}>
+          <div role="tablist" aria-label="preview mode" className="canvas-tabs" style={{ marginBottom: 'var(--space-sm)' }}>
+            <button type="button" role="tab" aria-selected={previewMode === 'json'} className={`canvas-tab${previewMode === 'json' ? ' canvas-tab--active' : ''}`} onClick={() => setPreviewMode('json')}>原始 JSON</button>
+            <button type="button" role="tab" aria-selected={previewMode === 'form'} className={`canvas-tab${previewMode === 'form' ? ' canvas-tab--active' : ''}`} onClick={() => setPreviewMode('form')}>表单预览</button>
           </div>
-          <div style={paletteStyle}>
-            {paletteGroups.map((group) => (
-              <section key={group.label} className="template-designer-palette-group">
-                <div className="palette-group__title">{group.label}</div>
-                {group.widgets.map((widget) => (
-                  <Button
-                    key={widget}
-                    aria-label={`Add ${widget}`}
-                    className="palette-item"
-                    disabled={!canEdit}
-                    draggable={canEdit}
-                    onClick={() => appendField(widget)}
-                    onDragStart={(event: DragEvent<HTMLButtonElement>) => {
-                      if (!canEdit) return
-                      event.dataTransfer.effectAllowed = 'copy'
-                      event.dataTransfer.setData('text/plain', `${PALETTE_DRAG_PREFIX}${widget}`)
-                      setDraggingFieldId(null)
-                    }}
-                    theme="light"
-                  >
-                    <span className={`palette-item__icon${widget === 'LLMTrigger' ? ' palette-item__icon--purple' : widget === 'ShowItem' ? ' palette-item__icon--show' : ''}`}>{widgetIcons[widget]}</span>
-                    <span>{widgetLabels[widget]}</span>
-                  </Button>
-                ))}
-              </section>
-            ))}
-          </div>
-        </aside>
-
-        <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 360 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
-            <label style={fieldStyle}>
-              <span style={{ fontWeight: 600 }}>模板名称</span>
-              <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} placeholder="输入模板标题..." />
-            </label>
-
-            <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)' }}>
-              <div role="tablist" aria-label="canvas tabs" className="canvas-tabs">
-                <button type="button" role="tab" aria-selected={activeCanvasTab === 'base'} className={`canvas-tab${activeCanvasTab === 'base' ? ' canvas-tab--active' : ''}`} onClick={() => setActiveCanvasTab('base')}>基础信息</button>
-                {(canvasTabsField?.tabs ?? []).map((tab, index) => (
-                  <button key={tab._draftId ?? `${tab.label}-${index}`} type="button" role="tab" aria-selected={activeCanvasTab === `tab-${index}`} className={`canvas-tab${activeCanvasTab === `tab-${index}` ? ' canvas-tab--active' : ''}`} onClick={() => selectCanvasTab(index)}>{tab.label}</button>
-                ))}
-                <button type="button" aria-label="新增画布 Tab" className="canvas-tab canvas-tab--add" disabled={!canEdit} onClick={addCanvasTab}>+ 新 Tab</button>
-                <span className="canvas-hint">拖拽字段卡调整顺序</span>
+          {previewMode === 'json' ? (
+            <pre aria-label="schema preview" style={jsonPreviewStyle}>{JSON.stringify(buildTemplatePayload(title, fields, schema), null, 2)}</pre>
+          ) : previewSchemaResult.ok ? (
+            <div aria-label="form preview" style={formPreviewStyle}>
+              <div className="lh-muted lh-text-13" style={{ marginBottom: 'var(--space-sm)' }}>
+                标注员视角的最终表单(可填写预览,不会提交)。
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-                <div style={{ fontWeight: 600 }}>画布区域 (Canvas)</div>
-                <PreviewItemStatus
-                  item={previewItem}
-                  loading={previewLoading}
-                  loadError={previewError}
-                  parseError={previewPayloadResult.error}
-                />
-              </div>
+              <SchemaRenderer
+                schema={previewSchemaResult.value}
+                payload={previewPayloadResult.payload}
+                value={previewAnswer}
+                onChange={setPreviewAnswer}
+              />
+            </div>
+          ) : (
+            <div role="alert" style={{ ...alertStyle, background: '#fff1f0' }}>当前配置无法渲染为表单预览:{previewSchemaResult.error.message}</div>
+          )}
+        </div>
+      ) : null}
 
-              <div
-                aria-label="canvas drop zone"
-                style={canvasStyle}
-                onDragOver={(event) => {
-                  if (!canEdit) return
-                  event.preventDefault()
-                  event.dataTransfer.dropEffect = draggingFieldId ? 'move' : 'copy'
-                }}
-                onDrop={(event) => {
-                  // Drops that miss a specific field append to the end (covers the empty canvas
-                  // and the gaps below the last node). Field-level drops stop propagation.
-                  handleCanvasDrop(event, null)
-                }}
-              >
-                {isBaseCanvasTab ? (
-                  baseCanvasFields.length === 0 ? (
-                    <EmptyCanvasDiagram />
-                  ) : baseCanvasFields.map((field, index) => (
-                    <CanvasField
-                      key={field._draftId}
-                      field={field}
-                      errors={validationErrorsByDraftId.get(field._draftId) ?? []}
-                      isFirst={index === 0}
-                      isLast={index === baseCanvasFields.length - 1}
-                      previewPayload={previewPayloadResult.payload}
-                      selected={field._draftId === selectedId}
-                      dragging={field._draftId === draggingFieldId}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className="template-designer-grid" style={{ marginTop: 'var(--space-lg)' }}>
+          <aside className="template-designer-palette" style={panelStyle}>
+            <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
+              <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
+            </div>
+            <div style={paletteStyle}>
+              {paletteGroups.map((group) => (
+                <section key={group.label} className="template-designer-palette-group">
+                  <div className="palette-group__title">{group.label}</div>
+                  {group.widgets.map((widget) => (
+                    <PaletteItem
+                      key={widget}
+                      widget={widget}
                       disabled={!canEdit}
-                      onSelect={() => setSelectedId(field._draftId)}
-                      onCopy={() => copyField(field._draftId)}
-                      onDelete={() => deleteField(field._draftId)}
-                      onMoveDown={() => moveField(field._draftId, 1)}
-                      onMoveUp={() => moveField(field._draftId, -1)}
-                      onDragEnd={() => setDraggingFieldId(null)}
-                      onDragOver={(event) => {
-                        if (!canEdit) return
-                        event.preventDefault()
-                        event.dataTransfer.dropEffect = draggingFieldId ? 'move' : 'copy'
-                      }}
-                      onDragStart={(event) => {
-                        if (!canEdit) return
-                        event.dataTransfer.effectAllowed = 'move'
-                        event.dataTransfer.setData('text/plain', field._draftId)
-                        setDraggingFieldId(field._draftId)
-                      }}
-                      onDrop={(event) => {
-                        event.stopPropagation()
-                        handleCanvasDrop(event, field._draftId)
-                      }}
+                      onAppend={() => appendField(widget)}
                     />
-                  ))
-                ) : activeTabFields.length === 0 ? (
-                  <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                    该 Tab 暂无字段。在右侧「属性 · 分页组」中为此 Tab 添加字段。
-                  </div>
-                ) : (
-                  <>
-                    <div style={{ marginBottom: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                      只读预览 · 编辑此 Tab 的字段请在右侧「属性 · 分页组」中操作
+                  ))}
+                </section>
+              ))}
+            </div>
+          </aside>
+
+          <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 360 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+              <label style={fieldStyle}>
+                <span style={{ fontWeight: 600 }}>模板名称</span>
+                <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} placeholder="输入模板标题..." />
+              </label>
+
+              <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)' }}>
+                <div role="tablist" aria-label="canvas tabs" className="canvas-tabs">
+                  <button type="button" role="tab" aria-selected={activeCanvasTab === 'base'} className={`canvas-tab${activeCanvasTab === 'base' ? ' canvas-tab--active' : ''}`} onClick={() => setActiveCanvasTab('base')}>基础信息</button>
+                  {(canvasTabsField?.tabs ?? []).map((tab, index) => (
+                    <button key={tab._draftId ?? `${tab.label}-${index}`} type="button" role="tab" aria-selected={activeCanvasTab === `tab-${index}`} className={`canvas-tab${activeCanvasTab === `tab-${index}` ? ' canvas-tab--active' : ''}`} onClick={() => selectCanvasTab(index)}>{tab.label}</button>
+                  ))}
+                  <button type="button" aria-label="新增画布 Tab" className="canvas-tab canvas-tab--add" disabled={!canEdit} onClick={addCanvasTab}>+ 新 Tab</button>
+                  <span className="canvas-hint">拖拽字段卡调整顺序</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+                  <div style={{ fontWeight: 600 }}>画布区域 (Canvas)</div>
+                  <PreviewItemStatus
+                    item={previewItem}
+                    loading={previewLoading}
+                    loadError={previewError}
+                    parseError={previewPayloadResult.error}
+                  />
+                </div>
+
+                <CanvasDropZone canvasRef={canvasRef}>
+                  {isBaseCanvasTab ? (
+                    baseCanvasFields.length === 0 ? (
+                      <EmptyCanvasDiagram />
+                    ) : (
+                      <SortableContext items={baseCanvasFields.map((field) => field._draftId)} strategy={verticalListSortingStrategy}>
+                        {baseCanvasFields.map((field, index) => (
+                          <CanvasField
+                            key={field._draftId}
+                            field={field}
+                            errors={validationErrorsByDraftId.get(field._draftId) ?? []}
+                            isFirst={index === 0}
+                            isLast={index === baseCanvasFields.length - 1}
+                            previewPayload={previewPayloadResult.payload}
+                            selected={field._draftId === selectedId}
+                            disabled={!canEdit}
+                            onSelect={() => setSelectedId(field._draftId)}
+                            onCopy={() => copyField(field._draftId)}
+                            onDelete={() => deleteField(field._draftId)}
+                            onMoveDown={() => moveField(field._draftId, 1)}
+                            onMoveUp={() => moveField(field._draftId, -1)}
+                          />
+                        ))}
+                      </SortableContext>
+                    )
+                  ) : activeTabFields.length === 0 ? (
+                    <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                      该 Tab 暂无字段。在右侧「属性 · 分页组」中为此 Tab 添加字段。
                     </div>
-                    {activeTabFields.map((child, index) => (
-                      <CanvasField
-                        key={child._draftId ?? `${child.name}-${index}`}
-                        field={child}
-                        errors={[]}
-                        isFirst={index === 0}
-                        isLast={index === activeTabFields.length - 1}
-                        previewPayload={previewPayloadResult.payload}
-                        selected={false}
-                        dragging={false}
-                        disabled
-                        readOnly
-                        onSelect={() => undefined}
-                        onCopy={() => undefined}
-                        onDelete={() => undefined}
-                        onMoveDown={() => undefined}
-                        onMoveUp={() => undefined}
-                        onDragEnd={() => undefined}
-                        onDragOver={() => undefined}
-                        onDragStart={() => undefined}
-                        onDrop={() => undefined}
-                      />
-                    ))}
-                  </>
-                )}
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                        只读预览 · 编辑此 Tab 的字段请在右侧「属性 · 分页组」中操作
+                      </div>
+                      {activeTabFields.map((child, index) => (
+                        <CanvasField
+                          key={child._draftId ?? `${child.name}-${index}`}
+                          field={child}
+                          errors={[]}
+                          isFirst={index === 0}
+                          isLast={index === activeTabFields.length - 1}
+                          previewPayload={previewPayloadResult.payload}
+                          selected={false}
+                          disabled
+                          readOnly
+                          onSelect={() => undefined}
+                          onCopy={() => undefined}
+                          onDelete={() => undefined}
+                          onMoveDown={() => undefined}
+                          onMoveUp={() => undefined}
+                        />
+                      ))}
+                    </>
+                  )}
+                </CanvasDropZone>
               </div>
             </div>
-          </div>
-        </main>
+          </main>
 
-        <aside className="template-designer-property" style={panelStyle}>
-          <PropertyPanel
-            field={selectedField}
-            errors={selectedField ? validationErrorsByDraftId.get(selectedField._draftId) ?? [] : []}
-            fields={fields}
-            disabled={!canEdit}
-            onChange={updateSelected}
-          />
-        </aside>
-      </div>
+          <aside className="template-designer-property" style={panelStyle}>
+            <PropertyPanel
+              field={selectedField}
+              errors={selectedField ? validationErrorsByDraftId.get(selectedField._draftId) ?? [] : []}
+              fields={fields}
+              disabled={!canEdit}
+              onChange={updateSelected}
+            />
+          </aside>
+        </div>
+
+        {/* DragOverlay:拖拽时跟随指针/键盘焦点的预览,palette 显示物料名,canvas 显示字段名。 */}
+        <DragOverlay dropAnimation={null}>
+          {activeDrag ? (
+            <div style={dragOverlayStyle}>
+              {activeDrag.source === 'palette'
+                ? `+ ${widgetLabels[activeDrag.widget]}`
+                : (fields.find((field) => field._draftId === activeDrag.draftId)?.name ?? '字段')}
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
+  )
+}
+
+// 物料按钮:useDraggable 提供拖入画布的能力,onClick 仍负责「点击追加」(两者并存)。
+// PointerSensor 的 8px 距离阈值保证小幅点击不会被吞成拖拽。
+function PaletteItem({ widget, disabled, onAppend }: {
+  widget: WidgetType
+  disabled: boolean
+  onAppend: () => void
+}) {
+  const data: PaletteDragData = { source: 'palette', widget }
+  // Semi <Button> 的 ref 指向组件实例而非 DOM,@dnd-kit 需要 DOM 节点,故把拖拽 ref/监听器
+  // 挂在外层 <div> 上;内层 Button 仍负责点击追加与视觉样式。
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `palette-${widget}`,
+    data,
+    disabled,
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ opacity: isDragging ? 0.5 : 1, cursor: disabled ? undefined : 'grab', touchAction: 'none' }}
+      {...attributes}
+      {...listeners}
+    >
+      <Button
+        aria-label={`Add ${widget}`}
+        className="palette-item"
+        disabled={disabled}
+        onClick={onAppend}
+        theme="light"
+      >
+        <span className={`palette-item__icon${widget === 'LLMTrigger' ? ' palette-item__icon--purple' : widget === 'ShowItem' ? ' palette-item__icon--show' : ''}`}>{widgetIcons[widget]}</span>
+        <span>{widgetLabels[widget]}</span>
+      </Button>
+    </div>
+  )
+}
+
+// 画布放置区:useDroppable 让空画布与字段卡之间/末尾的空白也能接收 palette 拖入。
+// 保留 canvasRef(focusFirstError 滚动定位与 data-draft-id 查询依赖它)。
+function CanvasDropZone({ canvasRef, children }: {
+  canvasRef: MutableRefObject<HTMLDivElement | null>
+  children: ReactNode
+}) {
+  const { setNodeRef } = useDroppable({ id: CANVAS_DROPPABLE_ID })
+  return (
+    <div
+      ref={(node) => {
+        canvasRef.current = node
+        setNodeRef(node)
+      }}
+      aria-label="canvas drop zone"
+      style={canvasStyle}
+    >
+      {children}
     </div>
   )
 }
@@ -645,7 +782,6 @@ function CanvasField({
   isLast,
   previewPayload,
   selected,
-  dragging,
   disabled,
   readOnly = false,
   onSelect,
@@ -653,10 +789,6 @@ function CanvasField({
   onDelete,
   onMoveDown,
   onMoveUp,
-  onDragEnd,
-  onDragOver,
-  onDragStart,
-  onDrop,
 }: {
   field: DraftField
   errors: DraftValidationError[]
@@ -664,7 +796,6 @@ function CanvasField({
   isLast: boolean
   previewPayload: RenderPayload
   selected: boolean
-  dragging: boolean
   disabled: boolean
   readOnly?: boolean
   onSelect: () => void
@@ -672,10 +803,6 @@ function CanvasField({
   onDelete: () => void
   onMoveDown: () => void
   onMoveUp: () => void
-  onDragEnd: () => void
-  onDragOver: (event: DragEvent<HTMLElement>) => void
-  onDragStart: (event: DragEvent<HTMLButtonElement>) => void
-  onDrop: (event: DragEvent<HTMLElement>) => void
 }) {
   const Widget = widgetRegistry[field.widget]
   // Canvas stays compact like the org mockup (name/type/label per card); the live
@@ -684,13 +811,22 @@ function CanvasField({
   // being labeled), so it stays expanded; input controls default collapsed. Full
   // WYSIWYG is still one click away via the 预览 button.
   const [showPreview, setShowPreview] = useState(field.widget === 'ShowItem')
+  // useSortable:顶层可编辑字段用 _draftId 作为 sortable id 接入排序;
+  // 只读(Tab 内预览)与禁用态不挂拖拽,listeners 仅绑在拖拽手柄上,不影响卡片内点击/编辑。
+  const data: CanvasDragData = { source: 'canvas', draftId: field._draftId }
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: field._draftId, data, disabled: readOnly || disabled })
+  const sortableStyle: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+  }
+  const baseStyle = isDragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle
   return (
     <section
+      ref={readOnly ? undefined : setNodeRef}
       aria-label={`canvas field ${field.name}`}
+      data-draft-id={field._draftId}
       className={`template-designer-field canvas-field${selected ? ' canvas-field--selected' : ''}${field.widget === 'LLMTrigger' ? ' canvas-field--llm' : ''}${field.widget === 'ShowItem' ? ' canvas-field--show' : ''}`}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      style={dragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle}
+      style={{ ...baseStyle, ...sortableStyle }}
     >
       <span aria-hidden="true" style={leftPortStyle} />
       <span aria-hidden="true" style={rightPortStyle} />
@@ -704,7 +840,9 @@ function CanvasField({
         </button>
         {readOnly ? null : (
           <div style={fieldActionsStyle}>
-            <Button size="small" theme="light" disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
+            <span ref={setActivatorNodeRef} style={{ display: 'inline-flex', cursor: disabled ? undefined : 'grab', touchAction: 'none' }} {...attributes} {...listeners}>
+              <Button size="small" theme="light" disabled={disabled} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
+            </span>
             <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
               <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>↑</Button>
               <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>↓</Button>
@@ -1861,7 +1999,21 @@ const selectedCanvasItemStyle: CSSProperties = {
 const draggingCanvasItemStyle: CSSProperties = {
   ...selectedCanvasItemStyle,
   opacity: 0.6,
-  transform: 'scale(0.98)',
+}
+
+const dragOverlayStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: 'var(--space-sm) var(--space-md)',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-accent)',
+  background: 'var(--color-surface)',
+  boxShadow: 'var(--shadow-md)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  color: 'var(--color-accent)',
+  cursor: 'grabbing',
+  pointerEvents: 'none',
 }
 
 const canvasItemHeaderStyle: CSSProperties = {
@@ -2099,6 +2251,15 @@ const jsonPreviewStyle: CSSProperties = {
   whiteSpace: 'pre-wrap',
   fontSize: 12,
   fontFamily: 'var(--font-mono)',
+}
+
+const formPreviewStyle: CSSProperties = {
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-surface)',
+  maxHeight: 600,
+  overflow: 'auto',
 }
 
 const backLinkStyle: CSSProperties = {

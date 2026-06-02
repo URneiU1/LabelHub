@@ -25,6 +25,37 @@ vi.mock('@douyinfe/semi-ui', () => ({
   },
 }))
 
+// @dnd-kit 在 jsdom 下无法靠 getBoundingClientRect 驱动(rect 全为 0),
+// 故 mock DndContext 捕获 onDragEnd,测试直接派发拖拽结束事件来精确驱动重排/插入,
+// 仍走真实组件的 handleDragEnd → setFields → buildTemplatePayload → 保存全链路。
+const dndState = vi.hoisted(() => ({ onDragEnd: undefined as ((event: unknown) => void) | undefined }))
+
+vi.mock('@dnd-kit/core', () => ({
+  DndContext: ({ children, onDragEnd }: { children: React.ReactNode, onDragEnd?: (event: unknown) => void }) => {
+    dndState.onDragEnd = onDragEnd
+    return children
+  },
+  DragOverlay: ({ children }: { children?: React.ReactNode }) => children ?? null,
+  PointerSensor: function PointerSensor() {},
+  KeyboardSensor: function KeyboardSensor() {},
+  useSensor: () => ({}),
+  useSensors: () => [],
+  useDraggable: () => ({ attributes: {}, listeners: {}, setNodeRef: () => {}, transform: null, isDragging: false }),
+  useDroppable: () => ({ setNodeRef: () => {}, isOver: false }),
+  closestCenter: () => [],
+}))
+
+vi.mock('@dnd-kit/sortable', () => ({
+  SortableContext: ({ children }: { children?: React.ReactNode }) => children ?? null,
+  verticalListSortingStrategy: {},
+  sortableKeyboardCoordinates: () => {},
+  useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: () => {}, setActivatorNodeRef: () => {}, transform: null, transition: undefined, isDragging: false }),
+}))
+
+vi.mock('@dnd-kit/utilities', () => ({
+  CSS: { Transform: { toString: () => '' }, Translate: { toString: () => '' } },
+}))
+
 const mockApiGet = vi.mocked(apiGet)
 const mockApiPost = vi.mocked(apiPost)
 
@@ -221,10 +252,14 @@ describe('TemplateDesigner', () => {
     await user.click(screen.getByRole('button', { name: 'Add Tags' }))
     expect(screen.getByLabelText('field_name')).toHaveValue('tags_1')
 
-    const dataTransfer = dragDataTransfer()
-    fireEvent.dragStart(screen.getByRole('button', { name: 'drag tags_1' }), { dataTransfer })
-    fireEvent.dragOver(screen.getByLabelText('canvas field summary'), { dataTransfer })
-    fireEvent.drop(screen.getByLabelText('canvas field summary'), { dataTransfer })
+    // 把 tags_1 拖到 summary 之前(canvas 重排,保留「插到目标前」语义)。
+    const tagsDraftId = draftIdOf('tags_1')
+    await act(async () => {
+      dndState.onDragEnd?.({
+        active: { id: tagsDraftId, data: { current: { source: 'canvas', draftId: tagsDraftId } } },
+        over: { id: draftIdOf('summary') },
+      })
+    })
 
     expect(screen.getByLabelText('field_name')).toHaveValue('tags_1')
 
@@ -378,7 +413,12 @@ describe('TemplateDesigner', () => {
 
     expect(screen.getByLabelText('validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
     expect(screen.getByLabelText('selected validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
-    expect(screen.getByRole('button', { name: 'Save as new version' })).toBeDisabled()
+    // 新行为:校验未通过时保存按钮不再禁用,点击会被 focusFirstError 拦截并定位到出错字段,而不保存。
+    const saveButton = screen.getByRole('button', { name: 'Save as new version' })
+    expect(saveButton).not.toBeDisabled()
+    await user.click(saveButton)
+    expect(mockApiPost).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('selected validation radio_1')).toBeInTheDocument()
   })
 
   it('renders ShowItem preview from a real task item payload without saving preview data', async () => {
@@ -761,11 +801,13 @@ describe('TemplateDesigner', () => {
 
     await screen.findByRole('button', { name: /select summary/ })
 
-    // Drag the Radio palette widget onto the existing "summary" field => inserts before it.
-    const dataTransfer = dragDataTransfer()
-    fireEvent.dragStart(screen.getByRole('button', { name: 'Add Radio' }), { dataTransfer })
-    fireEvent.dragOver(screen.getByLabelText('canvas field summary'), { dataTransfer })
-    fireEvent.drop(screen.getByLabelText('canvas field summary'), { dataTransfer })
+    // 把 Radio 物料拖到已有的 summary 字段上 => 插到它之前。
+    await act(async () => {
+      dndState.onDragEnd?.({
+        active: { id: 'palette-Radio', data: { current: { source: 'palette', widget: 'Radio' } } },
+        over: { id: draftIdOf('summary') },
+      })
+    })
 
     expect(screen.getByRole('button', { name: /select radio_1/ })).toBeInTheDocument()
 
@@ -842,14 +884,13 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function dragDataTransfer() {
-  const data = new Map<string, string>()
-  return {
-    dropEffect: '',
-    effectAllowed: '',
-    getData: vi.fn((type: string) => data.get(type) ?? ''),
-    setData: vi.fn((type: string, value: string) => data.set(type, value)),
-  }
+// 从画布上某字段的「select <name>」按钮回溯到它所在卡片的 data-draft-id,
+// 用作 @dnd-kit 拖拽事件里的稳定 id(组件内部生成,测试无法预知)。
+function draftIdOf(name: string): string {
+  const selectButton = screen.getByRole('button', { name: `select ${name}` })
+  const card = selectButton.closest('[data-draft-id]')
+  if (!card) throw new Error(`no canvas card found for field "${name}"`)
+  return card.getAttribute('data-draft-id') as string
 }
 
 function templateDetail(id: number, schema: unknown, isLatest: boolean, templateTaskId = 1) {
