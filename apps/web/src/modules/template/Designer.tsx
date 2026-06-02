@@ -508,7 +508,7 @@ export default function TemplateDesigner() {
           </div>
         </aside>
 
-        <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 800 }}>
+        <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 360 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
             <label style={fieldStyle}>
               <span style={{ fontWeight: 600 }}>模板名称</span>
@@ -678,6 +678,12 @@ function CanvasField({
   onDrop: (event: DragEvent<HTMLElement>) => void
 }) {
   const Widget = widgetRegistry[field.widget]
+  // Canvas stays compact like the org mockup (name/type/label per card); the live
+  // widget preview is opt-in per card so a long template doesn't become a wall of
+  // rendered controls. ShowItem is a display widget (its preview IS the source data
+  // being labeled), so it stays expanded; input controls default collapsed. Full
+  // WYSIWYG is still one click away via the 预览 button.
+  const [showPreview, setShowPreview] = useState(field.widget === 'ShowItem')
   return (
     <section
       aria-label={`canvas field ${field.name}`}
@@ -695,7 +701,6 @@ function CanvasField({
             <span style={{ fontSize: 11, padding: '1px 6px', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 4, color: 'var(--color-text-muted)' }}>{widgetLabels[field.widget]}</span>
           </div>
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{field.label}</span>
-          <span className="canvas-field__meta">字段名: <span className="canvas-field__meta-strong">{field.name}</span> · {widgetLabels[field.widget]}</span>
         </button>
         {readOnly ? null : (
           <div style={fieldActionsStyle}>
@@ -724,15 +729,28 @@ function CanvasField({
       {field.widget === 'Group' || field.widget === 'Tabs' ? (
         <NestedCanvasPreview field={field} />
       ) : (
-        <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8 }}>
-          <Widget
-            field={field}
-            value={field.widget === 'Tags' ? [] : ''}
-            answer={{}}
-            payload={previewPayload}
-            readOnly
-            onChange={() => undefined}
-          />
+        <div style={{ padding: '0 16px 12px' }}>
+          <button
+            type="button"
+            aria-label={`toggle preview ${field.name}`}
+            aria-expanded={showPreview}
+            onClick={() => setShowPreview((value) => !value)}
+            style={previewToggleStyle}
+          >
+            {showPreview ? '▾ 收起控件预览' : '▸ 预览控件'}
+          </button>
+          {showPreview ? (
+            <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8, marginTop: 8 }}>
+              <Widget
+                field={field}
+                value={field.widget === 'Tags' ? [] : ''}
+                answer={{}}
+                payload={previewPayload}
+                readOnly
+                onChange={() => undefined}
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </section>
@@ -1897,6 +1915,16 @@ const selectFieldButtonStyle: CSSProperties = {
 
 const widgetPreviewStyle: CSSProperties = {
   padding: 'var(--space-lg)',
+}
+
+const previewToggleStyle: CSSProperties = {
+  padding: '3px 10px',
+  fontSize: 'var(--text-sm)',
+  color: 'var(--color-text-secondary)',
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
+  cursor: 'pointer',
 }
 
 const nestedCanvasPreviewStyle: CSSProperties = {
