@@ -348,6 +348,41 @@ export async function removeAssignee(taskId: number, userId: number) {
   return apiDelete<RemoveAssigneeResult>(`/tasks/${taskId}/assignees/${userId}`)
 }
 
+// --- 审核员指派(task_reviewers)。仅 task owner / admin 可操作。 ---
+
+export type TaskReviewerView = {
+  userId: number
+  assignedAt: string
+}
+
+export type ReviewerCandidate = {
+  userId: number
+  username: string
+  displayName: string
+}
+
+export type AddReviewersResult = { added: number }
+export type RemoveReviewerResult = { removed: number }
+
+export async function listReviewers(taskId: number) {
+  const data = await apiGet<{ reviewers: TaskReviewerView[] }>(`/tasks/${taskId}/reviewers`)
+  return data.reviewers
+}
+
+// 列出可指派的审核员(role=reviewer 且 active)。
+export async function listReviewerCandidates(taskId: number) {
+  const data = await apiGet<{ candidates: ReviewerCandidate[] }>(`/tasks/${taskId}/reviewer-candidates`)
+  return data.candidates
+}
+
+export async function addReviewers(taskId: number, userIds: number[]) {
+  return apiPost<AddReviewersResult>(`/tasks/${taskId}/reviewers`, { userIds })
+}
+
+export async function removeReviewer(taskId: number, userId: number) {
+  return apiDelete<RemoveReviewerResult>(`/tasks/${taskId}/reviewers/${userId}`)
+}
+
 export type TaskItem = {
   id: number
   taskId: number

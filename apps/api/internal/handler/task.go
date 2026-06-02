@@ -62,6 +62,8 @@ func (h TaskHandler) Register(api gin.IRouter) {
 	api.GET("/tasks/:taskId/assignees", middleware.RequireRoles("owner", "admin"), h.ListAssignees)
 	api.POST("/tasks/:taskId/assignees", middleware.RequireRoles("owner", "admin"), h.AddAssignees)
 	api.DELETE("/tasks/:taskId/assignees/:userId", middleware.RequireRoles("owner", "admin"), h.RemoveAssignee)
+	// 审核员指派(task_reviewers):Owner 视角列出/指派/解除。
+	h.RegisterReviewers(api)
 }
 
 type createTaskRequest struct {

@@ -6,6 +6,7 @@ import EmptyState from '../../shared/components/EmptyState'
 import TaskForm from './TaskForm'
 import ImportPanel from './ImportPanel'
 import AssigneePanel from './AssigneePanel'
+import ReviewerPanel from './ReviewerPanel'
 import {
   availableTransitions,
   computeTaskStats,
@@ -26,7 +27,7 @@ interface TaskManagePanelProps {
   onTasksChanged: () => void
 }
 
-type DrawerTab = 'info' | 'dataset' | 'distribution'
+type DrawerTab = 'info' | 'dataset' | 'distribution' | 'reviewers'
 
 export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved, onTasksChanged }: TaskManagePanelProps) {
   // drawerMode: 'create' 新建草稿 / 'edit' 编辑选中任务 / null 关闭。
@@ -114,7 +115,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                     <button
                       type="button"
                       aria-label={`选择任务 ${task.title}`}
-                      aria-pressed={selected?.id === task.id}
+                      aria-current={selected?.id === task.id ? true : undefined}
                       className="tasks-table__select"
                       onClick={() => onSelect(task)}
                     >
@@ -188,6 +189,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                   ['info', '基础信息'],
                   ['dataset', '数据集'],
                   ['distribution', '分发策略'],
+                  ['reviewers', '审核员'],
                 ] as Array<[DrawerTab, string]>).map(([key, label]) => (
                   <button
                     key={key}
@@ -222,6 +224,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                       </div>
                     )
                   ) : null}
+                  {drawerTab === 'reviewers' ? <ReviewerPanel taskId={drawerTask.id} /> : null}
                 </>
               ) : null}
             </div>
