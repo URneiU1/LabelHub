@@ -121,3 +121,81 @@
   border-radius: 999px;
   transition: width 200ms ease;
 }
+
+/* 任务详情弹层:点卡片→看详情→确认领取 */
+.lz-detail__scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 22, 0.45);
+  z-index: 40;
+}
+
+.lz-detail {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius-lg);
+  box-shadow: var(--lh-shadow);
+  padding: 24px;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lz-detail__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.lz-detail__title {
+  flex: 1 1 auto;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--lh-text-1);
+  line-height: 1.35;
+}
+
+.lz-detail__meta {
+  font-size: 12px;
+  color: var(--lh-text-3);
+  font-family: var(--lh-font-mono);
+  margin-top: -8px;
+}
+
+.lz-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lz-detail__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lh-text-3);
+}
+
+.lz-detail__body {
+  font-size: 14px;
+  color: var(--lh-text-1);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.lz-detail__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lh-divider);
+}
