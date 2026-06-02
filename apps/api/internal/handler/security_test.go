@@ -301,7 +301,7 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	data := responseData(t, rec)
-	if data["reviewStage"] != "second" || data["reviewLevel"] != float64(2) || data["requiredLevels"] != float64(3) {
+	if data["reviewStage"] != "final" || data["reviewLevel"] != float64(2) || data["requiredLevels"] != float64(2) {
 		t.Fatalf("reviewStage/level/required = %v/%v/%v", data["reviewStage"], data["reviewLevel"], data["requiredLevels"])
 	}
 	aiReview := data["aiReview"].(map[string]any)

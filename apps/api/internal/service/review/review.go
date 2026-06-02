@@ -6,10 +6,16 @@
 // 0 → first,1 → second,2 → final。revise 让 labeler 重提产生新 revision,
 // approve 计数随之归零(per current revision),故 stage 自动重置。
 //
+// 入口态:human_reviewing(AI 通过待初审)、manual_review(AI 可疑转人工复核,独立初审入口)、
+// needs_arbitration(重叠仲裁)。manual_review 的 approve 等价初审通过,推进到 human_reviewing
+// 等终审(对齐状态机 {manual_review, approve} -> human_reviewing),计入 first-level,不终结 item。
+//
 // Apply() 在单一事务内:
-//   - 中间级 approve(第 1、2 次):INSERT human_reviews(stage)+ INSERT audit_logs,
+//   - manual_review 初审通过:INSERT human_reviews(first)+ UPDATE submissions(human_reviewing)+ INSERT audit_logs,
+//     跨状态推进但不终结 item。
+//   - 中间级 approve(第 1 次,human_reviewing 内部):INSERT human_reviews(stage)+ INSERT audit_logs,
 //     submission 停留在 human_reviewing(乐观锁确认未被抢先终态化)。
-//   - 终审 approve(第 3 次):INSERT human_reviews + UPDATE submissions(approved + approved_at)
+//   - 终审 approve(凑满级数):INSERT human_reviews + UPDATE submissions(approved + approved_at)
 //   - UPDATE task_items(finished)+ UPDATE tasks(finished_items += 1)+ INSERT audit_logs。
 //   - reject(任意 stage):同终态路径,落到 rejected。
 //   - revise(任意 stage):INSERT human_reviews + UPDATE submissions(revising)+ INSERT audit_logs,
@@ -37,27 +43,27 @@ const (
 	itemStatusNeedsArbitration = "needs_arbitration"
 )
 
-// RequiredHumanReviewLevels 多级人工审核的总级数:初审 → 复审 → 终审。
+// RequiredHumanReviewLevels 人工审核的总级数:初审 → 终审(对齐审核流程图,两级)。
 // 只有第 RequiredHumanReviewLevels 次 approve 才把 submission 推到 approved;
 // 前面的 approve 只记录 human_reviews 行并停留在 human_reviewing。
-const RequiredHumanReviewLevels = 3
+const RequiredHumanReviewLevels = 2
 
-// 三级 stage 字面值。HumanReview.Stage 列存这三个值之一。
+// stage 字面值。HumanReview.Stage 列存其一。StageSecond(复审)在两级流程下不会产生,
+// 仅保留常量以兼容历史数据与可能的配置扩展。
 const (
 	StageFirst  = "first"  // 初审
-	StageSecond = "second" // 复审
+	StageSecond = "second" // 复审(两级流程下不使用)
 	StageFinal  = "final"  // 终审
 )
 
 // stageByApproveCount 把"当前 revision 已有的 approve 数"映射到本次 approve 落到的 stage 与 level。
-// 0 → first(初审,level 1);1 → second(复审,level 2);2 及以上 → final(终审,level 3)。
+// 0 → first(初审,level 1);1 及以上 → final(终审,level 2)。
 var stageByApproveCount = []struct {
 	stage string
 	level int
 }{
 	{StageFirst, 1},
-	{StageSecond, 2},
-	{StageFinal, 3},
+	{StageFinal, 2},
 }
 
 // StageForApproveCount 暴露 approveCount → (stage, level) 给 handler 与单测复用。
@@ -136,7 +142,9 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			return err
 		}
 		isArbitration := submission.Status == statemachine.StateNeedsArbitration
-		if submission.Status != statemachine.StateHumanReviewing && !isArbitration {
+		// manual_review(AI 可疑转人工复核)是独立的初审入口,与 human_reviewing 同样可审。
+		isManualReview := submission.Status == statemachine.StateManualReview
+		if submission.Status != statemachine.StateHumanReviewing && !isArbitration && !isManualReview {
 			return ErrInvalidTransition
 		}
 		if submission.CurrentRevisionID == nil {
@@ -148,9 +156,15 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			return ErrForbidden
 		}
 
+		// manual_review 的 approve 等价"初审通过":推进到 human_reviewing 等终审,
+		// 目标态由 approved 改写为 human_reviewing(对齐状态机 {manual_review, approve} -> human_reviewing)。
+		if isManualReview && humanVerdict == "approve" {
+			to = statemachine.StateHumanReviewing
+		}
+
 		// 本次 review 落到哪个 stage 由"当前 revision 已有的 approve 数"决定。
 		// approve 路径下,前 RequiredHumanReviewLevels-1 次只记录 human_reviews 并停在 human_reviewing,
-		// 第 RequiredHumanReviewLevels 次才真正推到 approved。
+		// 第 RequiredHumanReviewLevels 次才真正推到 approved。manual_review 的 approve 计入 first-level。
 		var approveCount int64
 		if !isArbitration {
 			if err := tx.Model(&model.HumanReview{}).
@@ -164,9 +178,12 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			stage = StageFinal
 		}
 
-		// 中间级 approve:advance 一级,不变更 submission 状态。
-		isFinalApprove := humanVerdict == "approve" && (isArbitration || int(approveCount) >= RequiredHumanReviewLevels-1)
-		isIntermediateApprove := humanVerdict == "approve" && !isFinalApprove
+		// manual_review 初审通过:跨状态推进到 human_reviewing,记一次 first-level approve,
+		// 但不终结 item(尚未终审)。它既不是"停留原状态的中间级 approve",也不是"终态 approve"。
+		isManualReviewApprove := isManualReview && humanVerdict == "approve"
+		// 中间级 approve(仅 human_reviewing 内部):advance 一级,不变更 submission 状态。
+		isFinalApprove := humanVerdict == "approve" && !isManualReviewApprove && (isArbitration || int(approveCount) >= RequiredHumanReviewLevels-1)
+		isIntermediateApprove := humanVerdict == "approve" && !isManualReviewApprove && !isFinalApprove
 
 		// 只有真正发生状态变更的路径才校验状态机(中间级 approve 不变状态,跳过)。
 		if !isIntermediateApprove {

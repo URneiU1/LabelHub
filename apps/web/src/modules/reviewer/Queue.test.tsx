@@ -105,6 +105,40 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
   })
 
+  it('loads the manual_review branch and exposes a dedicated 转人工复核 partition', async () => {
+    const user = userEvent.setup()
+    const manualSubmission = { ...submission, id: 777, itemId: 17, status: 'manual_review', aiVerdict: 'uncertain', currentRevisionId: 977 }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions?status=manual_review') {
+        return [manualSubmission]
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<ReviewerQueue />)
+
+    // 两条独立分支都被拉取。
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith('/reviewer/submissions')
+      expect(mockApiGet).toHaveBeenCalledWith('/reviewer/submissions?status=manual_review')
+    })
+
+    // 「转人工复核」分区 tab 存在;两条 submission 默认都在「全部」分区可见。
+    await screen.findByLabelText('选择 Submission #501')
+    await screen.findByLabelText('选择 Submission #777')
+    const manualTab = screen.getByRole('tab', { name: /转人工复核/ })
+
+    // 切到「转人工复核」分区后,只剩 manual_review 那条。
+    await user.click(manualTab)
+    await waitFor(() => {
+      expect(screen.queryByLabelText('选择 Submission #501')).toBeNull()
+    })
+    expect(screen.getByLabelText('选择 Submission #777')).toBeTruthy()
+  })
+
   it('switches demo detail content when selecting different demo submissions (explicit ?demo=1)', async () => {
     const user = userEvent.setup()
     // M-10:demo 数据只在显式 ?demo=1 下出现,并带醒目「演示数据 · DEMO」标识。

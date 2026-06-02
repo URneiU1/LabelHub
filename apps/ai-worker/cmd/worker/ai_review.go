@@ -13,7 +13,6 @@ import (
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 	"labelhub.local/llmreview"
-	"labelhub.local/reviewsampling"
 )
 
 func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error {
@@ -173,6 +172,9 @@ func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
 }
 
 func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload) (bool, error) {
+	// started_at 记为本次进入 running 的时间,sweeper 用它判断 running 是否真卡死(M-06)。
+	// failed → running 的重试会刷新 started_at:每次重跑都应获得一个全新的超时窗口,
+	// 而不是沿用上一次失败前的开始时间,故此处是有意覆写(非取首次开始时间)。
 	res, err := h.db.ExecContext(ctx,
 		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1, started_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','failed')`,
 		time.Now().UTC(), payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
@@ -267,11 +269,6 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	if status != "ai_reviewing" || !currentRevisionID.Valid || uint64(currentRevisionID.Int64) != payload.RevisionID {
 		return tx.Commit()
 	}
-	meta, err := lockedAICompletionMeta(ctx, tx, payload.SubmissionID)
-	if err != nil {
-		return err
-	}
-
 	now := time.Now().UTC()
 	reviewRes, err := tx.ExecContext(ctx,
 		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
@@ -283,53 +280,30 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	if rows, _ := reviewRes.RowsAffected(); rows != 1 {
 		return errors.New("ai review completion lost review update race")
 	}
+	// 综合判定(对齐审核流程图,三条独立分支):
+	//   明确不合格(reject) → 直接打回标注员(revising);标注员修改后重提会再次过 AI 评测。
+	//   可疑(uncertain) → 转人工复核(manual_review),走专属的初审入口分支。
+	//   通过(pass) → 进初审(human_reviewing),等终审定夺。
+	// AI 不再自动入库 / 不抽检直通——是否入库只由人工终审决定。
 	toState := "human_reviewing"
 	event := "ai_done"
-	if result.Verdict == "pass" && (!meta.HumanReviewEnabled ||
-		!reviewsampling.ShouldReview(meta.TaskID, meta.ItemID, meta.LabelerID, meta.ReviewSamplingPct)) {
-		toState = "approved"
-		event = "ai_auto_approved"
-		res, err := tx.ExecContext(ctx,
-			`UPDATE submissions SET status = 'approved', ai_verdict = ?, ai_score = ?, approved_at = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`,
-			result.Verdict, result.Score, now, payload.SubmissionID, payload.RevisionID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost submission update race")
-		}
-		res, err = tx.ExecContext(ctx,
-			`UPDATE task_items SET status = 'finished', finished_at = ? WHERE id = ? AND status = 'claimed'`,
-			now, meta.ItemID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost task item update race")
-		}
-		res, err = tx.ExecContext(ctx,
-			`UPDATE tasks SET finished_items = finished_items + 1 WHERE id = ?`,
-			meta.TaskID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost task update race")
-		}
-	} else {
-		res, err := tx.ExecContext(ctx,
-			`UPDATE submissions SET status = 'human_reviewing', ai_verdict = ?, ai_score = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`,
-			result.Verdict, result.Score, payload.SubmissionID, payload.RevisionID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost submission update race")
-		}
+	switch result.Verdict {
+	case "reject":
+		toState = "revising"
+		event = "ai_reject"
+	case "uncertain":
+		toState = "manual_review"
+		event = "ai_uncertain"
+	}
+	submissionSQL := `UPDATE submissions SET status = ?, ai_verdict = ?, ai_score = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`
+	res, err := tx.ExecContext(ctx, submissionSQL,
+		toState, result.Verdict, result.Score, payload.SubmissionID, payload.RevisionID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows != 1 {
+		return errors.New("ai review completion lost submission update race")
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "score": result.Score})
 	if _, err := tx.ExecContext(ctx,
@@ -424,23 +398,6 @@ func lockedSubmissionState(ctx context.Context, tx *sql.Tx, submissionID uint64)
 		submissionID,
 	).Scan(&status, &currentRevisionID)
 	return status, currentRevisionID, err
-}
-
-type aiCompletionMeta struct {
-	TaskID             uint64
-	ItemID             uint64
-	LabelerID          uint64
-	HumanReviewEnabled bool
-	ReviewSamplingPct  int
-}
-
-func lockedAICompletionMeta(ctx context.Context, tx *sql.Tx, submissionID uint64) (aiCompletionMeta, error) {
-	var meta aiCompletionMeta
-	err := tx.QueryRowContext(ctx,
-		`SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? FOR UPDATE`,
-		submissionID,
-	).Scan(&meta.TaskID, &meta.ItemID, &meta.LabelerID, &meta.HumanReviewEnabled, &meta.ReviewSamplingPct)
-	return meta, err
 }
 
 func rollbackUnlessCommitted(tx *sql.Tx) {

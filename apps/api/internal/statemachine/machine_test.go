@@ -15,10 +15,15 @@ func TestAllPlannedTransitions(t *testing.T) {
 		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
 		{StateAIReviewing, EventAIAutoApproved, StateApproved},
+		{StateAIReviewing, EventAIUncertain, StateManualReview},
+		{StateAIReviewing, EventAIReject, StateRevising},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},
 		{StateHumanReviewing, EventApprove, StateApproved},
 		{StateHumanReviewing, EventReject, StateRejected},
 		{StateHumanReviewing, EventRevise, StateRevising},
+		{StateManualReview, EventApprove, StateHumanReviewing},
+		{StateManualReview, EventReject, StateRejected},
+		{StateManualReview, EventRevise, StateRevising},
 		{StateRevising, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventConsensusConflict, StateNeedsArbitration},
 		{StateSubmitted, EventConsensusEvidence, StateConsensusEvidence},
@@ -84,6 +89,7 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		StateSubmitted,
 		StateAIReviewing,
 		StateHumanReviewing,
+		StateManualReview,
 		StateNeedsArbitration,
 		StateConsensusEvidence,
 		StateApproved,
@@ -97,6 +103,7 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		EventSkipAI,
 		EventAIDone,
 		EventAIAutoApproved,
+		EventAIUncertain,
 		EventAIFailMax,
 		EventConsensusConflict,
 		EventConsensusEvidence,
@@ -124,8 +131,8 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 }
 
 func TestTransitionTableCoversPlan(t *testing.T) {
-	if got := len(Transitions()); got != 16 {
-		t.Fatalf("Transitions() len = %d, want 16", got)
+	if got := len(Transitions()); got != 21 {
+		t.Fatalf("Transitions() len = %d, want 21", got)
 	}
 }
 
@@ -144,10 +151,15 @@ func plannedTransitions() []plannedTransition {
 		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
 		{StateAIReviewing, EventAIAutoApproved, StateApproved},
+		{StateAIReviewing, EventAIUncertain, StateManualReview},
+		{StateAIReviewing, EventAIReject, StateRevising},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},
 		{StateHumanReviewing, EventApprove, StateApproved},
 		{StateHumanReviewing, EventReject, StateRejected},
 		{StateHumanReviewing, EventRevise, StateRevising},
+		{StateManualReview, EventApprove, StateHumanReviewing},
+		{StateManualReview, EventReject, StateRejected},
+		{StateManualReview, EventRevise, StateRevising},
 		{StateRevising, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventConsensusConflict, StateNeedsArbitration},
 		{StateSubmitted, EventConsensusEvidence, StateConsensusEvidence},

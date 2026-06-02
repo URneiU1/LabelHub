@@ -85,6 +85,13 @@ type QueueItem =
   | { kind: 'real', submission: Submission }
   | { kind: 'demo', item: DemoReviewItem }
 
+// 工作台队列分区(对齐审核流程图独立分支):
+//   AI 通过待初审(human_reviewing)与「转人工复核」(manual_review,AI 综合判定为可疑)分开展示。
+type QueueFilter = 'all' | 'human_reviewing' | 'manual_review'
+
+const MANUAL_REVIEW_STATUS = 'manual_review'
+const MANUAL_REVIEW_LABEL = '转人工复核'
+
 // 审核意见快捷标签:点击追加到审核意见文本框(复刻 ui-demo 的 quick-tags)。
 const QUICK_TAGS = ['# 关键词缺失', '# 类目错误', '# 标题超长', '# 包含违禁词', '# 格式不规范']
 
@@ -376,12 +383,23 @@ export default function ReviewerQueue() {
   const detailLoadSeq = useRef(0)
   // 顶部视图切换:审核工作台 / 仲裁 / 审核结果列表。
   const [view, setView] = useState<ReviewerView>('workbench')
+  // 工作台内的队列分区:全部 / AI 通过待初审 / 转人工复核。
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>('all')
   // 演示样例只在显式 ?demo=1 时启用,默认空队列展示空状态(M-10)。
   const demoMode = useMemo(() => isDemoMode(), [])
 
   const loadQueue = useCallback(async () => {
     try {
-      const data = await apiGet<Submission[]>('/reviewer/submissions')
+      // 两条独立分支分别拉取:AI 通过待初审(默认 human_reviewing)+ 转人工复核(manual_review)。
+      // 主队列(human_reviewing)失败按错误处理;转人工复核分支失败仅降级为空,不拖垮主队列。
+      const humanReviewing = await apiGet<Submission[]>('/reviewer/submissions')
+      let manualReview: Submission[] = []
+      try {
+        manualReview = await apiGet<Submission[]>(`/reviewer/submissions?status=${MANUAL_REVIEW_STATUS}`)
+      } catch {
+        manualReview = []
+      }
+      const data = [...humanReviewing, ...(manualReview ?? [])]
       setSubmissions(data)
       setSelectedSubmissionIds((current) => current.filter((id) => data.some((submission) => submission.id === id)))
       if (data.length === 0) {
@@ -401,15 +419,33 @@ export default function ReviewerQueue() {
     void loadQueue()
   }, [loadQueue])
 
+  // 各分区计数(基于真实队列;转人工复核 = status manual_review)。
+  const manualReviewCount = useMemo(
+    () => submissions.filter((submission) => submission.status === MANUAL_REVIEW_STATUS).length,
+    [submissions],
+  )
+  const humanReviewingCount = submissions.length - manualReviewCount
+
   const queueItems = useMemo<QueueItem[]>(() => {
     if (submissions.length > 0) {
-      return submissions.map((submission) => ({ kind: 'real', submission }))
+      const filtered = submissions.filter((submission) => {
+        if (queueFilter === 'manual_review') return submission.status === MANUAL_REVIEW_STATUS
+        if (queueFilter === 'human_reviewing') return submission.status !== MANUAL_REVIEW_STATUS
+        return true
+      })
+      return filtered.map((submission) => ({ kind: 'real', submission }))
     }
     if (demoMode) {
       return demoItems.map((item) => ({ kind: 'demo', item }))
     }
     return []
-  }, [submissions, demoMode])
+  }, [submissions, demoMode, queueFilter])
+
+  // 当前 filter 下可见的真实 submission id(全选 / 批量只作用于可见分区)。
+  const visibleSubmissionIds = useMemo(
+    () => queueItems.flatMap((item) => (item.kind === 'real' ? [item.submission.id] : [])),
+    [queueItems],
+  )
 
   const selectedDemo = demoItems.find((item) => item.id === selectedDemoId) ?? demoItems[1]
   const selectedDemoDetail = useMemo(() => getDemoReviewDetail(selectedDemo.id), [selectedDemo.id])
@@ -657,14 +693,45 @@ export default function ReviewerQueue() {
                 <span className="hr-side__tab">AI 已建议打回<span className="hr-side__tab-num">47</span></span>
                 <span className="hr-side__tab">转人工<span className="hr-side__tab-num">9</span></span>
               </div>
-            ) : null}
+            ) : (
+              // 真实队列:把「AI 通过待初审」与「转人工复核(AI 可疑)」分成独立分区(对齐审核流程图独立分支)。
+              <div className="hr-side__tabs" role="tablist" aria-label="审核队列分区">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={queueFilter === 'all'}
+                  className={`hr-side__tab${queueFilter === 'all' ? ' hr-side__tab--active' : ''}`}
+                  onClick={() => setQueueFilter('all')}
+                >
+                  全部<span className="hr-side__tab-num">{submissions.length}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={queueFilter === 'human_reviewing'}
+                  className={`hr-side__tab${queueFilter === 'human_reviewing' ? ' hr-side__tab--active' : ''}`}
+                  onClick={() => setQueueFilter('human_reviewing')}
+                >
+                  AI 通过待初审<span className="hr-side__tab-num">{humanReviewingCount}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={queueFilter === 'manual_review'}
+                  className={`hr-side__tab${queueFilter === 'manual_review' ? ' hr-side__tab--active' : ''}`}
+                  onClick={() => setQueueFilter('manual_review')}
+                >
+                  {MANUAL_REVIEW_LABEL}<span className="hr-side__tab-num">{manualReviewCount}</span>
+                </button>
+              </div>
+            )}
             <div className="hr-batch">
               <label className="hr-batch__check">
                 <input
                   aria-label="选择全部审核项"
                   type="checkbox"
-                  checked={!showingDemo && submissions.length > 0 && selectedSubmissionIds.length === submissions.length}
-                  onChange={(event) => setSelectedSubmissionIds(event.target.checked ? submissions.map((submission) => submission.id) : [])}
+                  checked={!showingDemo && visibleSubmissionIds.length > 0 && visibleSubmissionIds.every((id) => selectedSubmissionIds.includes(id))}
+                  onChange={(event) => setSelectedSubmissionIds(event.target.checked ? visibleSubmissionIds : [])}
                 />
                 已选 {showingDemo ? 3 : selectedSubmissionIds.length} 条
               </label>
@@ -792,6 +859,8 @@ function QueueCard({
   if (item.kind === 'real') {
     const submission = item.submission
     const stage = resolveStage(submission)
+    // 转人工复核(AI 可疑):独立中文标签 + 中文 StatusBadge,与「AI 通过待初审」区分。
+    const isManual = submission.status === MANUAL_REVIEW_STATUS
     return (
       <div className={`hr-item${active ? ' hr-item--selected' : ''}`}>
         <div className="hr-item__head">
@@ -808,9 +877,10 @@ function QueueCard({
             <span>· Task #{submission.taskId} · Item #{submission.itemId}</span>
           </div>
           <div className="hr-item__tags">
+            {isManual ? <span className="hr-tag hr-tag--warning">{MANUAL_REVIEW_LABEL}</span> : null}
             <span className="hr-tag hr-tag--ai">预审 {formatAIReviewSummary(submission)}</span>
             <span className="hr-tag hr-tag--purple" aria-label={`审核阶段 ${stage.label}`}>{stage.label} {stage.progress}</span>
-            <StatusBadge status={submission.status} />
+            <StatusBadge status={submission.status} label={isManual ? MANUAL_REVIEW_LABEL : undefined} />
           </div>
         </button>
       </div>
@@ -971,7 +1041,7 @@ function RealReviewDetail({
         <h2>{schema.ok ? schema.schema.title : '提交详情'}</h2>
         <div className="hr-main__head-right">
           <span className="lh-tag lh-tag--purple" aria-label={`审核阶段 ${stageLabel}`}>{stageLabel} · 审核进度 {stageProgress}</span>
-          <StatusBadge status={selected?.status} />
+          <StatusBadge status={selected?.status} label={selected?.status === MANUAL_REVIEW_STATUS ? MANUAL_REVIEW_LABEL : undefined} />
         </div>
       </div>
       <div className="hr-main__meta">Submission #{detail.submission?.id} · Task #{detail.task.id} · Item #{detail.item.id}</div>

@@ -196,7 +196,8 @@ func TestFailoverDoesNotMarkSucceededReviewDead(t *testing.T) {
 	}
 }
 
-func TestCompleteMovesSubmissionToHumanReviewWithAIVerdict(t *testing.T) {
+// 可疑(uncertain)→ 转人工复核(manual_review),走专属初审入口分支,不再合流进 human_reviewing。
+func TestCompleteMovesUncertainSubmissionToManualReview(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -223,13 +224,13 @@ func TestCompleteMovesSubmissionToHumanReviewWithAIVerdict(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
 	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-	mock.ExpectQuery(`(?is)^SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = \? FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"task_id", "item_id", "labeler_id", "human_review_enabled", "review_sampling_pct"}).AddRow(1, 11, 5, true, 100))
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+error_msg = NULL`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
+	mock.ExpectExec(`(?is)^UPDATE submissions SET status = \?, ai_verdict = \?, ai_score = \?`).
+		WithArgs("manual_review", "uncertain", 75.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
+		WithArgs(payload.SubmissionID, "manual_review", "ai_uncertain", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -242,7 +243,8 @@ func TestCompleteMovesSubmissionToHumanReviewWithAIVerdict(t *testing.T) {
 	}
 }
 
-func TestCompleteAutoApprovesPassWhenHumanReviewDisabled(t *testing.T) {
+// 明确不合格(reject)→ 直接打回标注员(revising),不进人审、不终结 item。
+func TestCompleteRejectBouncesSubmissionToRevising(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -257,9 +259,9 @@ func TestCompleteAutoApprovesPassWhenHumanReviewDisabled(t *testing.T) {
 		IdempotencyKey: "idem",
 	}
 	result := aiEvaluation{
-		Verdict:     "pass",
-		Score:       93,
-		Reason:      "passes without human review",
+		Verdict:     "reject",
+		Score:       30,
+		Reason:      "clearly fails",
 		Dimensions:  `[]`,
 		RawResponse: `{}`,
 		LatencyMS:   1,
@@ -269,18 +271,13 @@ func TestCompleteAutoApprovesPassWhenHumanReviewDisabled(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
 	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-	mock.ExpectQuery(`(?is)^SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = \? FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"task_id", "item_id", "labeler_id", "human_review_enabled", "review_sampling_pct"}).AddRow(1, 11, 5, false, 100))
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+error_msg = NULL`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'approved'`).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE task_items SET status = 'finished'`).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE tasks SET finished_items = finished_items \+ 1`).
+	mock.ExpectExec(`(?is)^UPDATE submissions SET status = \?, ai_verdict = \?, ai_score = \?`).
+		WithArgs("revising", "reject", 30.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-		WithArgs(payload.SubmissionID, "approved", "ai_auto_approved", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(payload.SubmissionID, "revising", "ai_reject", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -295,21 +292,19 @@ func TestCompleteAutoApprovesPassWhenHumanReviewDisabled(t *testing.T) {
 
 func TestHandleAIReviewVerdictStateMapping(t *testing.T) {
 	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
+	// 对齐审核流程图三条独立分支:
+	//   pass → 初审(human_reviewing);uncertain → 转人工复核(manual_review);reject → 直接打回标注员(revising)。
+	// AI 不再自动入库、不抽检直通。
 	tests := []struct {
-		name               string
-		verdict            string
-		score              float64
-		humanReviewEnabled bool
-		reviewSamplingPct  int
-		wantToState        string
-		wantEvent          string
-		wantAutoApprove    bool
+		name        string
+		verdict     string
+		score       float64
+		wantToState string
+		wantEvent   string
 	}{
-		{name: "pass with human review disabled auto approves", verdict: "pass", score: 92, humanReviewEnabled: false, reviewSamplingPct: 100, wantToState: "approved", wantEvent: "ai_auto_approved", wantAutoApprove: true},
-		{name: "pass outside review sample auto approves", verdict: "pass", score: 92, humanReviewEnabled: true, reviewSamplingPct: 0, wantToState: "approved", wantEvent: "ai_auto_approved", wantAutoApprove: true},
-		{name: "sampled pass with human review enabled goes to human review", verdict: "pass", score: 92, humanReviewEnabled: true, reviewSamplingPct: 100, wantToState: "human_reviewing", wantEvent: "ai_done"},
-		{name: "reject goes to human review", verdict: "reject", score: 35, humanReviewEnabled: false, reviewSamplingPct: 0, wantToState: "human_reviewing", wantEvent: "ai_done"},
-		{name: "uncertain goes to human review", verdict: "uncertain", score: 65, humanReviewEnabled: false, reviewSamplingPct: 0, wantToState: "human_reviewing", wantEvent: "ai_done"},
+		{name: "pass goes to first human review", verdict: "pass", score: 92, wantToState: "human_reviewing", wantEvent: "ai_done"},
+		{name: "uncertain goes to manual review", verdict: "uncertain", score: 65, wantToState: "manual_review", wantEvent: "ai_uncertain"},
+		{name: "reject bounces back to labeler", verdict: "reject", score: 35, wantToState: "revising", wantEvent: "ai_reject"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -331,23 +326,11 @@ func TestHandleAIReviewVerdictStateMapping(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
 			mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 				WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-			mock.ExpectQuery(`(?is)^SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = \? FOR UPDATE`).
-				WillReturnRows(sqlmock.NewRows([]string{"task_id", "item_id", "labeler_id", "human_review_enabled", "review_sampling_pct"}).AddRow(1, 11, 5, tt.humanReviewEnabled, tt.reviewSamplingPct))
 			mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+error_msg = NULL`).
 				WillReturnResult(sqlmock.NewResult(0, 1))
-			if tt.wantAutoApprove {
-				mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'approved', ai_verdict = \?, ai_score = \?, approved_at = \? WHERE id = \? AND status = 'ai_reviewing' AND current_revision_id = \?`).
-					WithArgs(tt.verdict, tt.score, sqlmock.AnyArg(), payload.SubmissionID, payload.RevisionID).
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec(`(?is)^UPDATE task_items SET status = 'finished'`).
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec(`(?is)^UPDATE tasks SET finished_items = finished_items \+ 1`).
-					WillReturnResult(sqlmock.NewResult(0, 1))
-			} else {
-				mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing', ai_verdict = \?, ai_score = \? WHERE id = \? AND status = 'ai_reviewing' AND current_revision_id = \?`).
-					WithArgs(tt.verdict, tt.score, payload.SubmissionID, payload.RevisionID).
-					WillReturnResult(sqlmock.NewResult(0, 1))
-			}
+			mock.ExpectExec(`(?is)^UPDATE submissions SET status = \?, ai_verdict = \?, ai_score = \? WHERE id = \? AND status = 'ai_reviewing' AND current_revision_id = \?`).
+				WithArgs(tt.wantToState, tt.verdict, tt.score, payload.SubmissionID, payload.RevisionID).
+				WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
 				WithArgs(payload.SubmissionID, tt.wantToState, tt.wantEvent, sqlmock.AnyArg(), sqlmock.AnyArg()).
 				WillReturnResult(sqlmock.NewResult(1, 1))
@@ -383,11 +366,10 @@ func TestHandleAIReviewUsesProviderResultAndRecordsUsage(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
 	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-	mock.ExpectQuery(`(?is)^SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = \? FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"task_id", "item_id", "labeler_id", "human_review_enabled", "review_sampling_pct"}).AddRow(1, 11, 5, true, 100))
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+tokens_input = \?, tokens_output = \?.+error_msg = NULL`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
+	mock.ExpectExec(`(?is)^UPDATE submissions SET status = \?, ai_verdict = \?, ai_score = \?`).
+		WithArgs("human_reviewing", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -431,11 +413,10 @@ func TestCompleteClearsPreviousErrorMessageOnRetrySuccess(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("failed"))
 	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
-	mock.ExpectQuery(`(?is)^SELECT s.task_id, s.item_id, s.labeler_id, t.human_review_enabled, t.review_sampling_pct FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = \? FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"task_id", "item_id", "labeler_id", "human_review_enabled", "review_sampling_pct"}).AddRow(1, 11, 5, true, 100))
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'.+error_msg = NULL`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`(?is)^UPDATE submissions SET status = 'human_reviewing'`).
+	mock.ExpectExec(`(?is)^UPDATE submissions SET status = \?, ai_verdict = \?, ai_score = \?`).
+		WithArgs("human_reviewing", "pass", 88.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
 		WillReturnResult(sqlmock.NewResult(1, 1))

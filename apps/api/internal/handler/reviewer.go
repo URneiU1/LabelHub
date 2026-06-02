@@ -128,14 +128,15 @@ type retryAIReviewResponse struct {
 
 var reviewerQueueAllowedStatuses = map[string]struct{}{
 	statemachine.StateHumanReviewing:   {},
+	statemachine.StateManualReview:     {},
 	statemachine.StateNeedsArbitration: {},
 }
 
 // reviewStageInfo 暴露 submission 当前所处的人工审核级别给前端展示初审/复审/终审。
 type reviewStageInfo struct {
 	ReviewStage    string `json:"reviewStage"`    // first / second / final
-	ReviewLevel    int    `json:"reviewLevel"`    // 1 / 2 / 3
-	RequiredLevels int    `json:"requiredLevels"` // 固定 3
+	ReviewLevel    int    `json:"reviewLevel"`    // 1 / 2
+	RequiredLevels int    `json:"requiredLevels"` // 固定 2(初审 → 终审)
 }
 
 // reviewerQueueItem:queue 里每条 submission 附带其当前 stage。
@@ -174,7 +175,7 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 	if _, ok := reviewerQueueAllowedStatuses[status]; !ok {
 		httpx.ErrorWithDetails(c, http.StatusForbidden, "FORBIDDEN",
 			"reviewer queue only exposes reviewable submissions",
-			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing, statemachine.StateNeedsArbitration}})
+			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing, statemachine.StateManualReview, statemachine.StateNeedsArbitration}})
 		return
 	}
 	claims, _ := middleware.Claims(c)
@@ -672,7 +673,8 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
 		return nil, false
 	}
-	if !policy.CanReviewSubmissionStatus(submission.Status) {
+	// manual_review(AI 可疑转人工复核)是 reviewer 的初审入口,与 policy 白名单里的状态一样可在详情查看。
+	if !policy.CanReviewSubmissionStatus(submission.Status) && submission.Status != statemachine.StateManualReview {
 		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "submission is not visible in reviewer detail")
 		return nil, false
 	}

@@ -45,15 +45,14 @@ func expectReviewSubmissionLockSequence(mock sqlmock.Sqlmock, revisionID uint64)
 			AddRow(501, 1, 11, "human_reviewing", revisionID))
 }
 
-// 多级审核端到端:approve #1(初审)/ #2(复审)只 advance stage 并停留 human_reviewing。
+// 两级审核端到端:approve #1(初审)只 advance stage 并停留 human_reviewing 等终审。
 func TestReviewSubmission_IntermediateApproveStaysHumanReviewing(t *testing.T) {
 	cases := []struct {
 		name          string
 		existingCount int
 		wantStage     string
 	}{
-		{"first approve -> second", 0, "first"},
-		{"second approve -> final", 1, "second"},
+		{"first approve (初审) stays human_reviewing", 0, "first"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,7 +96,7 @@ func TestReviewSubmission_IntermediateApproveStaysHumanReviewing(t *testing.T) {
 	}
 }
 
-// 多级审核端到端:approve #3(终审)推到 approved 并 finish item + bump finished_items。
+// 两级审核端到端:approve #2(终审)推到 approved 并 finish item + bump finished_items。
 func TestReviewSubmission_FinalApproveGoesApproved(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
@@ -105,7 +104,7 @@ func TestReviewSubmission_FinalApproveGoesApproved(t *testing.T) {
 
 	expectReviewSubmissionLockSequence(mock, revisionID)
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1)) // 已有 1 次(初审)→ 本次终审
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -132,8 +131,8 @@ func TestReviewSubmission_FinalApproveGoesApproved(t *testing.T) {
 	}
 }
 
-// reject 在复审阶段(已有 1 条 approve)直接落 rejected。
-func TestReviewSubmission_RejectAtSecondStageGoesRejected(t *testing.T) {
+// reject 在终审阶段(已有 1 条 approve)直接落 rejected。
+func TestReviewSubmission_RejectAtFinalStageGoesRejected(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
 	revisionID := uint64(901)
@@ -160,8 +159,8 @@ func TestReviewSubmission_RejectAtSecondStageGoesRejected(t *testing.T) {
 		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	data := responseData(t, rec)
-	if data["status"] != "rejected" || data["stage"] != "second" {
-		t.Fatalf("status/stage = %v/%v, want rejected/second", data["status"], data["stage"])
+	if data["status"] != "rejected" || data["stage"] != "final" {
+		t.Fatalf("status/stage = %v/%v, want rejected/final", data["status"], data["stage"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -179,7 +178,7 @@ func TestReviewerQueue_ExposesReviewStage(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
 			AddRow(501, 1, 11, "human_reviewing", rev501).
 			AddRow(502, 1, 12, "human_reviewing", rev502))
-	// rev501 已有 1 条 approve → second;rev502 无 approve → first(grouped 查询不返回 0 行)。
+	// rev501 已有 1 条 approve → final(终审);rev502 无 approve → first(grouped 查询不返回 0 行)。
 	mock.ExpectQuery(`(?is)^SELECT revision_id, COUNT\(\*\) AS total FROM .human_reviews.`).
 		WillReturnRows(sqlmock.NewRows([]string{"revision_id", "total"}).AddRow(rev501, 1))
 
@@ -193,7 +192,7 @@ func TestReviewerQueue_ExposesReviewStage(t *testing.T) {
 	}
 	items := responseDataArray(t, rec)
 	first := items[0].(map[string]any)
-	if first["reviewStage"] != "second" || first["reviewLevel"] != float64(2) || first["requiredLevels"] != float64(3) {
+	if first["reviewStage"] != "final" || first["reviewLevel"] != float64(2) || first["requiredLevels"] != float64(2) {
 		t.Fatalf("item0 stage = %v/%v/%v", first["reviewStage"], first["reviewLevel"], first["requiredLevels"])
 	}
 	second := items[1].(map[string]any)
@@ -226,6 +225,35 @@ func TestReviewerQueue_ExposesNeedsArbitration(t *testing.T) {
 	}
 	items := responseDataArray(t, rec)
 	if len(items) != 1 || items[0].(map[string]any)["status"] != "needs_arbitration" {
+		t.Fatalf("items = %v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// ReviewerQueue 用 ?status=manual_review 返回「转人工复核(AI 可疑)」分区的项。
+func TestReviewerQueue_ExposesManualReview(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+	revisionID := uint64(901)
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+LEFT JOIN task_reviewers`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(503, 1, 13, "manual_review", revisionID))
+	mock.ExpectQuery(`(?is)^SELECT revision_id, COUNT\(\*\) AS total FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id", "total"}))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions?status=manual_review", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	items := responseDataArray(t, rec)
+	if len(items) != 1 || items[0].(map[string]any)["status"] != "manual_review" {
 		t.Fatalf("items = %v", items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

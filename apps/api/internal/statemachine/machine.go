@@ -7,6 +7,9 @@ const (
 	StateSubmitted         = "submitted"
 	StateAIReviewing       = "ai_reviewing"
 	StateHumanReviewing    = "human_reviewing"
+	// StateManualReview 是 AI 综合判定为「可疑(uncertain)」时专属的转人工复核入口态(对齐审核流程图独立分支)。
+	// 它与 StateHumanReviewing 一样是初审入口,但区分来源:可疑 → manual_review,AI 通过 → human_reviewing。
+	StateManualReview      = "manual_review"
 	StateNeedsArbitration  = "needs_arbitration"
 	StateConsensusEvidence = "consensus_evidence"
 	StateRevising          = "revising"
@@ -21,6 +24,9 @@ const (
 	EventSkipAI               = "skip_ai"
 	EventAIDone               = "ai_done"
 	EventAIAutoApproved       = "ai_auto_approved"
+	// EventAIUncertain 表示 AI 综合判定为可疑,转人工复核(进入 manual_review)。
+	EventAIUncertain          = "ai_uncertain"
+	EventAIReject             = "ai_reject"
 	EventAIFailMax            = "ai_fail_max"
 	EventConsensusConflict    = "consensus_conflict"
 	EventConsensusEvidence    = "consensus_evidence"
@@ -51,10 +57,16 @@ var transitions = map[Key]Transition{
 	{StateSubmitted, EventSamplingAutoApproved}: {From: StateSubmitted, Event: EventSamplingAutoApproved, To: []string{StateApproved}},
 	{StateAIReviewing, EventAIDone}:             {From: StateAIReviewing, Event: EventAIDone, To: []string{StateApproved, StateHumanReviewing}},
 	{StateAIReviewing, EventAIAutoApproved}:     {From: StateAIReviewing, Event: EventAIAutoApproved, To: []string{StateApproved}},
+	{StateAIReviewing, EventAIUncertain}:        {From: StateAIReviewing, Event: EventAIUncertain, To: []string{StateManualReview}},
+	{StateAIReviewing, EventAIReject}:           {From: StateAIReviewing, Event: EventAIReject, To: []string{StateRevising}},
 	{StateAIReviewing, EventAIFailMax}:          {From: StateAIReviewing, Event: EventAIFailMax, To: []string{StateHumanReviewing}},
 	{StateHumanReviewing, EventApprove}:         {From: StateHumanReviewing, Event: EventApprove, To: []string{StateApproved}},
 	{StateHumanReviewing, EventReject}:          {From: StateHumanReviewing, Event: EventReject, To: []string{StateRejected}},
 	{StateHumanReviewing, EventRevise}:          {From: StateHumanReviewing, Event: EventRevise, To: []string{StateRevising}},
+	// 转人工复核(可疑)与初审做一致的人工动作:approve 进 human_reviewing 走终审,reject/revise 与初审一致。
+	{StateManualReview, EventApprove}:           {From: StateManualReview, Event: EventApprove, To: []string{StateHumanReviewing}},
+	{StateManualReview, EventReject}:            {From: StateManualReview, Event: EventReject, To: []string{StateRejected}},
+	{StateManualReview, EventRevise}:            {From: StateManualReview, Event: EventRevise, To: []string{StateRevising}},
 	{StateNeedsArbitration, EventApprove}:       {From: StateNeedsArbitration, Event: EventApprove, To: []string{StateApproved}},
 	{StateNeedsArbitration, EventReject}:        {From: StateNeedsArbitration, Event: EventReject, To: []string{StateRejected}},
 	{StateRevising, EventSubmit}:                {From: StateRevising, Event: EventSubmit, To: []string{StateSubmitted}},
