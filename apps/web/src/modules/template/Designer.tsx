@@ -937,12 +937,50 @@ function NestedCanvasPreview({ field }: { field: DraftField }) {
   )
 }
 
+const NESTED_INPUT_HINT: Record<string, string> = {
+  Input: '单行输入…',
+  Textarea: '多行文本…',
+  RichText: '富文本编辑…',
+  JSON: '{ } JSON 编辑器',
+  FileUpload: '↑ 文件 / 图片',
+}
+
+// 嵌套子字段的控件预览:把真实控件/选项铺出来,对齐 demo 的「饱满卡」观感
+function NestedFieldPreview({ child }: { child: FieldSchema }) {
+  if ((child.widget === 'Radio' || child.widget === 'Tags') && child.options?.length) {
+    return (
+      <div className="canvas-options template-designer-option-row">
+        {child.options.map((option) => <span key={option} className="canvas-option">{option}</span>)}
+      </div>
+    )
+  }
+  if (child.widget === 'ShowItem') {
+    return (
+      <div style={nestedShowItemBoxStyle}>
+        {child.label || child.name} · 只读展示{child.path ? ` · ${child.path}` : ''}
+      </div>
+    )
+  }
+  if (child.widget === 'LLMTrigger') {
+    return (
+      <span style={nestedLlmBoxStyle}>
+        <Icon name="sparkle" size={12} />
+        LLM 触发组件
+      </span>
+    )
+  }
+  return <div style={nestedFieldBoxStyle}>{NESTED_INPUT_HINT[child.widget] ?? child.widget}</div>
+}
+
 function NestedCanvasRow({ child }: { child: FieldSchema }) {
   return (
     <div style={nestedCanvasRowStyle} aria-label={`nested field ${child.name}`}>
-      <span style={nestedCanvasWidgetStyle}>{child.widget}</span>
-      <strong>{child.name}</strong>
-      <span>{child.label}</span>
+      <div style={nestedCanvasRowHeadStyle}>
+        <span style={nestedCanvasWidgetStyle}>{child.widget}</span>
+        <strong>{child.name}</strong>
+        <span>{child.label}</span>
+      </div>
+      <NestedFieldPreview child={child} />
     </div>
   )
 }
@@ -2121,16 +2159,50 @@ const nestedCanvasRowsStyle: CSSProperties = {
 }
 
 const nestedCanvasRowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '72px minmax(90px, 1fr) minmax(90px, 1fr)',
-  gap: 'var(--space-sm)',
-  alignItems: 'center',
-  padding: 'var(--space-xs) var(--space-sm)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 'var(--space-xs)',
+  padding: 'var(--space-sm)',
   border: '1px solid var(--color-border-light)',
   borderRadius: 'var(--radius-sm)',
   background: 'var(--color-bg)',
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
+}
+
+const nestedCanvasRowHeadStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '72px minmax(90px, 1fr) minmax(90px, 1fr)',
+  gap: 'var(--space-sm)',
+  alignItems: 'center',
+}
+
+const nestedFieldBoxStyle: CSSProperties = {
+  padding: '8px 12px',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
+}
+
+const nestedShowItemBoxStyle: CSSProperties = {
+  ...nestedFieldBoxStyle,
+  background: 'var(--color-surface-subtle)',
+  color: 'var(--color-text-secondary)',
+}
+
+const nestedLlmBoxStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '8px 12px',
+  border: '1px dashed #722ed1',
+  borderRadius: 'var(--radius-sm)',
+  background: '#f5e8ff',
+  color: '#722ed1',
+  fontSize: 'var(--text-sm)',
+  width: 'fit-content',
 }
 
 const nestedCanvasWidgetStyle: CSSProperties = {
