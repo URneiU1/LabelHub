@@ -845,6 +845,33 @@ describe('TemplateDesigner', () => {
     expect(mockApiGet).not.toHaveBeenCalledWith('/templates/new')
   })
 
+  it('seeds a new template by cloning the source task latest template via copyFrom', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      // copyFrom=9:克隆源任务 9 的最新模板 schema;不拉取 /templates/new。
+      if (path === '/tasks/9/templates') {
+        return [{ id: 77, taskId: 9, version: 3, schemaJson: JSON.stringify(baseSchema), createdAt: '2026-06-03T00:00:00Z' }]
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 30, taskId: 2, version: 1, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/2/templates/new?copyFrom=9')
+
+    // 仍是新建态(显示「新建模板」),但画布已带源任务字段(baseSchema 的 summary)。
+    await screen.findByText('新建模板')
+    expect(await screen.findByRole('button', { name: /select summary/ })).toBeInTheDocument()
+
+    // 保存 → POST 到本任务 /tasks/2/templates,克隆字段一并带上。
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/2/templates', expect.objectContaining({
+        fields: expect.arrayContaining([expect.objectContaining({ name: 'summary' })]),
+      }))
+    })
+    expect(mockApiGet).not.toHaveBeenCalledWith('/templates/new')
+  })
+
   it('fails closed for historical templates whose task does not match the route', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {

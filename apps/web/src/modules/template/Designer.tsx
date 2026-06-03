@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Button, Toast } from '@douyinfe/semi-ui'
 import { Parser as ExprParser } from 'expr-eval'
 import {
@@ -126,8 +126,11 @@ const designerExprParser = new ExprParser()
 export default function TemplateDesigner() {
   const { taskId, templateId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   // isNew:templateId === 'new' 进入空白新建态,不拉取已有模板,保存即创建该任务的第一个版本。
   const isNew = templateId === 'new'
+  // copyFromTaskId:新建态可带 ?copyFrom=<源任务 id>,从该任务最新模板克隆 schema 预填画布(仍是新建态)。
+  const copyFromTaskId = isNew ? searchParams.get('copyFrom') : null
   const numericTaskId = Number(taskId)
   // 新建态用 0 占位(而非 NaN),让 isCurrentRoute 的 templateId 比较稳定;loadTemplate 在 isNew 分支提前返回,不会触发 <=0 无效判定。
   const numericTemplateId = isNew ? 0 : Number(templateId)
@@ -170,6 +173,34 @@ export default function TemplateDesigner() {
     const isCurrentLoad = () => loadSeq.current === requestSeq
 
     if (isNew) {
+      // 复制模式:从源任务最新模板克隆 schema 预填画布;克隆失败则退回空白新建态。仍是新建态,保存走 POST 创建本任务首版。
+      if (copyFromTaskId) {
+        setLoading(true)
+        try {
+          const list = await apiGet<TaskTemplate[]>(`/tasks/${copyFromTaskId}/templates`)
+          if (!isCurrentLoad()) return
+          const source = list[0]
+          const parsed = source ? parseTemplateSchema(source.schemaJson) : null
+          if (parsed && parsed.ok) {
+            const draftFields = parsed.value.fields.map((field, index) => attachDraftIdsToField(field, `${field.name}-${index}`))
+            setTemplate(null)
+            setSchema(parsed.value)
+            setTitle(parsed.value.title)
+            setFields(draftFields)
+            setSelectedId(draftFields[0]?._draftId ?? null)
+            setIsLatest(true)
+            setLatestTemplateId(null)
+            setSchemaError(null)
+            setTaskMismatch(false)
+            setError('')
+            setLoading(false)
+            return
+          }
+        } catch {
+          if (!isCurrentLoad()) return
+          // 克隆失败:落到下方空白新建态。
+        }
+      }
       // 新建模式:跳过拉取,初始化一张空白可编辑模板,保存时走 POST /tasks/:id/templates 创建首版。
       setTemplate(null)
       setSchema({ title: '', layout: 'single_page', fields: [] })
@@ -248,7 +279,7 @@ export default function TemplateDesigner() {
         setLoading(false)
       }
     }
-  }, [numericTaskId, numericTemplateId, isNew])
+  }, [numericTaskId, numericTemplateId, isNew, copyFromTaskId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
