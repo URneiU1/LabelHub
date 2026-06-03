@@ -1518,6 +1518,7 @@ const metricCellStyle: React.CSSProperties = {
   border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-md)',
   background: 'var(--lh-bg-card)',
+  boxShadow: 'var(--lh-shadow-sm)',
 }
 
 const metricLabelStyle: React.CSSProperties = {
@@ -1530,6 +1531,8 @@ const metricValueStyle: React.CSSProperties = {
   marginTop: 4,
   fontWeight: 700,
   fontSize: 'var(--text-h2)',
+  fontFamily: 'var(--lh-font-display)',
+  fontVariantNumeric: 'tabular-nums',
 }
 
 const metricDetailStyle: React.CSSProperties = {
