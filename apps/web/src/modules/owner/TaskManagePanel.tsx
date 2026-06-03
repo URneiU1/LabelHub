@@ -143,6 +143,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                 <tr
                   key={task.id}
                   className={selected?.id === task.id ? 'tasks-table__row--active' : ''}
+                  onClick={() => onSelect(task)}
                 >
                   <td>
                     <button
@@ -150,7 +151,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                       aria-label={`选择任务 ${task.title}`}
                       aria-current={selected?.id === task.id ? true : undefined}
                       className="tasks-table__select"
-                      onClick={() => onSelect(task)}
+                      onClick={(event) => { event.stopPropagation(); onSelect(task) }}
                     >
                       <span className="tasks-table__title">{task.title}</span>
                       <span className="tasks-table__meta">{task.id} · {taskStatusLabel(task.status)}</span>

@@ -201,6 +201,11 @@
   letter-spacing: -0.01em;
 }
 
+/* 整行可点(不只标题列),光标提示可点击;配合 tr 上的 onClick。 */
+.tasks-table tbody tr {
+  cursor: pointer;
+}
+
 .tasks-table tbody tr:hover td {
   background: var(--lh-bg-elev);
 }

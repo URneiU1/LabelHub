@@ -73,6 +73,20 @@ describe('TaskManagePanel', () => {
     expect(onSelect).toHaveBeenCalledWith(draftTask)
   })
 
+  it('selects a task by clicking anywhere on the row, not only the title', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <TaskManagePanel tasks={[draftTask]} selected={null} onSelect={onSelect} onTaskSaved={vi.fn()} onTasksChanged={vi.fn()} />,
+    )
+
+    // 点分发策略列(非标题、非按钮)也应选中:整行可点。回归 2026-06-04「只有标题可点 → 点行其它地方没反应」。
+    await user.click(screen.getByText('先到先得'))
+
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(draftTask)
+  })
+
   it('publishes a draft task via the state-machine transition', async () => {
     const user = userEvent.setup()
     mockTransitionTask.mockResolvedValue({ ...draftTask, status: 'published' })
@@ -102,7 +116,8 @@ describe('TaskManagePanel', () => {
     await user.click(screen.getByRole('button', { name: '发布任务' }))
 
     await waitFor(() => {
-      expect(Toast.error).toHaveBeenCalledWith(expect.stringContaining('刷新'))
+      // 没绑模板的 INVALID_STATE 现按后端原因分流成"先搭模板"提示(见 client.ts resolveFriendlyMessage),不再是泛化的"刷新"。
+      expect(Toast.error).toHaveBeenCalledWith(expect.stringContaining('模板'))
     })
   })
 
