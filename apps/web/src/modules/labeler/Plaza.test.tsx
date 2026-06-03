@@ -107,7 +107,8 @@ describe('LabelerPlaza schema runtime flow', () => {
 
     render(<LabelerPlaza />)
 
-    await user.click(await screen.findByRole('button', { name: '领取题目 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
     await user.type(await screen.findByLabelText('一句话总评'), '回答准确')
     await user.click(screen.getByRole('button', { name: '提交审核' }))
 
@@ -143,7 +144,8 @@ describe('LabelerPlaza schema runtime flow', () => {
 
     render(<LabelerPlaza />)
 
-    await user.click(await screen.findByRole('button', { name: '领取题目 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
     await user.type(await screen.findByLabelText('一句话总评'), '回答准确')
     fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true })
 
@@ -179,7 +181,8 @@ describe('LabelerPlaza schema runtime flow', () => {
     try {
       render(<LabelerPlaza />)
 
-      fireEvent.click(await screen.findByRole('button', { name: '领取题目 QA 质量标注' }))
+      fireEvent.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+      fireEvent.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
       const input = await screen.findByLabelText('一句话总评')
 
       vi.useFakeTimers()
@@ -223,7 +226,8 @@ describe('LabelerPlaza schema runtime flow', () => {
 
     render(<LabelerPlaza />)
 
-    await user.click(await screen.findByRole('button', { name: '领取题目 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('fields[0].options')
     expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
@@ -365,7 +369,8 @@ describe('LabelerPlaza schema runtime flow', () => {
 
     render(<LabelerPlaza />)
 
-    await user.click(await screen.findByRole('button', { name: '领取题目 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
 
     // done = submitted + approved = 2 of 4 → 50%.
     const progress = await screen.findByRole('progressbar', { name: '标注进度' })
