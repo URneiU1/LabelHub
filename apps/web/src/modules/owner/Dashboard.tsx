@@ -335,20 +335,23 @@ export default function OwnerDashboard() {
   }, [selected?.id])
 
   useEffect(() => {
-    if (selected) {
-      selectedTaskIdRef.current = selected.id
+    if (!selected) return
+    selectedTaskIdRef.current = selected.id
+    // 任务管理页(detailSection==='tasks')看不到 AI 配置 / 指标条,选任务时跳过这 3 个 AI 加载,
+    // 避免每次点任务都打 prompts/golden/dryrun 三个接口 + 触发额外重渲染,拖慢"点任务"的响应。
+    if (detailSection !== 'tasks') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadPrompts(selected.id)
       void loadGoldenSamples(selected.id)
     }
-  }, [loadGoldenSamples, loadPrompts, selected])
+  }, [loadGoldenSamples, loadPrompts, selected, detailSection])
 
   useEffect(() => {
-    if (selected) {
+    if (selected && detailSection !== 'tasks') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadDryRunHistory(selected.id, dryRunHistorySampleID(dryRunHistorySampleFilter))
     }
-  }, [dryRunHistorySampleFilter, loadDryRunHistory, selected])
+  }, [dryRunHistorySampleFilter, loadDryRunHistory, selected, detailSection])
 
   function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
     seqRef.current += 1

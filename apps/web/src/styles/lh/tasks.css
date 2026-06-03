@@ -205,6 +205,11 @@
   background: var(--lh-bg-elev);
 }
 
+/* 即时按下反馈:点击瞬间(mousedown)就高亮,不必等 React 重渲染更新选中态,避免"点了没反应"的错觉。 */
+.tasks-table tbody tr:active td {
+  background: var(--lh-primary-soft);
+}
+
 .tasks-table__row--active td {
   background: var(--lh-primary-soft) !important;
 }
