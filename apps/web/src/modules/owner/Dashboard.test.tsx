@@ -58,6 +58,8 @@ describe('OwnerDashboard AI prompt flow', () => {
     window.history.pushState({}, '', '/')
     // 分节是模块级 store,重置回默认 'ai' 避免跨用例泄漏。
     resetOwnerSection()
+    // owner 选中任务现持久化到 localStorage,用例间清掉避免上次选中污染默认任务。
+    localStorage.clear()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]

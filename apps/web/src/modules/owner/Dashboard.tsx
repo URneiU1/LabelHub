@@ -196,11 +196,17 @@ export default function OwnerDashboard() {
     try {
       const data = await apiGet<TaskListResponse>('/tasks')
       const requestedTaskId = requestedNumberParam('taskId')
-      const initialTask = data.find((item) => item.id === requestedTaskId) ?? data[0] ?? null
+      // 默认任务优先级:URL 指定 → 上次选中 → 首个非草稿(有数据的发布/暂停/结束任务) → 列表首位。
+      const initialTask =
+        data.find((item) => item.id === requestedTaskId) ??
+        data.find((item) => item.id === readLastOwnerTaskId()) ??
+        data.find((item) => item.status !== 'draft') ??
+        data[0] ?? null
       setTasks(data)
       setSelected(initialTask)
       setBaselineDraft(initialTask?.baselineDescription ?? '')
       selectedTaskIdRef.current = initialTask?.id ?? null
+      writeLastOwnerTaskId(initialTask?.id ?? null)
       resetGoldenSampleFormToDefaults()
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载任务失败')
@@ -389,6 +395,7 @@ export default function OwnerDashboard() {
   function selectTask(task: Task) {
     if (task.id === selectedTaskIdRef.current) return
     selectedTaskIdRef.current = task.id
+    writeLastOwnerTaskId(task.id)
     taskActionGeneration.current += 1
     setPrompts([])
     setActivePromptId(null)
@@ -1292,6 +1299,21 @@ const defaultModel = ''
 const defaultGoldenPayload = '{"prompt":"示例题目"}'
 const defaultGoldenExpectedAnswer = '{"summary":"示例答案"}'
 const defaultGoldenExpectedVerdict = 'pass'
+
+// 记住 owner 上次选中的任务,跨 owner 子页导航 / 刷新沿用,避免每次重置回列表首位(常是空草稿)。
+const LAST_OWNER_TASK_KEY = 'labelhub_owner_last_task_id'
+
+function readLastOwnerTaskId(): number | null {
+  const raw = localStorage.getItem(LAST_OWNER_TASK_KEY)
+  const id = raw ? Number(raw) : NaN
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function writeLastOwnerTaskId(id: number | null) {
+  if (id != null) {
+    localStorage.setItem(LAST_OWNER_TASK_KEY, String(id))
+  }
+}
 
 const defaultDimensionsJSON = JSON.stringify([
   { name: '相关性', description: '是否相关', weight: 1 },
