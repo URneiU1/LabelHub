@@ -238,21 +238,17 @@ button.lh-side-item--active {
 .lh-side-item__icon {
   width: 18px;
   height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--lh-divider);
-  transition: background 120ms ease;
+  flex: 0 0 auto;
+  opacity: 0.7;
+  transition: opacity 120ms ease;
 }
 
 .lh-side-item:hover .lh-side-item__icon {
-  background: var(--lh-border);
+  opacity: 1;
 }
 
 .lh-side-item--active .lh-side-item__icon {
-  background: var(--lh-primary);
-  box-shadow: 0 2px 6px rgba(var(--lh-primary-rgb), 0.35);
+  opacity: 1;
 }
 
 /* ---------- Section sub-tabs (in-page tabs for sections that split into sub-pages) ---------- */

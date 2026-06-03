@@ -10,6 +10,7 @@ import {
   setOwnerSection,
   setOwnerSubView,
 } from '../state/ownerSection'
+import { Icon, type IconName } from '../components/Icon'
 
 interface NavItem {
   to: string
@@ -28,6 +29,23 @@ const ROLE_LABEL: Record<string, string> = {
   labeler: '标注员',
   reviewer: '审核员',
   admin: '管理员',
+}
+
+// 侧栏导航图标映射(取代空占位方块)
+const OWNER_SECTION_ICON: Record<string, IconName> = {
+  tasks: 'list',
+  template: 'layout',
+  dataset: 'database',
+  ai: 'sparkle',
+  review: 'userCheck',
+  stats: 'barChart',
+  export: 'download',
+}
+
+const ROLE_NAV_ICON: Record<string, IconName> = {
+  '/owner': 'list',
+  '/labeler': 'edit',
+  '/reviewer': 'userCheck',
 }
 
 function primaryRole(roles: string[]): string {
@@ -102,7 +120,10 @@ export default function AppLayout() {
                       'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                     }
                   >
-                    <span className="lh-side-item__icon" />
+                    <Icon
+                      name={OWNER_SECTION_ICON[key] ?? 'list'}
+                      className="lh-side-item__icon"
+                    />
                     {label}
                   </NavLink>
                 ))}
@@ -119,7 +140,10 @@ export default function AppLayout() {
                     'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                   }
                 >
-                  <span className="lh-side-item__icon" />
+                  <Icon
+                    name={ROLE_NAV_ICON[item.to] ?? 'list'}
+                    className="lh-side-item__icon"
+                  />
                   {item.label}
                 </NavLink>
               ))}
@@ -136,7 +160,10 @@ export default function AppLayout() {
                     'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                   }
                 >
-                  <span className="lh-side-item__icon" />
+                  <Icon
+                    name={ROLE_NAV_ICON[item.to] ?? 'list'}
+                    className="lh-side-item__icon"
+                  />
                   {item.label}
                 </NavLink>
               ))}
