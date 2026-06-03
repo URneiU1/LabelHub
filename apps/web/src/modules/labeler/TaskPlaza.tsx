@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Input, Select } from '@douyinfe/semi-ui'
 import type { Task } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
+import { Markdown } from '../../shared/markdown'
 import StatusBadge from '../../shared/components/StatusBadge'
 
 type TaskPlazaProps = {
@@ -156,7 +157,7 @@ function TaskDetailModal({ task, onClose, onConfirm }: TaskDetailModalProps) {
         {task.baselineDescription ? (
           <div className="lz-detail__section">
             <div className="lz-detail__label">验收基线 / 审核规则</div>
-            <div className="lz-detail__body">{task.baselineDescription}</div>
+            <div className="lz-detail__body"><Markdown text={task.baselineDescription} /></div>
           </div>
         ) : null}
 

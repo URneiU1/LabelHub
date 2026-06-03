@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
+import { Markdown } from '../../shared/markdown'
 import { isSafeURL } from '../../shared/security/url'
 import { isRecord, resolvePath, textValue } from '../path'
 import type { ShowItemMode, WidgetProps } from '../types'
@@ -22,7 +23,7 @@ export default function ShowItemWidget({ field, answer, payload }: WidgetProps) 
     return <ValuePanel label={field.label}>{isSafeURL(src) ? <img src={src} alt={field.label} style={imageStyle} /> : <EmptyMedia />}</ValuePanel>
   }
   if (mode === 'markdown') {
-    return <ValuePanel label={field.label}><div style={markdownStyle}>{renderMarkdown(markdownText(value))}</div></ValuePanel>
+    return <ValuePanel label={field.label}><div style={markdownStyle}><Markdown text={markdownText(value)} /></div></ValuePanel>
   }
 
   return <AutoPayloadView label={field.label} value={value} />
@@ -109,43 +110,9 @@ function renderMediaFromPayload(payload: Record<string, unknown>) {
     return <Field label="图片素材">{isSafeURL(src) ? <img src={src} alt="任务素材" style={imageStyle} /> : <EmptyMedia />}</Field>
   }
   if (mediaType === 'markdown' && markdown) {
-    return <Field label="Markdown 素材"><div style={markdownStyle}>{renderMarkdown(markdown)}</div></Field>
+    return <Field label="Markdown 素材"><div style={markdownStyle}><Markdown text={markdown} /></div></Field>
   }
   return null
-}
-
-function renderMarkdown(markdown: string) {
-  return markdown.split('\n').map((line, index) => {
-    const value = line.trim()
-    if (!value) {
-      return null
-    }
-    const video = value.match(/<video[^>]*src=["']([^"']+)["'][^>]*>/i)
-    if (video && isSafeURL(video[1])) {
-      return <video key={index} controls src={video[1]} style={mediaStyle} />
-    }
-    const image = value.match(/!\[([^\]]*)\]\(([^)]+)\)/)
-    if (image && isSafeURL(image[2])) {
-      return <img key={index} src={image[2]} alt={image[1] || 'markdown 图片'} style={imageStyle} />
-    }
-    const link = value.match(/\[([^\]]+)\]\(([^)]+)\)/)
-    if (link && isSafeURL(link[2]) && link[2].endsWith('.mp4')) {
-      return <video key={index} controls src={link[2]} style={mediaStyle} />
-    }
-    if (link && isSafeURL(link[2])) {
-      return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>
-    }
-    if (value.startsWith('### ')) {
-      return <h4 key={index} style={markdownHeadingStyle}>{value.slice(4)}</h4>
-    }
-    if (value.startsWith('## ')) {
-      return <h3 key={index} style={markdownHeadingStyle}>{value.slice(3)}</h3>
-    }
-    if (value.startsWith('# ')) {
-      return <h2 key={index} style={markdownHeadingStyle}>{value.slice(2)}</h2>
-    }
-    return <p key={index} style={{ margin: 'var(--space-sm) 0' }}>{value}</p>
-  })
 }
 
 function mediaURL(value: unknown) {
@@ -233,11 +200,6 @@ const markdownStyle: CSSProperties = {
   background: 'var(--color-bg)',
   border: '1px solid var(--color-border-light)',
   lineHeight: 1.6,
-}
-
-const markdownHeadingStyle: CSSProperties = {
-  fontFamily: 'var(--font-heading)',
-  margin: 'var(--space-sm) 0',
 }
 
 const tagRowStyle: CSSProperties = {
