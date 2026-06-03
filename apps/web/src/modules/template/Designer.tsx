@@ -29,6 +29,7 @@ import { parseTemplateSchema } from '../../renderer/parser'
 import type { AnswerValue } from '../../renderer/types'
 import { widgetRegistry } from '../../renderer/widgets'
 import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type VisibleWhen, type WidgetType } from '../../renderer/types'
+import { Icon } from '../../shared/components/Icon'
 import '../../styles/lh/designer.css'
 import './Designer.css'
 
@@ -863,11 +864,11 @@ function CanvasField({
               <Button size="small" theme="light" disabled={disabled} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
             </span>
             <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
-              <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>↑</Button>
-              <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>↓</Button>
+              <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`} icon={<Icon name="up" size={14} />} />
+              <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`} icon={<Icon name="down" size={14} />} />
             </div>
-            <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>复制</Button>
-            <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger">删除</Button>
+            <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`} icon={<Icon name="copy" size={14} />} />
+            <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger" icon={<Icon name="close" size={14} />} />
           </div>
         )}
       </div>
