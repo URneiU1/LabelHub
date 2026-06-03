@@ -34,9 +34,19 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit' | null>(null)
   const [drawerTab, setDrawerTab] = useState<DrawerTab>('info')
   const [transitioning, setTransitioning] = useState<TaskTransition | null>(null)
+  // 列表筛选:按任务名/ID 搜索 + 按状态过滤(纯前端,stats 仍按全量统计)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
 
   const stats = computeTaskStats(tasks)
   const drawerTask = drawerMode === 'edit' ? selected : null
+
+  const query = search.trim().toLowerCase()
+  const visibleTasks = tasks.filter((task) => {
+    if (statusFilter !== 'all' && task.status !== statusFilter) return false
+    if (query && !task.title.toLowerCase().includes(query) && !String(task.id).includes(query)) return false
+    return true
+  })
 
   function openCreate() {
     setDrawerMode('create')
@@ -93,6 +103,29 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
         ))}
       </div>
 
+      <div className="tasks-filters">
+        <input
+          type="text"
+          className="tasks-filters__search"
+          aria-label="搜索任务"
+          placeholder="搜索任务名 / ID"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <select
+          className="tasks-filters__select"
+          aria-label="按状态筛选"
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.target.value)}
+        >
+          <option value="all">全部状态</option>
+          <option value="draft">草稿</option>
+          <option value="published">发布中</option>
+          <option value="paused">已暂停</option>
+          <option value="ended">已结束</option>
+        </select>
+      </div>
+
       <div className="tasks-table">
         <table>
           <thead>
@@ -104,7 +137,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task) => {
+            {visibleTasks.map((task) => {
               const percent = taskProgressPercent(task)
               return (
                 <tr
@@ -146,6 +179,12 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
               <tr>
                 <td colSpan={4}>
                   <EmptyState title="暂无任务" body="点击「新建任务」创建第一个标注任务。" variant="empty" />
+                </td>
+              </tr>
+            ) : visibleTasks.length === 0 ? (
+              <tr>
+                <td colSpan={4}>
+                  <EmptyState title="没有匹配的任务" body="调整搜索关键词或状态筛选试试。" variant="empty" />
                 </td>
               </tr>
             ) : null}

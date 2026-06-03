@@ -2,19 +2,40 @@
   display: flex;
   gap: 12px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
-.tasks-filters .arco-input-inner-wrapper,
-.tasks-filters .arco-select-view {
+.tasks-filters__search,
+.tasks-filters__select {
+  height: 38px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
   background: #fff;
+  color: var(--lh-text-1);
+  font: inherit;
+  font-size: 14px;
+  padding: 0 12px;
 }
 
-.tasks-filters .arco-input-inner-wrapper {
+.tasks-filters__search {
   width: 280px;
+  max-width: 100%;
 }
 
-.tasks-filters .arco-select {
+.tasks-filters__search::placeholder {
+  color: var(--lh-text-3);
+}
+
+.tasks-filters__select {
   width: 160px;
+  cursor: pointer;
+}
+
+.tasks-filters__search:focus,
+.tasks-filters__select:focus {
+  outline: none;
+  border-color: var(--lh-primary);
+  box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0.12);
 }
 
 .tasks-table {
@@ -160,6 +181,24 @@
 .lh-stat--active {
   border-color: var(--lh-primary);
   background: var(--lh-primary-soft);
+}
+
+/* Phase 1 · 任务管理 stat 卡对齐 demo:纯平卡(去主色左描边),数字用展示字体 + 等宽数位。
+   scope 到 .lh-task-manage,不影响 labeler/MyData 的 .lh-stat。 */
+.lh-task-manage .lh-stat {
+  cursor: default;
+  border-left: 1px solid var(--lh-border);
+}
+
+.lh-task-manage .lh-stat:has(.lh-stat__value--success),
+.lh-task-manage .lh-stat:has(.lh-stat__value--warning) {
+  border-left-color: var(--lh-border);
+}
+
+.lh-task-manage .lh-stat__value {
+  font-family: var(--font-heading);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .tasks-table tbody tr:hover td {
