@@ -606,6 +606,12 @@ button.lh-side-item--active {
   font-family: var(--lh-font-mono);
 }
 
+.lh-icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .lh-text-12 {
   font-size: 12px;
 }

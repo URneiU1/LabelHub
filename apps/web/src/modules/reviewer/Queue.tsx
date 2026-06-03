@@ -5,6 +5,7 @@ import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer
 import type { AnswerValue, TemplateSchema } from '../../renderer/types'
 import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type ReviewResult, type Submission, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
+import { Icon } from '../../shared/components/Icon'
 import { parsePayload } from '../../shared/components/payload'
 import StatusBadge from '../../shared/components/StatusBadge'
 import AIVerdictPanel from './AIVerdictPanel'
@@ -453,6 +454,15 @@ export default function ReviewerQueue() {
   const payload = useMemo(() => parsePayload(detail?.item?.payload), [detail?.item?.payload])
   const answer = useMemo<AnswerValue>(() => parseAnswer(detail?.revision?.answer), [detail?.revision?.answer])
   const showingDemo = demoMode && submissions.length === 0 && !selected && !detail
+  // 全选 checkbox 的全选 / 半选态:可见项全部选中 → 勾选;仅部分选中 → indeterminate 半选。
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  const allVisibleSelected = !showingDemo && visibleSubmissionIds.length > 0 && visibleSubmissionIds.every((id) => selectedSubmissionIds.includes(id))
+  const someVisibleSelected = !showingDemo && visibleSubmissionIds.some((id) => selectedSubmissionIds.includes(id))
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someVisibleSelected && !allVisibleSelected
+    }
+  }, [someVisibleSelected, allVisibleSelected])
   const retryDisabled = !showingDemo && (!selected || !canRetryAIReview(detail?.aiReview))
   const selectedRule = useMemo(() => {
     if (ruleConfigs.length > 0) {
@@ -728,9 +738,10 @@ export default function ReviewerQueue() {
             <div className="hr-batch">
               <label className="hr-batch__check">
                 <input
+                  ref={selectAllRef}
                   aria-label="选择全部审核项"
                   type="checkbox"
-                  checked={!showingDemo && visibleSubmissionIds.length > 0 && visibleSubmissionIds.every((id) => selectedSubmissionIds.includes(id))}
+                  checked={allVisibleSelected}
                   onChange={(event) => setSelectedSubmissionIds(event.target.checked ? visibleSubmissionIds : [])}
                 />
                 已选 {showingDemo ? 3 : selectedSubmissionIds.length} 条
@@ -930,7 +941,7 @@ function DemoReviewDetail({
 
       <section style={aiResultStyle}>
         <div style={sectionTitleRowStyle}>
-          <h3 style={sectionTitleStyle}>✦ AI 预审 · 本轮重跑结果</h3>
+          <h3 style={sectionTitleStyle}><span className="lh-icon-text"><Icon name="sparkle" size={15} />AI 预审 · 本轮重跑结果</span></h3>
           <span style={modelPillStyle}>{detail.promptLabel}</span>
         </div>
         <div style={scoreLineStyle}>

@@ -81,6 +81,12 @@
   margin-bottom: 8px;
   background: #fff;
   cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.hr-item:hover:not(.hr-item--selected) {
+  border-color: var(--lh-border-strong);
+  box-shadow: var(--lh-shadow-sm);
 }
 
 .hr-item--selected {
@@ -202,6 +208,7 @@
   border: 1px solid var(--lh-border);
   border-radius: var(--lh-radius-lg);
   padding: 14px 16px;
+  box-shadow: var(--lh-shadow-sm);
 }
 
 .hr-compare__head {
@@ -411,9 +418,11 @@
 }
 
 .hr-stat-cell__value {
+  font-family: var(--lh-font-display);
   font-size: 22px;
   font-weight: 700;
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .hr-stat-cell__value--success {

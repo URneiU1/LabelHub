@@ -1,4 +1,5 @@
 import type { AIReviewDetail, Submission } from '../../shared/api/client'
+import { Icon } from '../../shared/components/Icon'
 import StatusBadge from '../../shared/components/StatusBadge'
 
 // AI 预审面板:复刻 ui-demo AiReview 的视觉(维度 ScoreBar + 评语 + 状态),
@@ -21,7 +22,7 @@ export default function AIVerdictPanel({ aiReview, submission }: AIVerdictPanelP
     return (
       <section className="ai-section" aria-label="AI 预审结论">
         <div className="ai-section__head">
-          <span className="ai-section__title">AI 预审结论</span>
+          <span className="ai-section__title lh-icon-text"><Icon name="sparkle" size={14} />AI 预审结论</span>
           <span className="ai-section__aside">
             <span className="lh-tag lh-tag--purple">{aiReview.prompt ? `v${aiReview.prompt.version} · ${aiReview.prompt.model}` : `prompt v${aiReview.promptVersion}`}</span>
           </span>
@@ -57,7 +58,7 @@ export default function AIVerdictPanel({ aiReview, submission }: AIVerdictPanelP
     return (
       <section className="ai-section" aria-label="AI 预审结论">
         <div className="ai-section__head">
-          <span className="ai-section__title">AI 预审结论</span>
+          <span className="ai-section__title lh-icon-text"><Icon name="sparkle" size={14} />AI 预审结论</span>
         </div>
         <div className="hr-rerun__scores">AI {submission.aiVerdict} · {score}</div>
         <div style={{ color: submission.aiVerdict === 'pass' ? 'var(--lh-success)' : 'var(--lh-danger)', fontWeight: 700, fontSize: 13 }}>verdict: {submission.aiVerdict}</div>
@@ -69,7 +70,7 @@ export default function AIVerdictPanel({ aiReview, submission }: AIVerdictPanelP
   return (
     <section className="ai-section" aria-label="AI 预审结论">
       <div className="ai-section__head">
-        <span className="ai-section__title">AI 预审结论</span>
+        <span className="ai-section__title lh-icon-text"><Icon name="sparkle" size={14} />AI 预审结论</span>
       </div>
       <div className="hr-rerun__scores">AI 未预审</div>
       <p className="lh-muted">暂无 AI 预审结果</p>
