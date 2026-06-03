@@ -27,6 +27,12 @@ describe('ApiError', () => {
     expect(err.message).toContain('刷新')
   })
 
+  it('maps INVALID_STATE with a missing-template reason to a build-template hint', () => {
+    const err = new ApiError('INVALID_STATE', 'task must have a bound template before publishing', 'req-1')
+    expect(err.message).toContain('模板')
+    expect(err.message).not.toContain('被其他人改动')
+  })
+
   it('maps LLM_PROVIDER_ERROR to a retry-or-human-review hint', () => {
     const err = new ApiError('LLM_PROVIDER_ERROR', 'upstream 503', 'req-2')
     expect(err.message).toContain('AI 服务')
@@ -139,7 +145,7 @@ describe('task management client wrappers', () => {
     await expect(transitionTask(7, 'publish')).rejects.toMatchObject({
       code: 'INVALID_STATE',
     })
-    await expect(transitionTask(7, 'publish')).rejects.toThrow('刷新')
+    await expect(transitionTask(7, 'publish')).rejects.toThrow('模板')
   })
 
   it('importItemsFile sends multipart form with file and optional format', async () => {

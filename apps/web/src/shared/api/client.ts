@@ -11,11 +11,20 @@ type ApiErrorEnvelope = {
   request_id: string
 }
 
-// 对少数会让标注/审核流程卡住的错误码,给出可执行的中文提示;
-// 其余错误码沿用后端 message,避免覆盖已有的具体说明。
-const FRIENDLY_ERROR_BY_CODE: Record<string, string> = {
-  INVALID_STATE: '该记录的状态已被其他人改动,请刷新后再操作。',
-  LLM_PROVIDER_ERROR: 'AI 服务暂时不可用,可稍后重试,或直接转人工审核。',
+// 对少数会让标注/审核流程卡住的错误码,给出可执行的中文提示;其余错误码沿用后端 message。
+// INVALID_STATE 一个码覆盖多种业务原因(没绑模板 / 状态已变 / 字段冻结),统一文案会误导
+// (如"没绑模板"被显示成"状态被他人改动,请刷新"——刷新无用)。按后端 message 内容分流。
+function resolveFriendlyMessage(code: string, backendMessage: string): string | null {
+  if (code === 'INVALID_STATE') {
+    if (backendMessage.toLowerCase().includes('template')) {
+      return '请先为该任务搭建并保存模板,再发布。'
+    }
+    return '该任务状态已变化(可能已发布或已被改动),请刷新后重试。'
+  }
+  if (code === 'LLM_PROVIDER_ERROR') {
+    return 'AI 服务暂时不可用,可稍后重试,或直接转人工审核。'
+  }
+  return null
 }
 
 export class ApiError extends Error {
@@ -23,7 +32,7 @@ export class ApiError extends Error {
   requestId: string
 
   constructor(code: string, backendMessage: string, requestId: string) {
-    super(FRIENDLY_ERROR_BY_CODE[code] || backendMessage || '请求失败')
+    super(resolveFriendlyMessage(code, backendMessage) || backendMessage || '请求失败')
     this.name = 'ApiError'
     this.code = code
     this.requestId = requestId
