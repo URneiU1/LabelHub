@@ -822,11 +822,6 @@ export default function OwnerDashboard() {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--space-xl)' }}>
-        <h1 style={{ fontFamily: 'var(--lh-font-sans)', fontSize: 'var(--text-h1)', margin: 0, fontWeight: 700 }}>Owner 任务负责人</h1>
-        <p style={{ fontFamily: 'var(--lh-font-sans)', color: 'var(--lh-text-2)', marginTop: 'var(--space-xs)' }}>任务发布 · 模板搭建 · 审核配置 · 数据导出</p>
-      </div>
-
       <div>
         <section style={{ ...panelStyle, minHeight: 600 }}>
           {detailSection === 'tasks' && (
