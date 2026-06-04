@@ -1530,8 +1530,8 @@ const controlStripStyle: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
   gap: 'var(--space-sm)',
-  marginBottom: 'var(--space-lg)',
-  padding: 'var(--space-sm)',
+  marginBottom: 'var(--space-md)',
+  padding: '6px',
   border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-lg)',
   background: 'var(--lh-bg-elev)',
@@ -1539,7 +1539,7 @@ const controlStripStyle: React.CSSProperties = {
 
 const metricCellStyle: React.CSSProperties = {
   minWidth: 0,
-  padding: 'var(--space-md)',
+  padding: '10px 12px',
   border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-md)',
   background: 'var(--lh-bg-card)',
