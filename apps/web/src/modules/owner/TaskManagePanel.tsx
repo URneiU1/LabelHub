@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Toast } from '@douyinfe/semi-ui'
+import { Modal, Toast } from '@douyinfe/semi-ui'
 import { ApiError, transitionTask, type Task } from '../../shared/api/client'
 import StatusBadge from '../../shared/components/StatusBadge'
 import EmptyState from '../../shared/components/EmptyState'
@@ -65,6 +65,23 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
       // 新建后切到编辑态,方便接着配模板/导入数据。
       setDrawerMode('edit')
     }
+  }
+
+  // 「下线 / 结束」会把任务推进到不可逆的终态(标注员从此领不到题),先弹二次确认防误点;
+  // 其它转移(发布 / 暂停 / 恢复)都可逆,直接执行。
+  function requestTransition(action: TaskTransition) {
+    if (!selected || transitioning) return
+    if (action !== 'end') {
+      void runTransition(action)
+      return
+    }
+    Modal.confirm({
+      title: '确定结束该任务?',
+      content: '结束后任务变为「已结束」,不可恢复,标注员将无法再领取该任务的题目。',
+      okText: '结束任务',
+      cancelText: '取消',
+      onOk: () => runTransition('end'),
+    })
   }
 
   async function runTransition(action: TaskTransition) {
@@ -206,7 +223,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
               aria-label={`${TRANSITION_LABELS[action]}任务`}
               disabled={transitioning !== null}
               className={'lh-btn' + (action === 'publish' || action === 'resume' ? ' lh-btn--primary' : '')}
-              onClick={() => void runTransition(action)}
+              onClick={() => requestTransition(action)}
             >
               {transitioning === action ? '处理中…' : TRANSITION_LABELS[action]}
             </button>

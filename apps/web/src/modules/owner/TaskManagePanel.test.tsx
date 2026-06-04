@@ -1,8 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskManagePanel from './TaskManagePanel'
 import { ApiError, importItemsFile, listAssignees, transitionTask } from '../../shared/api/client'
+
+const mockModalConfirm = vi.hoisted(() => vi.fn())
 
 vi.mock('../../shared/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../shared/api/client')>()
@@ -23,6 +25,7 @@ vi.mock('../../shared/api/client', async (importOriginal) => {
 
 vi.mock('@douyinfe/semi-ui', () => ({
   Toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  Modal: { confirm: mockModalConfirm },
 }))
 
 const mockTransitionTask = vi.mocked(transitionTask)
@@ -40,11 +43,23 @@ const draftTask = {
   distribution: 'first_come',
 }
 
+const publishedTask = {
+  id: 8,
+  title: 'QA 质量校验',
+  description: null,
+  baselineDescription: null,
+  status: 'published',
+  totalItems: 10,
+  finishedItems: 4,
+  distribution: 'first_come',
+}
+
 describe('TaskManagePanel', () => {
   beforeEach(() => {
     mockTransitionTask.mockReset()
     mockImportItemsFile.mockReset()
     mockListAssignees.mockReset()
+    mockModalConfirm.mockReset()
     mockListAssignees.mockResolvedValue([])
   })
 
@@ -140,5 +155,64 @@ describe('TaskManagePanel', () => {
       expect(mockImportItemsFile).toHaveBeenCalledWith(7, file)
     })
     expect(onTasksChanged).toHaveBeenCalled()
+  })
+
+  it('asks for confirmation before ending a task and only transitions after the user confirms', async () => {
+    const user = userEvent.setup()
+    mockTransitionTask.mockResolvedValue({ ...publishedTask, status: 'ended' })
+
+    render(
+      <TaskManagePanel tasks={[publishedTask]} selected={publishedTask} onSelect={vi.fn()} onTaskSaved={vi.fn()} onTasksChanged={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '下线任务' }))
+
+    // 「下线 / 结束」是终态不可逆,先弹二次确认,确认前不应真的下线。
+    expect(mockModalConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      title: '确定结束该任务?',
+      content: expect.stringContaining('不可恢复'),
+    }))
+    expect(mockTransitionTask).not.toHaveBeenCalled()
+
+    // 点「确定」(onOk)后才真正走状态机 end。
+    const confirmConfig = mockModalConfirm.mock.calls[0][0]
+    await act(async () => {
+      await confirmConfig.onOk()
+    })
+
+    await waitFor(() => {
+      expect(mockTransitionTask).toHaveBeenCalledWith(8, 'end')
+    })
+  })
+
+  it('does not end the task when the confirmation is cancelled', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <TaskManagePanel tasks={[publishedTask]} selected={publishedTask} onSelect={vi.fn()} onTaskSaved={vi.fn()} onTasksChanged={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '下线任务' }))
+
+    // 取消 = 不触发 onOk,状态机不应被调用。
+    expect(mockModalConfirm).toHaveBeenCalledTimes(1)
+    expect(mockTransitionTask).not.toHaveBeenCalled()
+  })
+
+  it('pauses a published task directly without a confirmation dialog', async () => {
+    const user = userEvent.setup()
+    mockTransitionTask.mockResolvedValue({ ...publishedTask, status: 'paused' })
+
+    render(
+      <TaskManagePanel tasks={[publishedTask]} selected={publishedTask} onSelect={vi.fn()} onTaskSaved={vi.fn()} onTasksChanged={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '暂停任务' }))
+
+    // 只有「下线 / 结束」走确认弹窗,其它转移(暂停/恢复/发布)直接执行。
+    await waitFor(() => {
+      expect(mockTransitionTask).toHaveBeenCalledWith(8, 'pause')
+    })
+    expect(mockModalConfirm).not.toHaveBeenCalled()
   })
 })
