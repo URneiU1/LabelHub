@@ -82,9 +82,10 @@ func upsertUser(database *gorm.DB, seed seedUser) error {
 		}
 
 		if err := tx.Model(&user).Updates(map[string]any{
-			"display_name": seed.displayName,
-			"email":        seed.email,
-			"status":       "active",
+			"password_hash": passwordHash,
+			"display_name":  seed.displayName,
+			"email":         seed.email,
+			"status":        "active",
 		}).Error; err != nil {
 			return err
 		}
@@ -113,6 +114,7 @@ type officialSeedConfig struct {
 	BaselinePath    string
 	TemplatePath    string
 	DatasetPath     string
+	GoldenAnswer    func(map[string]any) map[string]any
 }
 
 func seedQAQuality(database *gorm.DB) error {
@@ -122,6 +124,7 @@ func seedQAQuality(database *gorm.DB) error {
 		BaselinePath:    "tools/seed/datasets/qa_quality/标注要求.md",
 		TemplatePath:    "tools/seed/templates/qa_quality_review.json",
 		DatasetPath:     "tools/seed/datasets/qa_quality/json/qa_quality.json",
+		GoldenAnswer:    qaQualityGoldenAnswer,
 	})
 }
 
@@ -132,8 +135,20 @@ func seedPreferenceCompare(database *gorm.DB) error {
 		BaselinePath:    "tools/seed/datasets/preference_compare/标注要求.md",
 		TemplatePath:    "tools/seed/templates/preference_compare_review.json",
 		DatasetPath:     "tools/seed/datasets/preference_compare/json/preference_compare.json",
+		GoldenAnswer:    preferenceCompareGoldenAnswer,
 	})
 }
+
+const defaultAIPromptTemplate = `请根据任务验收基线、题目 payload 和标注员 answer 做结构化预审。判断标注结果是否需要人工重点关注；AI 结论只作为人工审核参考，不自动入库。`
+
+const defaultAIPromptDimensions = `[
+  {"name":"相关性","description":"答案是否贴合题目与任务验收基线。","weight":0.35},
+  {"name":"准确性","description":"结论、评分或偏好判断是否正确。","weight":0.45},
+  {"name":"安全性","description":"是否存在安全、合规或明显不可接受内容。","weight":0.20}
+]`
+
+const defaultAIPromptModel = "doubao-seed-2.0-lite"
+const defaultGoldenVerdict = "uncertain"
 
 func seedOfficialTask(database *gorm.DB, config officialSeedConfig) error {
 	return database.Transaction(func(tx *gorm.DB) error {
@@ -157,18 +172,28 @@ func seedOfficialTask(database *gorm.DB, config officialSeedConfig) error {
 			BaselineDescription: model.StringFrom(string(baseline)),
 			Status:              "published",
 			Distribution:        "first_come",
-			AIReviewEnabled:     false,
+			AIReviewEnabled:     true,
 			HumanReviewEnabled:  true,
 			PublishedAt:         model.TimeFrom(time.Now().UTC()),
 		}
 		if err := tx.Where("title = ?", task.Title).Attrs(task).FirstOrCreate(&task).Error; err != nil {
 			return err
 		}
+		prompt, err := seedDefaultAIPrompt(tx, task.ID, owner.ID)
+		if err != nil {
+			return err
+		}
+		activePromptID := task.AIPromptID
+		if activePromptID == nil {
+			activePromptID = &prompt.ID
+		}
+		task.AIPromptID = activePromptID
 		if err := tx.Model(&task).Updates(map[string]any{
 			"baseline_description": string(baseline),
 			"status":               "published",
-			"ai_review_enabled":    false,
+			"ai_review_enabled":    true,
 			"human_review_enabled": true,
+			"ai_prompt_id":         *activePromptID,
 			"published_at":         time.Now().UTC(),
 		}).Error; err != nil {
 			return err
@@ -252,9 +277,157 @@ func seedOfficialTask(database *gorm.DB, config officialSeedConfig) error {
 				return err
 			}
 		}
+		if err := seedGoldenSamples(tx, task.ID, *activePromptID, owner.ID, items, config.GoldenAnswer); err != nil {
+			return err
+		}
 
 		return tx.Model(&task).Update("total_items", len(items)).Error
 	})
+}
+
+func seedDefaultAIPrompt(tx *gorm.DB, taskID uint64, ownerID uint64) (model.AIPromptConfig, error) {
+	prompt := model.AIPromptConfig{
+		TaskID:         taskID,
+		Version:        1,
+		PromptTemplate: defaultAIPromptTemplate,
+		Dimensions:     defaultAIPromptDimensions,
+		PassThreshold:  80,
+		UncertainMin:   60,
+		Model:          defaultAIPromptModel,
+		CreatedBy:      ownerID,
+	}
+	var existing model.AIPromptConfig
+	err := tx.Where("task_id = ? AND version = ?", taskID, 1).First(&existing).Error
+	switch {
+	case err == nil:
+		if err := tx.Model(&existing).Updates(map[string]any{
+			"prompt_template": defaultAIPromptTemplate,
+			"dimensions":      defaultAIPromptDimensions,
+			"pass_threshold":  80,
+			"uncertain_min":   60,
+			"model":           defaultAIPromptModel,
+		}).Error; err != nil {
+			return model.AIPromptConfig{}, err
+		}
+		existing.PromptTemplate = defaultAIPromptTemplate
+		existing.Dimensions = defaultAIPromptDimensions
+		existing.PassThreshold = 80
+		existing.UncertainMin = 60
+		existing.Model = defaultAIPromptModel
+		return existing, nil
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := tx.Create(&prompt).Error; err != nil {
+			return model.AIPromptConfig{}, err
+		}
+		return prompt, nil
+	default:
+		return model.AIPromptConfig{}, err
+	}
+}
+
+func seedGoldenSamples(tx *gorm.DB, taskID uint64, promptID uint64, ownerID uint64, items []map[string]any, answerFor func(map[string]any) map[string]any) error {
+	if answerFor == nil {
+		return nil
+	}
+	limit := 2
+	if len(items) < limit {
+		limit = len(items)
+	}
+	for index := 0; index < limit; index++ {
+		payload, err := json.Marshal(items[index])
+		if err != nil {
+			return err
+		}
+		answer, err := json.Marshal(answerFor(items[index]))
+		if err != nil {
+			return err
+		}
+		hash := sha256.Sum256(payload)
+		payloadJSON := string(payload)
+		answerJSON := string(answer)
+		payloadHash := hex.EncodeToString(hash[:])
+		notes := model.StringFrom("seed golden sample for mock AI dry-run")
+		promptIDCopy := promptID
+		sample := model.GoldenSample{
+			TaskID:          taskID,
+			AIPromptID:      &promptIDCopy,
+			Payload:         payloadJSON,
+			PayloadHash:     payloadHash,
+			ExpectedAnswer:  answerJSON,
+			ExpectedVerdict: defaultGoldenVerdict,
+			Notes:           notes,
+			CreatedBy:       ownerID,
+		}
+		if err := tx.Where("task_id = ? AND payload_hash = ?", taskID, sample.PayloadHash).Attrs(sample).FirstOrCreate(&sample).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&sample).Updates(map[string]any{
+			"ai_prompt_id":     promptID,
+			"payload":          payloadJSON,
+			"expected_answer":  answerJSON,
+			"expected_verdict": defaultGoldenVerdict,
+			"notes":            notes,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func qaQualityGoldenAnswer(payload map[string]any) map[string]any {
+	prompt, _ := payload["prompt"].(string)
+	return map[string]any{
+		"relevance_score":     5,
+		"accuracy_score":      5,
+		"format_score":        5,
+		"safety_score":        5,
+		"issue_tags":          []string{"无明显问题"},
+		"summary":             "答案整体符合验收要求",
+		"comment":             "围绕题目作答，关键事实与参考答案一致，可进入人工终审。",
+		"revision_suggestion": "无需修改。",
+		"corrected_answer": map[string]any{
+			"prompt": prompt,
+		},
+	}
+}
+
+func preferenceCompareGoldenAnswer(payload map[string]any) map[string]any {
+	preferred, _ := payload["preferred"].(string)
+	if preferred == "" {
+		preferred = "A"
+	}
+	margin, _ := payload["margin"].(string)
+	if margin == "" {
+		margin = "明显优于"
+	}
+	dimensions, ok := payload["dimensions"].([]any)
+	selectedDimensions := make([]string, 0, len(dimensions))
+	if ok {
+		for _, dimension := range dimensions {
+			if name, ok := dimension.(string); ok {
+				selectedDimensions = append(selectedDimensions, name)
+			}
+		}
+	}
+	if len(selectedDimensions) == 0 {
+		selectedDimensions = []string{"准确性"}
+	}
+	note, _ := payload["annotator_note"].(string)
+	if note == "" {
+		note = "偏好结论与参考标注一致，可进入人工终审。"
+	}
+	return map[string]any{
+		"preferred":           preferred,
+		"margin":              margin,
+		"safety_flag":         "否",
+		"dimensions":          selectedDimensions,
+		"summary":             "偏好判断符合参考答案",
+		"annotator_note":      note,
+		"revision_suggestion": "无需修改。",
+		"structured_note": map[string]any{
+			"seed": true,
+		},
+	}
 }
 
 type seedTemplateAction struct {
