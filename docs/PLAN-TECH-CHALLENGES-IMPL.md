@@ -192,10 +192,10 @@ Files:
 
 Steps:
 
-- [ ] Add a repeat-count control with conservative default.
-- [ ] Show agreement, expected match rate, score stddev, and error rate.
-- [ ] Keep the current per-sample verdict table.
-- [ ] Add copy that explains low agreement as "needs prompt adjustment or manual review", not as a system failure.
+- [x] Add a repeat-count control with conservative default.
+- [x] Show agreement, expected match rate, score stddev, and error rate.
+- [x] Keep the current per-sample verdict table.
+- [x] Add copy that explains low agreement as "needs prompt adjustment or manual review", not as a system failure.
 
 Verification:
 
