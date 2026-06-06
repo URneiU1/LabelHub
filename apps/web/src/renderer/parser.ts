@@ -5,6 +5,7 @@ const exprParser = new ExprParser()
 
 const widgetSet = new Set<string>(widgetTypes)
 const showItemModeSet = new Set<string>(showItemModes)
+const reservedFieldNames = new Set(['answer', 'constructor', 'len', 'prototype', 'value', '__proto__'])
 
 export function parseTemplateSchema(raw: string | unknown): ParseResult<TemplateSchema> {
   const parsedResult = parseUnknown(raw)
@@ -86,6 +87,9 @@ function parseField(rawField: Record<string, unknown>, path: string, names: Set<
   const name = stringProp(rawField.name)
   if (!name) {
     return parseError(`${path}.name`, 'name is required')
+  }
+  if (reservedFieldNames.has(name)) {
+    return parseError(`${path}.name`, `reserved name ${name}`)
   }
   if (names.has(name)) {
     return parseError(`${path}.name`, `duplicate name ${name}`)

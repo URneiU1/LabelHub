@@ -9,6 +9,7 @@ import SchemaRenderer from './SchemaRenderer'
 import { parseTemplateSchema } from './parser'
 import type { AnswerValue, TemplateSchema, ValidationError } from './types'
 import { apiPost } from '../shared/api/client'
+import { buildLargeSchema, topLevelFieldNames } from './__fixtures__/largeSchema'
 
 vi.mock('../shared/api/client', () => ({
   apiPost: vi.fn(),
@@ -289,6 +290,60 @@ describe('SchemaRenderer', () => {
     expect(screen.getByLabelText('严重程度')).toBeInTheDocument()
   })
 
+  it('prunes hidden leaf values when conditional fields become invisible', async () => {
+    const user = userEvent.setup()
+    const result = parseTemplateSchema({
+      title: 'conditional',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: '结论', options: ['pass', 'reject'] },
+        {
+          name: 'reject_reason',
+          widget: 'Input',
+          label: '打回原因',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+        },
+        {
+          name: 'reject_group',
+          widget: 'Group',
+          label: '打回详情',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+          fields: [{ name: 'severity', widget: 'Input', label: '严重程度' }],
+        },
+      ],
+    })
+    if (!result.ok) {
+      throw new Error(result.error.message)
+    }
+
+    function ConditionalRenderer() {
+      const [answer, setAnswer] = useState<AnswerValue>({
+        decision: 'reject',
+        reject_reason: '证据不足',
+        severity: 'high',
+      })
+      return (
+        <>
+          <SchemaRenderer schema={result.value} value={answer} onChange={setAnswer} />
+          <output aria-label="conditional-answer-json">{JSON.stringify(answer)}</output>
+        </>
+      )
+    }
+
+    render(<ConditionalRenderer />)
+
+    expect(screen.getByLabelText('打回原因')).toHaveValue('证据不足')
+    expect(screen.getByLabelText('严重程度')).toHaveValue('high')
+
+    await user.click(within(screen.getByRole('radiogroup', { name: '结论' })).getByLabelText('pass'))
+
+    await waitFor(() => {
+      const answer = JSON.parse(screen.getByLabelText('conditional-answer-json').textContent || '{}') as AnswerValue
+      expect(answer).toEqual({ decision: 'pass' })
+    })
+    expect(screen.queryByLabelText('打回原因')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('严重程度')).not.toBeInTheDocument()
+  })
+
   it('renders ShowItem media modes from path', () => {
     const result = parseTemplateSchema({
       title: 'media',
@@ -390,5 +445,49 @@ describe('SchemaRenderer', () => {
 
     expect(screen.queryByRole('link', { name: 'bad' })).not.toBeInTheDocument()
     expect(screen.queryByAltText('图片')).not.toBeInTheDocument()
+  })
+
+  describe('large schema (P2 performance fixture)', () => {
+    it('parses a 300+ field schema without corrupting field order or keys', () => {
+      const raw = buildLargeSchema(300)
+      const result = parseTemplateSchema(raw)
+      if (!result.ok) {
+        throw new Error(result.error.message)
+      }
+      // 顶层字段的顺序与键必须与输入一致(Designer 加载/保存不应打乱)。
+      expect(result.value.fields.map((field) => field.name)).toEqual(topLevelFieldNames(raw))
+      // Group / Tabs 容器存在,确认大 schema 覆盖嵌套结构。
+      expect(result.value.fields.some((field) => field.widget === 'Group')).toBe(true)
+      expect(result.value.fields.some((field) => field.widget === 'Tabs')).toBe(true)
+    })
+
+    it('renders a large schema without throwing and keeps only visible leaf values', async () => {
+      const raw = buildLargeSchema(300)
+      const result = parseTemplateSchema(raw)
+      if (!result.ok) {
+        throw new Error(result.error.message)
+      }
+
+      function LargeHarness() {
+        // f_1 依赖 gate_0 == 'show';gate_0 设为 'hide' → f_1 隐藏,其残留值应被裁剪。
+        const [answer, setAnswer] = useState<AnswerValue>({ gate_0: 'hide', f_1: 'orphan', f_2: 'kept' })
+        return (
+          <>
+            <SchemaRenderer schema={result.value} value={answer} onChange={setAnswer} />
+            <output aria-label="large-answer-json">{JSON.stringify(answer)}</output>
+          </>
+        )
+      }
+
+      render(<LargeHarness />)
+
+      await waitFor(() => {
+        const answer = JSON.parse(screen.getByLabelText('large-answer-json').textContent || '{}') as AnswerValue
+        expect(answer.f_1).toBeUndefined()
+      })
+      const answer = JSON.parse(screen.getByLabelText('large-answer-json').textContent || '{}') as AnswerValue
+      expect(answer.f_2).toBe('kept')
+      expect(answer.gate_0).toBe('hide')
+    })
   })
 })

@@ -90,6 +90,19 @@ describe('parseTemplateSchema', () => {
     }
   })
 
+  it('rejects reserved field names', () => {
+    const result = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'value', widget: 'Input' }],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.field).toBe('fields[0].name')
+      expect(result.error.message).toContain('reserved')
+    }
+  })
+
   it('rejects invalid radio options instead of silently filtering them', () => {
     const result = parseTemplateSchema({
       title: 'bad',

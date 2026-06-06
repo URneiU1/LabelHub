@@ -22,8 +22,15 @@ export default function SchemaRenderer({
   runtime,
   onChange,
 }: SchemaRendererProps) {
+  useEffect(() => {
+    const next = pruneHiddenAnswerValues(schema, value)
+    if (next !== value) {
+      onChange?.(next)
+    }
+  }, [schema, value, onChange])
+
   function updateField(name: string, nextValue: unknown) {
-    onChange?.({ ...value, [name]: nextValue })
+    onChange?.(pruneHiddenAnswerValues(schema, { ...value, [name]: nextValue }))
   }
 
   return (
@@ -89,6 +96,43 @@ function renderField(
       ))}
     </div>
   )
+}
+
+function pruneHiddenAnswerValues(schema: TemplateSchema, answer: AnswerValue): AnswerValue {
+  const visibleNames = collectVisibleLeafFieldNames(schema.fields, answer)
+  const allNames = collectLeafFieldNames(schema.fields)
+  let changed = false
+  const next: AnswerValue = {}
+  for (const [key, value] of Object.entries(answer)) {
+    if (allNames.has(key) && !visibleNames.has(key)) {
+      changed = true
+      continue
+    }
+    next[key] = value
+  }
+  return changed ? next : answer
+}
+
+function collectVisibleLeafFieldNames(fields: FieldSchema[], answer: AnswerValue, names = new Set<string>()) {
+  for (const field of fields) {
+    if (!visibleWhenMatches(field.visibleWhen, answer)) {
+      continue
+    }
+    if (field.widget === 'Group' && field.fields) {
+      collectVisibleLeafFieldNames(field.fields, answer, names)
+      continue
+    }
+    if (field.widget === 'Tabs' && field.tabs) {
+      for (const tab of field.tabs) {
+        collectVisibleLeafFieldNames(tab.fields, answer, names)
+      }
+      continue
+    }
+    if (field.widget !== 'ShowItem') {
+      names.add(field.name)
+    }
+  }
+  return names
 }
 
 function TabsField({
