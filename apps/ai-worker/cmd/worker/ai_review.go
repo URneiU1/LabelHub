@@ -55,7 +55,7 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 	}
 	h.circuit.recordProviderSuccess()
 	if err := h.complete(ctx, payload, result); err != nil {
-		return h.retryOrFailover(ctx, payload, err)
+		return err
 	}
 	h.logger.Info("ai review completed",
 		zap.Uint64("submission_id", payload.SubmissionID),
@@ -67,6 +67,7 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 }
 
 type aiReviewPayload struct {
+	TaskID         uint64 `json:"task_id,omitempty"`
 	SubmissionID   uint64 `json:"submission_id"`
 	RevisionID     uint64 `json:"revision_id"`
 	PromptConfigID uint64 `json:"prompt_config_id"`
@@ -126,6 +127,7 @@ func newEvaluatorFromEnv() (aiEvaluator, error) {
 
 func evaluateWithProvider(ctx context.Context, provider llmreview.Provider, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
 	result, err := provider.Evaluate(ctx, input.Prompt, llmreview.EvaluationInput{
+		TaskID:              payload.TaskID,
 		SubmissionID:        payload.SubmissionID,
 		RevisionID:          payload.RevisionID,
 		PromptConfigID:      payload.PromptConfigID,
@@ -176,8 +178,8 @@ func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload
 	// failed → running 的重试会刷新 started_at:每次重跑都应获得一个全新的超时窗口,
 	// 而不是沿用上一次失败前的开始时间,故此处是有意覆写(非取首次开始时间)。
 	res, err := h.db.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1, started_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','failed')`,
-		time.Now().UTC(), payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1, started_at = ?, prompt_config_id = COALESCE(prompt_config_id, ?) WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','failed')`,
+		time.Now().UTC(), payload.PromptConfigID, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return false, err
@@ -191,8 +193,8 @@ func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload
 
 func (h workerHandlers) markFailed(ctx context.Context, payload aiReviewPayload, cause error) error {
 	_, err := h.db.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'failed', error_msg = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
-		llmreview.SafeErrorMessage(cause), payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'failed', error_msg = ?, prompt_config_id = COALESCE(prompt_config_id, ?) WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		llmreview.SafeErrorMessage(cause), payload.PromptConfigID, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	return err
 }
@@ -271,8 +273,8 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 	now := time.Now().UTC()
 	reviewRes, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
-		result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'succeeded', prompt_config_id = COALESCE(prompt_config_id, ?), verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		payload.PromptConfigID, result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return err
@@ -335,8 +337,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	now := time.Now().UTC()
 	deadRes, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'dead', error_msg = ?, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
-		llmreview.SafeErrorMessage(cause), now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'dead', prompt_config_id = COALESCE(prompt_config_id, ?), error_msg = ?, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		payload.PromptConfigID, llmreview.SafeErrorMessage(cause), now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return err
@@ -375,8 +377,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 func lockedAIReviewStatus(ctx context.Context, tx *sql.Tx, payload aiReviewPayload) (string, error) {
 	var status string
 	err := tx.QueryRowContext(ctx,
-		`SELECT status FROM ai_reviews WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? FOR UPDATE`,
-		payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`SELECT status FROM ai_reviews WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) FOR UPDATE`,
+		payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	).Scan(&status)
 	return status, err
 }

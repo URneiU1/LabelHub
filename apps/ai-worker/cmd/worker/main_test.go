@@ -384,6 +384,38 @@ func TestHandleAIReviewUsesProviderResultAndRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestHandleAIReviewReturnsCompleteDBErrorWithoutFailover(t *testing.T) {
+	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rawPayload := validAIReviewPayloadJSON()
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'running'`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT sr.answer, ti.payload, COALESCE\(t.baseline_description,''\), cfg.prompt_template, cfg.dimensions, cfg.pass_threshold, cfg.uncertain_min, cfg.model`).
+		WillReturnRows(sqlmock.NewRows([]string{"answer", "payload", "baseline_description", "prompt_template", "dimensions", "pass_threshold", "uncertain_min", "model"}).
+			AddRow(`{"summary":"ok"}`, `{"prompt":"question"}`, "baseline", "review {{answer.summary}}", `[{"name":"相关性"}]`, 80, 60, "test-model"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT status FROM ai_reviews.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("running"))
+	mock.ExpectQuery(`(?is)^SELECT status, current_revision_id FROM submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "current_revision_id"}).AddRow("ai_reviewing", 901))
+	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'succeeded'`).
+		WillReturnError(errors.New("db write failed"))
+	mock.ExpectRollback()
+
+	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: staticEvaluator{}}
+	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err == nil {
+		t.Fatal("handleAIReview should return complete DB error for retry")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestCompleteClearsPreviousErrorMessageOnRetrySuccess(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
@@ -572,7 +604,7 @@ func TestParseAIDryRunPayloadRequiresRunID(t *testing.T) {
 }
 
 func TestHandleAIDryRunCompletesQueuedRun(t *testing.T) {
-	t.Setenv("LLM_PROVIDER", "mock")
+	t.Setenv("LLM_PROVIDER", "unsupported-provider")
 	t.Setenv("LLM_ALLOWED_MODELS", "test-model")
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {

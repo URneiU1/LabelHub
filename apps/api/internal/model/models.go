@@ -176,6 +176,7 @@ type AIReview struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
 	SubmissionID   uint64     `json:"submissionId"`
 	RevisionID     uint64     `json:"revisionId"`
+	PromptConfigID uint64     `gorm:"column:prompt_config_id" json:"promptConfigId"`
 	IdempotencyKey string     `gorm:"uniqueIndex;size:64" json:"idempotencyKey"`
 	PromptVersion  int        `json:"promptVersion"`
 	Verdict        *string    `json:"verdict"`

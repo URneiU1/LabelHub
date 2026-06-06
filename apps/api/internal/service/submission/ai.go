@@ -76,6 +76,7 @@ func createPendingAIReview(tx *gorm.DB, sub model.Submission, revision model.Sub
 	review := model.AIReview{
 		SubmissionID:   sub.ID,
 		RevisionID:     revision.ID,
+		PromptConfigID: plan.PromptID,
 		IdempotencyKey: plan.IdempotencyKey,
 		PromptVersion:  plan.PromptVersion,
 		Status:         "pending",

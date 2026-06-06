@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -48,12 +49,14 @@ type goldenSampleRequest struct {
 }
 
 type goldenSampleDryRunRequest struct {
-	AIPromptID *uint64 `json:"ai_prompt_id"`
+	AIPromptID  *uint64 `json:"ai_prompt_id"`
+	RepeatCount *int    `json:"repeat_count"`
 }
 
 type goldenSampleBatchDryRunRequest struct {
-	SampleIDs  []uint64 `json:"sample_ids"`
-	AIPromptID *uint64  `json:"ai_prompt_id"`
+	SampleIDs   []uint64 `json:"sample_ids"`
+	AIPromptID  *uint64  `json:"ai_prompt_id"`
+	RepeatCount *int     `json:"repeat_count"`
 }
 
 type goldenSampleResponse struct {
@@ -89,6 +92,10 @@ type resolvedGoldenSamplePrompt struct {
 
 const maxGoldenSampleBatchDryRunSamples = 20
 const goldenSampleDryRunTopic = "ai:dry-run"
+
+// 稳定性 dry-run 的重复次数上限,与 worker 端 maxDryRunRepeatCount 保持一致
+// (两者属不同 go module 无法共享常量,改其一须同步另一)。
+const maxGoldenSampleDryRunRepeatCount = 5
 
 func (h GoldenSampleHandler) List(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
@@ -386,6 +393,10 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 	if !bindLimitedJSON(c, &req, maxAIPromptBytes) {
 		return
 	}
+	repeatCount, ok := normalizeDryRunRepeatCount(c, req.RepeatCount)
+	if !ok {
+		return
+	}
 	if err := enforceDryRunGuard(h.db, task.ID, 1); err != nil {
 		if errors.Is(err, errDryRunQuotaExceeded) || errors.Is(err, errDryRunCircuitOpen) {
 			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
@@ -427,7 +438,7 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 		return
 	}
 
-	dryRunID, err := h.recordQueuedGoldenSampleDryRun(task.ID, prompt, sample, currentUserID(c))
+	dryRunID, err := h.recordQueuedGoldenSampleDryRun(task.ID, prompt, sample, currentUserID(c), repeatCount)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
 		return
@@ -448,6 +459,10 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 		return
 	}
 	sampleIDs, ok := normalizeGoldenSampleBatchIDs(c, req.SampleIDs)
+	if !ok {
+		return
+	}
+	repeatCount, ok := normalizeDryRunRepeatCount(c, req.RepeatCount)
 	if !ok {
 		return
 	}
@@ -488,7 +503,7 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 			summary.Failed++
 			continue
 		}
-		dryRunID, err := h.recordQueuedGoldenSampleDryRun(task.ID, resolved.prompt, sample, userID)
+		dryRunID, err := h.recordQueuedGoldenSampleDryRun(task.ID, resolved.prompt, sample, userID, repeatCount)
 		if err != nil {
 			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to record ai dry-run")
 			return
@@ -566,7 +581,19 @@ func validGoldenSampleVerdict(verdict string) bool {
 	}
 }
 
-func (h GoldenSampleHandler) recordQueuedGoldenSampleDryRun(taskID uint64, prompt model.AIPromptConfig, sample model.GoldenSample, userID uint64) (uint64, error) {
+// normalizeDryRunRepeatCount 校验可选的 repeat_count:缺省 → 1;否则必须是 1..max 的整数。
+func normalizeDryRunRepeatCount(c *gin.Context, raw *int) (int, bool) {
+	if raw == nil {
+		return 1, true
+	}
+	if *raw < 1 || *raw > maxGoldenSampleDryRunRepeatCount {
+		httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", fmt.Sprintf("repeat_count must be between 1 and %d", maxGoldenSampleDryRunRepeatCount))
+		return 0, false
+	}
+	return *raw, true
+}
+
+func (h GoldenSampleHandler) recordQueuedGoldenSampleDryRun(taskID uint64, prompt model.AIPromptConfig, sample model.GoldenSample, userID uint64, repeatCount int) (uint64, error) {
 	payloadSnapshot := sample.Payload
 	expectedAnswerSnapshot := sample.ExpectedAnswer
 	run := model.AIDryRun{
@@ -585,7 +612,7 @@ func (h GoldenSampleHandler) recordQueuedGoldenSampleDryRun(taskID uint64, promp
 		if err := tx.Create(&run).Error; err != nil {
 			return err
 		}
-		payload, err := goldenSampleDryRunPayload(run.ID)
+		payload, err := goldenSampleDryRunPayload(run.ID, repeatCount)
 		if err != nil {
 			return err
 		}
@@ -602,8 +629,12 @@ func (h GoldenSampleHandler) recordQueuedGoldenSampleDryRun(taskID uint64, promp
 	return dryRunID, err
 }
 
-func goldenSampleDryRunPayload(runID uint64) (string, error) {
-	raw, err := json.Marshal(gin.H{"run_id": runID})
+func goldenSampleDryRunPayload(runID uint64, repeatCount int) (string, error) {
+	payload := gin.H{"run_id": runID}
+	if repeatCount > 1 {
+		payload["repeat_count"] = repeatCount
+	}
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
