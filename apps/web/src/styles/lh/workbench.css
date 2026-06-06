@@ -492,3 +492,38 @@
   padding: 1px 6px;
   font-size: 11px;
 }
+
+/* 移动端(≤768px,加分项):桌面版 wb-shell 是 240px 侧栏 + 主区 + 280px 右栏的
+   三列 flex,在窄屏会横向溢出。这里把三列纵向堆叠、侧栏改为整宽,并收紧内边距。
+   仅在 ≤768px 生效,桌面布局不受影响。Designer 同样复用 wb-shell:堆叠后可用但
+   偏窄,属可接受的「桌面优先」降级(见 docs/ARCHITECTURE.md 的移动端说明)。 */
+@media (max-width: 768px) {
+  .wb-shell {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .wb-side,
+  .wb-right {
+    flex: 1 1 auto;
+    width: 100%;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--lh-border);
+  }
+
+  .wb-main {
+    padding: 16px;
+    padding-bottom: calc(16px + var(--lh-demo-nav-safe-bottom));
+  }
+
+  .wb-head {
+    flex-wrap: wrap;
+  }
+
+  .wb-head__actions {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
