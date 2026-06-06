@@ -1237,7 +1237,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
 
-    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', {})
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', { repeat_count: 1 })
     expect(await screen.findByText('mismatch')).toBeInTheDocument()
     expect(screen.getAllByText('not enough evidence').length).toBeGreaterThan(0)
     expect(screen.getByText('44')).toBeInTheDocument()
@@ -1362,7 +1362,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
 
     await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12] })
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12], repeat_count: 1 })
     })
     expect(mockApiPost).toHaveBeenCalledTimes(1)
     // 入队后由轮询填充每个样本的结果行(reason 同时出现在结果行与详情面板,故用 findAllByText)。
@@ -1823,6 +1823,130 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByLabelText('golden_sample_expected_verdict')).toHaveValue('uncertain')
     expect(screen.getByLabelText('golden_sample_prompt')).toHaveValue('none')
     expect(screen.getByLabelText('golden_sample_notes')).toHaveValue('Task B note')
+  })
+
+  it('sends the selected repeat_count when running a golden sample for a stability check', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path.startsWith('/tasks/1/ai-dry-runs')) {
+        return { dryRuns: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      provider: 'mock',
+      dryRunId: 44,
+      matchedExpected: true,
+      result: { verdict: 'pass', overall_score: 90, dimensions: [], reason: 'ok', model: 'mock-model' },
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.selectOptions(await screen.findByLabelText('dry_run_repeat_count'), '3')
+    await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
+
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', { repeat_count: 3 })
+  })
+
+  it('renders stability metrics from a dry-run history result', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return {
+          dryRuns: [
+            {
+              id: 90,
+              taskId: 1,
+              aiPromptId: 33,
+              goldenSampleId: 11,
+              promptVersion: 3,
+              expectedVerdict: 'pass',
+              actualVerdict: 'pass',
+              matchedExpected: true,
+              status: 'succeeded',
+              result: {
+                verdict: 'pass',
+                overall_score: 80,
+                dimensions: [],
+                reason: 'ok',
+                stability: {
+                  repeat_count: 3,
+                  success_count: 3,
+                  error_count: 1,
+                  error_rate: 0.25,
+                  verdict_agreement: 0.6667,
+                  score_stddev: 4.32,
+                  expected_match_rate: 0.6667,
+                  verdict_counts: { pass: 2, reject: 1 },
+                  runs: [
+                    { verdict: 'pass', score: 80 },
+                    { verdict: 'pass', score: 78 },
+                    { verdict: 'reject', score: 40 },
+                  ],
+                },
+              },
+              errorMsg: null,
+              createdAt: '2026-05-25T12:00:00Z',
+              finishedAt: '2026-05-25T12:01:00Z',
+            },
+          ],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByText('#90')).toBeInTheDocument()
+    // verdict_agreement / expected_match_rate 0.6667 → 67%,error_rate 0.25 → 25%,score_stddev 4.32。
+    expect(screen.getAllByText('67%').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('25%')).toBeInTheDocument()
+    expect(screen.getByText('4.32')).toBeInTheDocument()
+    expect(screen.getByText('pass · 78')).toBeInTheDocument()
+    expect(screen.getByText(/needs adjustment or manual review/)).toBeInTheDocument()
   })
 })
 

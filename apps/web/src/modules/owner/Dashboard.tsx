@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { Fragment, lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Modal, Toast } from '@douyinfe/semi-ui'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
@@ -31,6 +31,21 @@ type AIReviewSettingsResponse = {
   aiReviewEnabled: boolean
   activePromptId: number | null
 }
+// 稳定性 dry-run 聚合指标(repeat_count > 1 时由 worker 写入 result.stability)。
+// rate 类字段均为 0~1 的比例,UI 渲染时换算成百分比。
+type AIDryRunStability = {
+  repeat_count: number
+  success_count: number
+  error_count: number
+  error_rate: number
+  verdict_agreement: number
+  score_stddev: number
+  expected_match_rate?: number
+  dimension_stddev?: Record<string, number>
+  verdict_counts: Record<string, number>
+  runs: Array<{ verdict: string, score: number }>
+  errors?: string[]
+}
 type AIDryRunResult = {
   provider: string
   dryRunId?: number
@@ -43,7 +58,7 @@ type AIDryRunResult = {
     model?: string
   }
 }
-type AIDryRunHistoryResult = AIDryRunResult['result'] & { provider?: string }
+type AIDryRunHistoryResult = AIDryRunResult['result'] & { provider?: string, stability?: AIDryRunStability }
 type QueuedDryRunResponse = {
   dryRunId: number
   status: 'queued' | 'running'
@@ -154,6 +169,8 @@ export default function OwnerDashboard() {
   const [goldenExpectedVerdict, setGoldenExpectedVerdict] = useState(defaultGoldenExpectedVerdict)
   const [goldenNotes, setGoldenNotes] = useState('')
   const [goldenPromptChoice, setGoldenPromptChoice] = useState('active')
+  // 稳定性 dry-run 的重复次数,保守默认 1(单次烟测);3/5 用于稳定性检查。
+  const [dryRunRepeatCount, setDryRunRepeatCount] = useState(1)
   const [goldenSampleError, setGoldenSampleError] = useState('')
   const [goldenSampleLoading, setGoldenSampleLoading] = useState(false)
   const [goldenSampleLoadFailed, setGoldenSampleLoadFailed] = useState(false)
@@ -621,6 +638,7 @@ export default function OwnerDashboard() {
     try {
       const data = await apiPost<GoldenSampleBatchDryRunResponse>(`/tasks/${selected.id}/golden-samples/dry-runs`, {
         sample_ids: samples.map((sample) => sample.id),
+        repeat_count: dryRunRepeatCount,
       })
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       const sampleById = new Map(samples.map((sample) => [sample.id, sample]))
@@ -692,7 +710,7 @@ export default function OwnerDashboard() {
       },
     }))
     try {
-      const data = await apiPost<QueuedDryRunResponse & Partial<AIDryRunResult>>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, {})
+      const data = await apiPost<QueuedDryRunResponse & Partial<AIDryRunResult>>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, { repeat_count: dryRunRepeatCount })
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       if (data.result) {
         setDryRun(data as AIDryRunResult)
@@ -1026,9 +1044,19 @@ export default function OwnerDashboard() {
                 <div id="ai-golden" style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
                   <div style={aiSettingsRowStyle}>
                     <h3 style={subHeadingStyle}>Golden Samples (评测集)</h3>
-                    <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
-                      批量运行评测
-                    </Button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>
+                        <span>稳定性重复次数 / Runs</span>
+                        <select aria-label="dry_run_repeat_count" value={String(dryRunRepeatCount)} onChange={(event) => setDryRunRepeatCount(Number(event.target.value))} style={{ ...inputStyle, width: 72 }}>
+                          <option value="1">1</option>
+                          <option value="3">3</option>
+                          <option value="5">5</option>
+                        </select>
+                      </label>
+                      <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
+                        批量运行评测
+                      </Button>
+                    </div>
                   </div>
                   {goldenSampleError ? <div role="alert" style={{ ...alertStyle, marginTop: 'var(--space-md)' }}>{goldenSampleError}</div> : null}
 
@@ -1199,23 +1227,32 @@ export default function OwnerDashboard() {
                           </thead>
                           <tbody>
                             {dryRunHistory.map((run) => (
-                              <tr key={run.id}>
-                                <td style={resultCellStyle}>#{run.id}</td>
-                                <td style={resultCellStyle}>{run.goldenSampleId ? `#${run.goldenSampleId}` : '-'}</td>
-                                <td style={resultCellStyle}>{run.expectedVerdict || '-'}</td>
-                                <td style={resultCellStyle}>{run.actualVerdict || '-'}</td>
-                                <td style={resultCellStyle}>
-                                  <span style={{ color: run.matchedExpected ? 'var(--lh-success)' : run.matchedExpected === false ? 'var(--lh-danger)' : 'inherit', fontWeight: 600 }}>
-                                    {formatMatched(run.matchedExpected)}
-                                  </span>
-                                </td>
-                                <td style={resultCellStyle}>
-                                  <StatusBadge status={run.status} />
-                                  {run.errorMsg ? <span style={errorTextStyle}> {run.errorMsg}</span> : null}
-                                </td>
-                                <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
-                                <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
-                              </tr>
+                              <Fragment key={run.id}>
+                                <tr>
+                                  <td style={resultCellStyle}>#{run.id}</td>
+                                  <td style={resultCellStyle}>{run.goldenSampleId ? `#${run.goldenSampleId}` : '-'}</td>
+                                  <td style={resultCellStyle}>{run.expectedVerdict || '-'}</td>
+                                  <td style={resultCellStyle}>{run.actualVerdict || '-'}</td>
+                                  <td style={resultCellStyle}>
+                                    <span style={{ color: run.matchedExpected ? 'var(--lh-success)' : run.matchedExpected === false ? 'var(--lh-danger)' : 'inherit', fontWeight: 600 }}>
+                                      {formatMatched(run.matchedExpected)}
+                                    </span>
+                                  </td>
+                                  <td style={resultCellStyle}>
+                                    <StatusBadge status={run.status} />
+                                    {run.errorMsg ? <span style={errorTextStyle}> {run.errorMsg}</span> : null}
+                                  </td>
+                                  <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
+                                  <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
+                                </tr>
+                                {run.result?.stability ? (
+                                  <tr>
+                                    <td style={resultCellStyle} colSpan={8}>
+                                      <DryRunStabilityPanel stability={run.result.stability} />
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -1235,6 +1272,46 @@ export default function OwnerDashboard() {
           )}
         </section>
       </div>
+    </div>
+  )
+}
+
+// 稳定性 dry-run(repeat_count > 1)指标面板:展示一致率 / 期望匹配率 / 分数标准差 / 错误率,
+// 并附说明性文案——低一致率代表 prompt 需要调整或人工复核,而不是系统故障。
+function DryRunStabilityPanel({ stability }: { stability: AIDryRunStability }) {
+  const lowAgreement = stability.verdict_agreement < 1
+  return (
+    <div style={stabilityPanelStyle}>
+      <div style={stabilityMetricsRowStyle}>
+        <StabilityMetric label="结论一致率 / Agreement" value={formatRateAsPercent(stability.verdict_agreement)} tone={lowAgreement ? 'warn' : 'success'} />
+        <StabilityMetric label="期望匹配率 / Match rate" value={formatOptionalRatePercent(stability.expected_match_rate)} />
+        <StabilityMetric label="分数标准差 / Score stddev" value={stability.score_stddev.toFixed(2)} />
+        <StabilityMetric label="错误率 / Error rate" value={formatRateAsPercent(stability.error_rate)} tone={stability.error_rate > 0 ? 'warn' : 'success'} />
+        <StabilityMetric label="重复次数 / Runs" value={`${stability.success_count}/${stability.repeat_count}`} />
+      </div>
+      {stability.runs.length > 0 ? (
+        <div style={stabilityRunsStyle}>
+          <span style={{ color: 'var(--lh-text-3)' }}>逐次结论 / Per-run:</span>
+          {stability.runs.map((attempt, index) => (
+            <span key={index} style={stabilityRunChipStyle}>{attempt.verdict} · {attempt.score}</span>
+          ))}
+        </div>
+      ) : null}
+      {lowAgreement ? (
+        <div style={stabilityHintStyle}>
+          一致率偏低说明 prompt 需要调整或人工复核,并非系统故障 / Low agreement means the prompt needs adjustment or manual review, not a system failure.
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function StabilityMetric({ label, value, tone = 'muted' }: { label: string, value: string, tone?: 'success' | 'warn' | 'muted' }) {
+  const accent = tone === 'success' ? 'var(--lh-success)' : tone === 'warn' ? 'var(--lh-danger)' : 'var(--lh-text-1)'
+  return (
+    <div style={stabilityMetricStyle}>
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>{label}</div>
+      <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: accent }}>{value}</div>
     </div>
   )
 }
@@ -1470,6 +1547,15 @@ function summarizeDryRunHistory(runs: AIDryRunHistoryItem[]) {
 
 function formatPercent(value: number | null) {
   return value === null ? '-%' : `${value}%`
+}
+
+// 把 0~1 的比例换算成百分比展示(稳定性指标)。
+function formatRateAsPercent(value: number) {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatOptionalRatePercent(value: number | undefined) {
+  return value === undefined ? '-' : formatRateAsPercent(value)
 }
 
 function formatOptionalNumber(value: number | null) {
@@ -1727,6 +1813,46 @@ const historySummaryStyle: React.CSSProperties = {
   marginTop: 'var(--space-md)',
   color: 'var(--lh-text-2)',
   fontSize: 'var(--text-sm)',
+}
+
+const stabilityPanelStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm) var(--space-md)',
+  background: 'var(--lh-bg)',
+  borderRadius: 'var(--radius-sm)',
+}
+
+const stabilityMetricsRowStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-lg)',
+}
+
+const stabilityMetricStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 2,
+}
+
+const stabilityRunsStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: 'var(--space-xs)',
+  fontSize: 'var(--text-sm)',
+}
+
+const stabilityRunChipStyle: React.CSSProperties = {
+  padding: '2px var(--space-sm)',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--lh-border)',
+  background: 'var(--lh-bg-card)',
+  color: 'var(--lh-text-2)',
+}
+
+const stabilityHintStyle: React.CSSProperties = {
+  fontSize: 'var(--text-sm)',
+  color: 'var(--lh-text-3)',
 }
 
 const alertStyle: React.CSSProperties = {
