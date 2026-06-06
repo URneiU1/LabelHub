@@ -79,6 +79,32 @@ func TestValidateRequiredAnswer_NestedGroupAndTabs(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredAnswer_HiddenContainersSkipRequiredChildren(t *testing.T) {
+	schema := `{"fields":[
+		{"name":"show_group","widget":"Radio"},
+		{"name":"hidden_group","widget":"Group","visibleWhen":{"field":"show_group","equals":"yes"},"fields":[
+			{"name":"inner","widget":"Input","required":true}
+		]},
+		{"name":"show_tabs","widget":"Radio"},
+		{"name":"hidden_tabs","widget":"Tabs","visibleWhen":{"field":"show_tabs","equals":"yes"},"tabs":[
+			{"label":"A","fields":[{"name":"tab_inner","widget":"Input","required":true}]}
+		]}
+	]}`
+
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"show_group":"no","show_tabs":"no"}`)); err != nil {
+		t.Fatalf("hidden Group/Tabs children should not block submit, got %v", err)
+	}
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"show_group":"yes","show_tabs":"no"}`)); !errors.Is(err, ErrIncompleteAnswer) {
+		t.Fatalf("visible Group required child should be rejected, got %v", err)
+	}
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"show_group":"no","show_tabs":"yes"}`)); !errors.Is(err, ErrIncompleteAnswer) {
+		t.Fatalf("visible Tabs required child should be rejected, got %v", err)
+	}
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"show_group":"yes","inner":"ok","show_tabs":"yes","tab_inner":"ok"}`)); err != nil {
+		t.Fatalf("filled visible container children should pass, got %v", err)
+	}
+}
+
 func TestValidateRequiredAnswer_EqualsAcrossTypes(t *testing.T) {
 	// requiredWhen.equals 为数字时,answer 中的 float64 也应正确比较。
 	schema := `{"fields":[
@@ -103,5 +129,85 @@ func TestValidateRequiredAnswer_TolerantOnBadOrEmptySchema(t *testing.T) {
 	}
 	if err := validateRequiredAnswer("not json", decodeAnswer(t, `{}`)); err != nil {
 		t.Fatalf("unparsable schema should pass, got %v", err)
+	}
+}
+
+// asAnswerValidationError 判断 err 是否为值校验违规(minLength/maxLength/regex/customRule)。
+func asAnswerValidationError(err error) (*AnswerValidationError, bool) {
+	var ave *AnswerValidationError
+	if errors.As(err, &ave) {
+		return ave, true
+	}
+	return nil, false
+}
+
+func TestValidateAnswer_LengthRules(t *testing.T) {
+	// summary: maxLength 5;comment: minLength 3。与 validator.ts 一致:
+	// minLength 先 trim 再数,maxLength 不 trim。
+	schema := `{"fields":[
+		{"name":"summary","widget":"Input","label":"总评","maxLength":5},
+		{"name":"comment","widget":"TextArea","label":"评语","minLength":3}
+	]}`
+
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"summary":"ok","comment":"good"}`)); err != nil {
+		t.Fatalf("valid lengths should pass, got %v", err)
+	}
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"summary":"toolong","comment":"good"}`)); func() bool { _, ok := asAnswerValidationError(err); return !ok }() {
+		t.Fatalf("summary over maxLength should be rejected, got %v", err)
+	}
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"summary":"ok","comment":"ab"}`)); func() bool { _, ok := asAnswerValidationError(err); return !ok }() {
+		t.Fatalf("comment under minLength should be rejected, got %v", err)
+	}
+	// minLength 对 trim 后计数:"  a  " trim 成 "a" 长度 1 < 3。
+	if _, ok := asAnswerValidationError(validateRequiredAnswer(schema, decodeAnswer(t, `{"summary":"ok","comment":"  a  "}`))); !ok {
+		t.Fatal("minLength should count trimmed length")
+	}
+}
+
+func TestValidateAnswer_Regex(t *testing.T) {
+	schema := `{"fields":[
+		{"name":"code","widget":"Input","label":"编号","regex":"^[A-Z]{3}$"}
+	]}`
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"code":"ABC"}`)); err != nil {
+		t.Fatalf("matching regex should pass, got %v", err)
+	}
+	if _, ok := asAnswerValidationError(validateRequiredAnswer(schema, decodeAnswer(t, `{"code":"abc"}`))); !ok {
+		t.Fatal("non-matching regex should be rejected")
+	}
+	// regex 只校验非空值;空值(可选字段)跳过 regex。
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"code":""}`)); err != nil {
+		t.Fatalf("empty optional value skips regex, got %v", err)
+	}
+}
+
+func TestValidateAnswer_CustomRule(t *testing.T) {
+	schema := `{"fields":[
+		{"name":"reason","widget":"TextArea","label":"理由","customRule":{"expr":"len(value) >= 5","message":"理由至少 5 个字符"}}
+	]}`
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"reason":"够长的理由"}`)); err != nil {
+		t.Fatalf("satisfying customRule should pass, got %v", err)
+	}
+	ave, ok := asAnswerValidationError(validateRequiredAnswer(schema, decodeAnswer(t, `{"reason":"短"}`)))
+	if !ok {
+		t.Fatal("violating customRule should be rejected")
+	}
+	if ave.Message != "理由至少 5 个字符" {
+		t.Fatalf("customRule message should surface to user, got %q", ave.Message)
+	}
+}
+
+func TestValidateAnswer_HiddenFieldValueRulesSkipped(t *testing.T) {
+	// 隐藏字段(visibleWhen 不命中)的值不参与 minLength/regex 校验。
+	schema := `{"fields":[
+		{"name":"need","widget":"Radio"},
+		{"name":"detail","widget":"Input","label":"详情","minLength":10,"visibleWhen":{"field":"need","equals":"yes"}}
+	]}`
+	// detail 隐藏且其值很短,也不应被拒。
+	if err := validateRequiredAnswer(schema, decodeAnswer(t, `{"need":"no","detail":"x"}`)); err != nil {
+		t.Fatalf("hidden field value rules must be skipped, got %v", err)
+	}
+	// detail 可见且太短 → 拒绝。
+	if _, ok := asAnswerValidationError(validateRequiredAnswer(schema, decodeAnswer(t, `{"need":"yes","detail":"x"}`))); !ok {
+		t.Fatal("visible field too short should be rejected")
 	}
 }

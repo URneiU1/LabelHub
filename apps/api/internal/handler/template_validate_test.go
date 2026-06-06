@@ -44,6 +44,13 @@ func TestValidateTemplateSchema(t *testing.T) {
 			wantValid: false, wantField: "fields[1].name", wantMsg: "duplicate",
 		},
 		{
+			name: "reserved field name",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"value","widget":"Input"}
+			]}`,
+			wantValid: false, wantField: "fields[0].name", wantMsg: "reserved",
+		},
+		{
 			name: "unknown widget",
 			raw: `{"title":"t","layout":"single_page","fields":[
 				{"name":"a","widget":"Slider"}
@@ -148,6 +155,71 @@ func TestValidateTemplateSchema(t *testing.T) {
 					{"name":"reason","widget":"Input","requiredWhen":{"field":"reason"}}
 				]}`,
 			wantValid: false, wantField: "fields[0].requiredWhen", wantMsg: "equals or notEmpty",
+		},
+		{
+			name: "visibleWhen and customRule valid",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"decision","widget":"Radio","options":["pass","reject"]},
+					{"name":"reason","widget":"Input","visibleWhen":{"field":"decision","equals":"reject"}},
+					{"name":"score","widget":"Input","customRule":{"expr":"len(value) >= 4","message":"至少 4 个字符"}}
+				]}`,
+			wantValid: true,
+		},
+		{
+			name: "visibleWhen dangling field rejected",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"reason","widget":"Input","visibleWhen":{"field":"missing","notEmpty":true}}
+				]}`,
+			wantValid: false, wantField: "fields[0].visibleWhen.field", wantMsg: "existing field",
+		},
+		{
+			name: "visibleWhen needs condition",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"reason","widget":"Input","visibleWhen":{"field":"reason"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].visibleWhen", wantMsg: "equals or notEmpty",
+		},
+		{
+			name: "customRule must be object",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"score","widget":"Input","customRule":"value > 0"}
+				]}`,
+			wantValid: false, wantField: "fields[0].customRule", wantMsg: "object",
+		},
+		{
+			name: "customRule empty expr",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"score","widget":"Input","customRule":{"expr":"","message":"invalid"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].customRule.expr", wantMsg: "required",
+		},
+		{
+			name: "customRule invalid expr",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"score","widget":"Input","customRule":{"expr":"value >= ","message":"invalid"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].customRule.expr", wantMsg: "unsupported syntax",
+		},
+		{
+			name: "customRule unsupported function rejected at save",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"score","widget":"Input","customRule":{"expr":"max(value, 1) > 0","message":"invalid"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].customRule.expr", wantMsg: "unsupported",
+		},
+		{
+			name: "customRule unsupported operator rejected at save",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"score","widget":"Input","customRule":{"expr":"value > 0 && value < 9","message":"invalid"}}
+				]}`,
+			wantValid: false, wantField: "fields[0].customRule.expr", wantMsg: "unsupported",
+		},
+		{
+			name: "customRule empty message",
+			raw: `{"title":"t","layout":"single_page","fields":[
+					{"name":"score","widget":"Input","customRule":{"expr":"value > 0","message":""}}
+				]}`,
+			wantValid: false, wantField: "fields[0].customRule.message", wantMsg: "required",
 		},
 		{
 			name: "group and tabs nested fields are valid",

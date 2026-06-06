@@ -252,6 +252,7 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 		Draft:     draft,
 	})
 	if err != nil {
+		var answerValidationErr *submission.AnswerValidationError
 		switch {
 		case errors.Is(err, submission.ErrItemNotClaimed):
 			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "item is not claimed by current user")
@@ -261,6 +262,8 @@ func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "已达到今日提交上限")
 		case errors.Is(err, submission.ErrIncompleteAnswer):
 			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "答案不完整，请填写所有必填项 / Incomplete answer")
+		case errors.As(err, &answerValidationErr):
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", answerValidationErr.Message)
 		case errors.Is(err, submission.ErrInvalidSubmit):
 			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", err.Error())
 		case errors.Is(err, submission.ErrDraftAfterSubmit):

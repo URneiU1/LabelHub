@@ -3,10 +3,14 @@ package submission
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
+	"unicode/utf16"
 
 	"gorm.io/gorm"
 
+	"labelhub-api/internal/customrule"
 	"labelhub-api/internal/model"
 )
 
@@ -17,6 +21,17 @@ import (
 // let an incomplete answer through.
 var ErrIncompleteAnswer = errors.New("submission: required field is empty")
 
+// AnswerValidationError:可见字段的值违反了模板规则(minLength / maxLength /
+// regex / customRule)。Message 是面向用户的提示,已带字段标签,直接回前端展示。
+//
+// Backend value-rule validation with parity to renderer/validator.ts: a client that
+// bypasses the frontend cannot submit an answer that violates length/regex/custom rules.
+type AnswerValidationError struct {
+	Message string
+}
+
+func (e *AnswerValidationError) Error() string { return e.Message }
+
 // 校验用的最小 schema 视图。只取必填判定需要的字段,与前端
 // renderer/validator.ts 的 required / requiredWhen / visibleWhen 规则对齐。
 // 布局型 widget(ShowItem / Group / Tabs)不直接产出答案值,递归进其子字段。
@@ -25,13 +40,25 @@ type validateSchema struct {
 }
 
 type validateField struct {
-	Name         string             `json:"name"`
-	Widget       string             `json:"widget"`
-	Required     bool               `json:"required"`
-	RequiredWhen *validateCondition `json:"requiredWhen"`
-	VisibleWhen  *validateCondition `json:"visibleWhen"`
-	Fields       []validateField    `json:"fields"`
-	Tabs         []validateTab      `json:"tabs"`
+	Name         string              `json:"name"`
+	Label        string              `json:"label"`
+	Widget       string              `json:"widget"`
+	Required     bool                `json:"required"`
+	RequiredWhen *validateCondition  `json:"requiredWhen"`
+	VisibleWhen  *validateCondition  `json:"visibleWhen"`
+	MinLength    *int                `json:"minLength"`
+	MaxLength    *int                `json:"maxLength"`
+	Regex        string              `json:"regex"`
+	CustomRule   *validateCustomRule `json:"customRule"`
+	Fields       []validateField     `json:"fields"`
+	Tabs         []validateTab       `json:"tabs"`
+}
+
+// validateCustomRule 复用前端 CustomRule 形状:expr 是 expr-eval 表达式,
+// message 是校验不通过时展示给用户的文案。
+type validateCustomRule struct {
+	Expr    string `json:"expr"`
+	Message string `json:"message"`
 }
 
 type validateTab struct {
@@ -66,8 +93,12 @@ func validateSubmitAnswer(tx *gorm.DB, task model.Task, templateVersion int, ans
 	return validateRequiredAnswer(template.SchemaJSON, answer)
 }
 
-// validateRequiredAnswer 解析模板 SchemaJSON,对 answer 做服务端必填校验。
-// 命中 visibleWhen 的字段里,required 或 requiredWhen 命中者必须非空,否则返回 ErrIncompleteAnswer。
+// validateRequiredAnswer 解析模板 SchemaJSON,对 answer 做服务端校验,与前端
+// renderer/validator.ts 对齐:
+//   - 命中 visibleWhen 的字段里,required / requiredWhen 命中者必须非空(否则 ErrIncompleteAnswer)。
+//   - 可见字段的值还要满足 minLength / maxLength / regex / customRule(否则 AnswerValidationError)。
+//
+// 隐藏容器(visibleWhen 不命中的 Group / Tabs)整体跳过,其子字段不参与校验。
 // schemaJSON 解析失败时静默放行(模板已在创建时校验过,这里不替模板纠错;且
 // 解析错误若硬卡会误伤历史/外部数据)。
 func validateRequiredAnswer(schemaJSON string, answer map[string]any) error {
@@ -78,26 +109,26 @@ func validateRequiredAnswer(schemaJSON string, answer map[string]any) error {
 	if err := json.Unmarshal([]byte(schemaJSON), &schema); err != nil {
 		return nil
 	}
-	if missingRequired(schema.Fields, answer) {
-		return ErrIncompleteAnswer
-	}
-	return nil
+	return validateAnswerFields(schema.Fields, answer)
 }
 
-// missingRequired 深度优先遍历叶子字段(展开 Group.fields 与 Tabs.tabs[].fields),
-// 返回是否存在「可见的必填字段为空」。
-func missingRequired(fields []validateField, answer map[string]any) bool {
+// validateAnswerFields 深度优先遍历字段(展开 Group.fields 与 Tabs.tabs[].fields),
+// 返回首个校验违规。隐藏容器整体跳过。
+func validateAnswerFields(fields []validateField, answer map[string]any) error {
 	for _, field := range fields {
+		if !conditionMatches(field.VisibleWhen, answer, true) {
+			continue
+		}
 		switch field.Widget {
 		case widgetGroup:
-			if missingRequired(field.Fields, answer) {
-				return true
+			if err := validateAnswerFields(field.Fields, answer); err != nil {
+				return err
 			}
 			continue
 		case widgetTabs:
 			for _, tab := range field.Tabs {
-				if missingRequired(tab.Fields, answer) {
-					return true
+				if err := validateAnswerFields(tab.Fields, answer); err != nil {
+					return err
 				}
 			}
 			continue
@@ -105,15 +136,72 @@ func missingRequired(fields []validateField, answer map[string]any) bool {
 			// 纯展示物料,无答案值。
 			continue
 		}
-		if !conditionMatches(field.VisibleWhen, answer, true) {
-			continue
-		}
+		value := answer[field.Name]
 		required := field.Required || conditionMatches(field.RequiredWhen, answer, false)
-		if required && answerIsEmpty(answer[field.Name]) {
-			return true
+		if required && answerIsEmpty(value) {
+			return ErrIncompleteAnswer
+		}
+		if err := validateFieldValue(field, value, answer); err != nil {
+			return err
 		}
 	}
-	return false
+	return nil
+}
+
+// validateFieldValue 对单个可见字段的值做 minLength / maxLength / regex / customRule
+// 校验,规则与 validator.ts 逐条对齐:
+//   - minLength:对字符串值,trim 后按 UTF-16 码元计数 < minLength 即违规。
+//   - maxLength:对字符串值,不 trim,UTF-16 码元 > maxLength 即违规。
+//   - regex:仅对非空字符串值;命中失败即违规。
+//   - customRule:仅对非空值;表达式求值为假或出错即违规(对齐 validator.ts 的 catch→false)。
+func validateFieldValue(field validateField, value any, answer map[string]any) error {
+	label := fieldLabel(field)
+	if s, ok := value.(string); ok {
+		if field.MinLength != nil && utf16Len(strings.TrimSpace(s)) < *field.MinLength {
+			return &AnswerValidationError{Message: fmt.Sprintf("%s must be at least %d characters", label, *field.MinLength)}
+		}
+		if field.MaxLength != nil && utf16Len(s) > *field.MaxLength {
+			return &AnswerValidationError{Message: fmt.Sprintf("%s must be at most %d characters", label, *field.MaxLength)}
+		}
+		if field.Regex != "" && !answerIsEmpty(s) {
+			// 模板保存时已校验 regex 可编译;若仍失败则跳过,不误伤用户。
+			if re, err := regexp.Compile(field.Regex); err == nil && !re.MatchString(s) {
+				return &AnswerValidationError{Message: fmt.Sprintf("%s format is invalid", label)}
+			}
+		}
+	}
+	if field.CustomRule != nil && strings.TrimSpace(field.CustomRule.Expr) != "" && !answerIsEmpty(value) {
+		expr, err := customrule.Parse(field.CustomRule.Expr)
+		if err != nil {
+			// 落库的模板已通过 customrule.Parse 校验;此处解析失败意味着数据被篡改/损坏,按违规处理。
+			return &AnswerValidationError{Message: customRuleMessage(field)}
+		}
+		ok, evalErr := expr.Eval(customrule.Scope{Value: value, Answer: answer})
+		if evalErr != nil || !ok {
+			return &AnswerValidationError{Message: customRuleMessage(field)}
+		}
+	}
+	return nil
+}
+
+func fieldLabel(field validateField) string {
+	if strings.TrimSpace(field.Label) != "" {
+		return field.Label
+	}
+	return field.Name
+}
+
+func customRuleMessage(field validateField) string {
+	if field.CustomRule != nil && strings.TrimSpace(field.CustomRule.Message) != "" {
+		return field.CustomRule.Message
+	}
+	return fmt.Sprintf("%s is invalid", fieldLabel(field))
+}
+
+// utf16Len 返回字符串的 UTF-16 码元数,与 JS String.length 对齐,
+// 保证 minLength / maxLength 计数与前端一致。
+func utf16Len(s string) int {
+	return len(utf16.Encode([]rune(s)))
 }
 
 // conditionMatches 求值 visibleWhen / requiredWhen。condition 为 nil 时:
