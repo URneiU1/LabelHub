@@ -28,6 +28,14 @@
 }
 
 .wb-side__item {
+  /* 重置原生 <button> 默认样式(否则未激活项会露出浏览器默认灰底 + 斜角边框),改成白底卡 + 柔和浅边框 */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  background: #fff;
+  border: 1px solid var(--lh-border);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -45,6 +53,7 @@
 
 .wb-side__item--active {
   background: var(--lh-primary-soft);
+  border-color: var(--lh-primary);
 }
 
 .wb-side__no {
@@ -319,6 +328,57 @@
   margin: 0 auto;
   font-size: 12px;
   color: var(--lh-text-3);
+}
+
+/* P3 离线草稿:工具栏旁的紧凑连接/草稿状态指示。 */
+.wb-draft-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-draft-state__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff7e8;
+  border: 1px solid #ffe1a8;
+  color: var(--lh-warning);
+  font-size: 12px;
+}
+
+.wb-draft-state__discard {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--lh-text-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wb-draft-state__discard:hover {
+  color: var(--lh-text-1);
+}
+
+/* P3 本地草稿恢复横幅:沿用 wb-banner 视觉,右侧叠加恢复/丢弃操作。 */
+.wb-draft-recover {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-draft-recover__text {
+  flex: 1 1 auto;
+}
+
+.wb-draft-recover__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Right panel */

@@ -4,6 +4,7 @@ import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LabelerPlaza from './Plaza'
 import { apiGet, apiPost } from '../../shared/api/client'
+import { buildDraftKey, loadLocalDraft } from './offlineDraftStore'
 
 vi.mock('../../shared/api/client', () => ({
   apiGet: vi.fn(),
@@ -376,5 +377,179 @@ describe('LabelerPlaza schema runtime flow', () => {
     const progress = await screen.findByRole('progressbar', { name: '标注进度' })
     expect(progress).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('2 / 4 · 进度 50%')).toBeInTheDocument()
+  })
+})
+
+describe('LabelerPlaza offline draft preservation (P3)', () => {
+  // claim 返回 submission id=42、revision=null → 本地草稿键为 1:11:42:new。
+  const draftKey = buildDraftKey({ taskId: 1, itemId: 11, submissionId: 42, revisionNo: null })
+  const schema = {
+    title: 'qa_offline',
+    layout: 'single_page',
+    fields: [{ name: 'summary', widget: 'Input', label: '一句话总评', required: true }],
+  }
+  const claimBundle = {
+    task,
+    item,
+    template: { id: 101, schemaJson: JSON.stringify(schema) },
+    submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+    revision: null,
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    mockApiGet.mockReset()
+    mockApiPost.mockReset()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        return []
+      }
+      if (path === '/tasks/1/labeler/items') {
+        return itemNav
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+  })
+
+  async function enterAnswerPage() {
+    fireEvent.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+    fireEvent.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
+    return screen.findByLabelText('一句话总评')
+  }
+
+  it('marks the local draft synced after a successful autosave', async () => {
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        return claimBundle
+      }
+      if (path === '/tasks/1/items/11/draft') {
+        return { id: 42, taskId: 1, itemId: 11, status: 'draft' }
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    try {
+      render(<LabelerPlaza />)
+      const input = await enterAnswerPage()
+
+      vi.useFakeTimers()
+      fireEvent.change(input, { target: { value: '自动保存答案' } })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      vi.useRealTimers()
+
+      await waitFor(() => {
+        expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/items/11/draft', { answer: { summary: '自动保存答案' } })
+      })
+      await waitFor(() => {
+        const draft = loadLocalDraft(draftKey)
+        expect(draft).not.toBeNull()
+        expect(draft!.answer).toEqual({ summary: '自动保存答案' })
+        expect(draft!.synced).toBe(true)
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('preserves the local draft and surfaces a non-blocking state when autosave fails', async () => {
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        return claimBundle
+      }
+      if (path === '/tasks/1/items/11/draft') {
+        throw new Error('network down')
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    try {
+      render(<LabelerPlaza />)
+      const input = await enterAnswerPage()
+
+      vi.useFakeTimers()
+      fireEvent.change(input, { target: { value: '断网时的答案' } })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      vi.useRealTimers()
+
+      // 本地草稿保留且仍未同步。
+      await waitFor(() => {
+        const draft = loadLocalDraft(draftKey)
+        expect(draft).not.toBeNull()
+        expect(draft!.answer).toEqual({ summary: '断网时的答案' })
+        expect(draft!.synced).toBe(false)
+      })
+      // 非阻塞提示出现(非弹窗)。
+      expect(await screen.findByText('本地草稿已保存 / local draft saved')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('offers to restore a newer local draft on reload, and restores it', async () => {
+    const user = userEvent.setup()
+    // 预置一份比服务端更新、未同步、模板版本匹配(null)的本地草稿。
+    localStorage.setItem(draftKey, JSON.stringify({
+      answer: { summary: '断网时未保存的较新答案' },
+      updatedAt: Date.now(),
+      templateVersion: null,
+      synced: false,
+    }))
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        // 服务端没有这份答案(revision=null → 空答案),本地更新 → 应提示恢复。
+        return claimBundle
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza />)
+    await enterAnswerPage()
+
+    // 出现恢复横幅。
+    expect(await screen.findByText('发现未同步的本地草稿。')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '恢复本地草稿' }))
+
+    // 恢复后答案被写回输入框。
+    await waitFor(() => {
+      expect(screen.getByLabelText('一句话总评')).toHaveValue('断网时未保存的较新答案')
+    })
+  })
+
+  it('blocks final submit while offline, keeps the local draft, and shows clear copy', async () => {
+    const user = userEvent.setup()
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        return claimBundle
+      }
+      if (path === '/tasks/1/items/11/submit') {
+        throw new Error('submit should not be called while offline')
+      }
+      if (path === '/tasks/1/items/11/draft') {
+        return { id: 42, taskId: 1, itemId: 11, status: 'draft' }
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+    const { Toast } = await import('@douyinfe/semi-ui')
+
+    const onlineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+    try {
+      render(<LabelerPlaza />)
+      const input = await enterAnswerPage()
+      await user.type(input, '离线作答')
+      await user.click(screen.getByRole('button', { name: '提交审核' }))
+
+      // 提交被阻断:never hits the submit endpoint, friendly copy shown.
+      expect(mockApiPost).not.toHaveBeenCalledWith('/tasks/1/items/11/submit', expect.anything())
+      expect(Toast.error).toHaveBeenCalledWith(expect.stringContaining('无法提交审核'))
+    } finally {
+      onlineSpy.mockRestore()
+    }
   })
 })

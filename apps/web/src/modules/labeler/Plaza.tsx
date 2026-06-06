@@ -10,6 +10,7 @@ import StatusBadge from '../../shared/components/StatusBadge'
 import ItemNav from './ItemNav'
 import MyData from './MyData'
 import TaskPlaza from './TaskPlaza'
+import { buildDraftKey, discardLocalDraft, isLocalDraftNewer, loadLocalDraft, markSynced, saveLocalDraft } from './offlineDraftStore'
 import '../../styles/lh/workbench.css'
 import '../../styles/lh/tasks.css'
 import './plaza.css'
@@ -31,6 +32,11 @@ export default function LabelerPlaza() {
   const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const lastSavedDraftKey = useRef('')
   const autoSaveSeq = useRef(0)
+
+  // P3 离线草稿:localDraftSaved 表示自动保存网络失败但本地草稿已留底(非阻塞提示);
+  // recoverableDraft 是「本地有比服务端更新的未同步草稿」时供用户恢复/丢弃的待恢复答案。
+  const [localDraftSaved, setLocalDraftSaved] = useState(false)
+  const [recoverableDraft, setRecoverableDraft] = useState<AnswerValue | null>(null)
 
   // 常驻「AI 求助」:不依赖模板是否配置 LLMTrigger 字段,作答页底部固定入口。
   const [assistOpen, setAssistOpen] = useState(false)
@@ -86,6 +92,13 @@ export default function LabelerPlaza() {
     }
   }, [])
 
+  // P3:载入某题后,若本地存在比服务端更新的未同步草稿(且模板版本一致),
+  // 暂存为待恢复草稿(非阻塞,由作答页横幅让用户「恢复 / 丢弃」)。每次载题先清旧的离线状态。
+  function detectRecoverableDraft(data: TaskBundle, serverAnswer: AnswerValue) {
+    setLocalDraftSaved(false)
+    setRecoverableDraft(computeRecoverableDraft(data, serverAnswer))
+  }
+
   async function claim(taskId: number) {
     setLoading(true)
     try {
@@ -97,6 +110,7 @@ export default function LabelerPlaza() {
       setAnswer(nextAnswer)
       setErrors([])
       setAutoSaveState('idle')
+      detectRecoverableDraft(data, nextAnswer)
       Toast.success('已领取题目')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '领取失败')
@@ -116,6 +130,7 @@ export default function LabelerPlaza() {
       setAnswer(nextAnswer)
       setErrors([])
       setAutoSaveState('idle')
+      detectRecoverableDraft(data, nextAnswer)
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载待修改任务失败')
     } finally {
@@ -147,6 +162,12 @@ export default function LabelerPlaza() {
       Toast.error(schema.message)
       return
     }
+    // P3:本阶段最终提交仅限在线。离线时阻断提交并友好提示,保留本地草稿(不清理)。
+    if (!navigator.onLine) {
+      setLocalDraftSaved(true)
+      Toast.error('当前网络已断开,无法提交审核;你的答案已保存在本地草稿,联网后可再提交。')
+      return
+    }
     const validationErrors = validateAnswer(schema.schema, answer)
     setErrors(validationErrors)
     if (validationErrors.length > 0) {
@@ -160,6 +181,13 @@ export default function LabelerPlaza() {
       autoSaveSeq.current += 1
       lastSavedDraftKey.current = answerDraftKey(answer)
       setAutoSaveState('idle')
+      // 提交成功:服务端已收下本次答案 → 本地草稿标记已同步,清掉离线/恢复提示。
+      const submittedKey = bundleDraftKey(bundle)
+      if (submittedKey) {
+        markSynced(submittedKey)
+      }
+      setLocalDraftSaved(false)
+      setRecoverableDraft(null)
       void loadMySubmissions()
       Toast.success(`已提交，状态 ${data.status}`)
     } catch (error) {
@@ -209,6 +237,10 @@ export default function LabelerPlaza() {
 
   const answerKey = useMemo(() => answerDraftKey(answer), [answer])
 
+  // 当前题目对应的本地草稿键 + 模板版本(autosave / 提交 / 恢复共用)。bundle 缺失时为 null。
+  const localDraftKey = useMemo(() => (bundle ? bundleDraftKey(bundle) : null), [bundle])
+  const templateVersion = bundle?.template?.version ?? null
+
   useEffect(() => {
     if (!bundle?.task || !bundle.item || !schema.ok || answerKey === lastSavedDraftKey.current) {
       return
@@ -221,6 +253,11 @@ export default function LabelerPlaza() {
       // 杜绝旧闭包里的 answer 覆盖更新的 lastSavedDraftKey。
       const requestSeq = autoSaveSeq.current
       setAutoSaveState('saving')
+      // P3:先把本地草稿落盘(标记未同步),网络调用失败也不丢这次改动。
+      const draftKey = localDraftKey
+      if (draftKey) {
+        saveLocalDraft(draftKey, answer, templateVersion)
+      }
       void apiPost<Submission>(`/tasks/${taskId}/items/${itemId}/draft`, { answer })
         .then((submission) => {
           if (autoSaveSeq.current !== requestSeq) {
@@ -229,15 +266,22 @@ export default function LabelerPlaza() {
           lastSavedDraftKey.current = answerKey
           setBundle((current) => current && current.task.id === taskId && current.item?.id === itemId ? { ...current, submission } : current)
           setAutoSaveState('saved')
+          setLocalDraftSaved(false)
+          // 服务端确认本次答案 → 本地草稿标记已同步。
+          if (draftKey) {
+            markSynced(draftKey)
+          }
         })
         .catch(() => {
           if (autoSaveSeq.current === requestSeq) {
             setAutoSaveState('failed')
+            // 网络失败:保留本地草稿,亮非阻塞「本地草稿已保存」状态。
+            setLocalDraftSaved(true)
           }
         })
     }, 3000)
     return () => window.clearTimeout(timer)
-  }, [answer, answerKey, bundle?.item, bundle?.task, schema])
+  }, [answer, answerKey, bundle?.item, bundle?.task, schema, localDraftKey, templateVersion])
 
   // ---- 4.3 新增导航编排(不触碰上方既有 claim/saveDraft/submit/autosave/快捷键逻辑) ----
 
@@ -253,6 +297,9 @@ export default function LabelerPlaza() {
       setAnswer(nextAnswer)
       setErrors([])
       setAutoSaveState('idle')
+      // P3:与 claim/openSubmission 一致地检测可恢复的本地草稿(用稳定 setter + 纯函数,无需进依赖)。
+      setLocalDraftSaved(false)
+      setRecoverableDraft(computeRecoverableDraft(data, nextAnswer))
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载题目失败')
     } finally {
@@ -324,12 +371,39 @@ export default function LabelerPlaza() {
     setAutoSaveState('idle')
     autoSaveSeq.current += 1
     lastSavedDraftKey.current = ''
+    setLocalDraftSaved(false)
+    setRecoverableDraft(null)
     setAssistOpen(false)
     setAssistText('')
     setAssistError('')
     void loadTasks()
     void loadMySubmissions()
   }, [loadMySubmissions, loadTasks])
+
+  // P3:把本地草稿恢复为当前答案。沿用 onChange 的同步推进:推进 autoSaveSeq、置 idle 触发后续自动保存。
+  function restoreLocalDraft() {
+    if (!recoverableDraft) {
+      return
+    }
+    autoSaveSeq.current += 1
+    setAnswer(recoverableDraft)
+    setAutoSaveState('idle')
+    setRecoverableDraft(null)
+    if (schema.ok && errors.length > 0) {
+      setErrors(validateAnswer(schema.schema, recoverableDraft))
+    }
+    Toast.success('已恢复本地草稿')
+  }
+
+  // P3:丢弃当前题目的本地草稿(让离线恢复可逆)。清掉待恢复 + 离线提示。
+  function discardCurrentLocalDraft() {
+    if (localDraftKey) {
+      discardLocalDraft(localDraftKey)
+    }
+    setRecoverableDraft(null)
+    setLocalDraftSaved(false)
+    Toast.info('已丢弃本地草稿')
+  }
 
   // 切题时清空上一题的 AI 求助结果,避免建议串题。与既有 autosave 效果同样的同步置态模式。
   useEffect(() => {
@@ -422,6 +496,19 @@ export default function LabelerPlaza() {
               </div>
             ) : null}
 
+            {recoverableDraft ? (
+              <div className="wb-banner wb-draft-recover" role="status">
+                <span className="wb-draft-recover__text">
+                  <strong>发现未同步的本地草稿。</strong>
+                  上次有改动未成功保存到服务器,要恢复本地草稿吗?
+                </span>
+                <span className="wb-draft-recover__actions">
+                  <Button size="small" theme="solid" onClick={restoreLocalDraft}>恢复本地草稿</Button>
+                  <Button size="small" theme="borderless" type="tertiary" onClick={discardCurrentLocalDraft}>丢弃本地草稿</Button>
+                </span>
+              </div>
+            ) : null}
+
             {schema.ok ? (
               <SchemaRenderer
                 schema={schema.schema}
@@ -474,7 +561,16 @@ export default function LabelerPlaza() {
               <Button theme="light" onClick={skipItem}>跳过</Button>
               <Button theme="light" onClick={() => Toast.info('已记录上报(演示)')}>报告题目</Button>
               <Button theme="borderless" type="tertiary" loading={assistLoading} onClick={() => void askAssist()} title="遇到难题,让 AI 给点思路">✦ 遇到难题 · AI 求助</Button>
-              <span className="wb-footer__shortcuts">{autoSaveText(autoSaveState)}</span>
+              <span className="wb-footer__shortcuts wb-draft-state" role="status">
+                {localDraftSaved ? (
+                  <>
+                    <span className="wb-draft-state__pill" title="网络保存失败,答案已留存在本地草稿">本地草稿已保存 / local draft saved</span>
+                    <button type="button" className="wb-draft-state__discard" onClick={discardCurrentLocalDraft}>丢弃本地草稿</button>
+                  </>
+                ) : (
+                  autoSaveText(autoSaveState)
+                )}
+              </span>
               <Button disabled={!schema.ok} onClick={() => void saveDraft()} theme="light">保存草稿</Button>
               <Button disabled={!schema.ok} theme="solid" onClick={() => void submit()} title="提交审核 (Ctrl/Cmd + Enter)">提交审核</Button>
             </div>
@@ -556,6 +652,38 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
 
 function answerDraftKey(answer: AnswerValue) {
   return JSON.stringify(answer)
+}
+
+// 由 bundle 推导本地草稿坐标键(taskId:itemId:submissionId:revisionNo)。
+// 无 task/item 时返回 null(尚不能定位草稿)。revisionNo 优先用 submission.currentRevisionId,
+// 退化用 revision.id(后端 SubmissionRevision 仅暴露 id,这里把它当作修订标识)。
+function bundleDraftKey(bundle: TaskBundle): string | null {
+  if (!bundle.task || !bundle.item) {
+    return null
+  }
+  return buildDraftKey({
+    taskId: bundle.task.id,
+    itemId: bundle.item.id,
+    submissionId: bundle.submission?.id ?? null,
+    revisionNo: bundle.submission?.currentRevisionId ?? bundle.revision?.id ?? null,
+  })
+}
+
+// 纯函数:某 bundle 是否有「比服务端更新、且与服务端答案不同」的本地草稿。
+// 有则返回该本地答案供恢复,否则返回 null。在三条载题路径间复用,不依赖组件闭包。
+function computeRecoverableDraft(bundle: TaskBundle, serverAnswer: AnswerValue): AnswerValue | null {
+  const draftKey = bundleDraftKey(bundle)
+  if (!draftKey) {
+    return null
+  }
+  const draft = loadLocalDraft(draftKey)
+  if (!isLocalDraftNewer(draft, bundle.template?.version ?? null)) {
+    return null
+  }
+  if (draft && answerDraftKey(draft.answer) !== answerDraftKey(serverAnswer)) {
+    return draft.answer
+  }
+  return null
 }
 
 // summarizeSchema:给 AI 求助用的轻量模板摘要(标题 + 字段名/类型/是否必填),
