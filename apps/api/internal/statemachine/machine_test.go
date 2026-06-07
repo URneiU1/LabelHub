@@ -12,9 +12,7 @@ func TestAllPlannedTransitions(t *testing.T) {
 		{StateDraft, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventEnqueue, StateAIReviewing},
 		{StateSubmitted, EventSkipAI, StateHumanReviewing},
-		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
-		{StateAIReviewing, EventAIAutoApproved, StateApproved},
 		{StateAIReviewing, EventAIUncertain, StateManualReview},
 		{StateAIReviewing, EventAIReject, StateRevising},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},
@@ -74,6 +72,7 @@ func TestInvalidTransitions(t *testing.T) {
 		{StateHumanReviewing, EventSubmit, StateSubmitted},
 		{StateApproved, EventRevise, StateRevising},
 		{StateRejected, EventSubmit, StateSubmitted},
+		{StateAIReviewing, EventAIDone, StateApproved},
 	}
 
 	for _, tt := range tests {
@@ -102,7 +101,6 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		EventEnqueue,
 		EventSkipAI,
 		EventAIDone,
-		EventAIAutoApproved,
 		EventAIUncertain,
 		EventAIFailMax,
 		EventConsensusConflict,
@@ -131,8 +129,8 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 }
 
 func TestTransitionTableCoversPlan(t *testing.T) {
-	if got := len(Transitions()); got != 21 {
-		t.Fatalf("Transitions() len = %d, want 21", got)
+	if got := len(Transitions()); got != 20 {
+		t.Fatalf("Transitions() len = %d, want 20", got)
 	}
 }
 
@@ -148,9 +146,7 @@ func plannedTransitions() []plannedTransition {
 		{StateDraft, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventEnqueue, StateAIReviewing},
 		{StateSubmitted, EventSkipAI, StateHumanReviewing},
-		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
-		{StateAIReviewing, EventAIAutoApproved, StateApproved},
 		{StateAIReviewing, EventAIUncertain, StateManualReview},
 		{StateAIReviewing, EventAIReject, StateRevising},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},

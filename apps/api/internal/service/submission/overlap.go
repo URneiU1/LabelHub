@@ -96,6 +96,42 @@ func transitionConsensusPeers(tx *gorm.DB, itemID uint64, currentSubmissionID ui
 	return nil
 }
 
+func transitionArbitrationPeers(tx *gorm.DB, itemID uint64, currentSubmissionID uint64) error {
+	var peerIDs []uint64
+	if err := tx.Model(&model.Submission{}).
+		Where("item_id = ? AND id <> ? AND status = ?", itemID, currentSubmissionID, statemachine.StateSubmitted).
+		Order("id ASC").
+		Pluck("id", &peerIDs).Error; err != nil {
+		return err
+	}
+	for _, peerID := range peerIDs {
+		if err := statemachine.Apply(statemachine.StateSubmitted, statemachine.EventConsensusConflict, statemachine.StateNeedsArbitration); err != nil {
+			return err
+		}
+		result := tx.Model(&model.Submission{}).
+			Where("id = ? AND status = ?", peerID, statemachine.StateSubmitted).
+			Update("status", statemachine.StateNeedsArbitration)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrClaimRaceLost
+		}
+		if err := audit.Write(tx, audit.LogEntry{
+			EntityType: "submission",
+			EntityID:   peerID,
+			FromState:  statemachine.StateSubmitted,
+			ToState:    statemachine.StateNeedsArbitration,
+			ActorType:  "system",
+			Event:      statemachine.EventConsensusConflict,
+			Payload:    map[string]any{"conflict_submission_id": currentSubmissionID},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func priorOverlapAnswers(tx *gorm.DB, itemID uint64, currentSubmissionID uint64) ([]string, error) {
 	var answers []string
 	err := tx.Table("submissions").

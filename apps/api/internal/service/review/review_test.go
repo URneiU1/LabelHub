@@ -29,6 +29,13 @@ func newReviewMockDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock, *sql.DB) {
 	return gormDB, mock, sqlDB
 }
 
+func expectApproveCounts(mock sqlmock.Sqlmock, total int64, sameReviewer int64) {
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews. WHERE .+verdict = \?`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(total))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews. WHERE .+reviewer_id = \?.+verdict = \?`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(sameReviewer))
+}
+
 // Decode:reviewer 的 verdict 字符串映射到状态机 event + 目标态 + human_verdict 字段。
 // 单/复数严格匹配:"approved" 不等于 "approve"。
 func TestDecodeMapping(t *testing.T) {
@@ -97,8 +104,7 @@ func TestApplyFinalApproveWritesHumanReviewAndFinishesItem(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions. WHERE .submissions.\..id. = .+ORDER BY .submissions.\..id. LIMIT .+FOR UPDATE`).
 		WillReturnRows(reviewSubmissionRows("human_reviewing"))
 	// approve count = 2 → 本次是第 3 次(终审),推到 approved。
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	expectApproveCounts(mock, 2, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).
@@ -207,8 +213,7 @@ func TestApplyFirstApproveStaysHumanReviewing(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .tasks.`).WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	expectApproveCounts(mock, 0, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	// 初审:只 advance(UPDATE updated_at),不改 status,不动 task_items / tasks。
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -236,8 +241,7 @@ func TestApplyFinalApproveFinishesItem(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .tasks.`).WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1)) // 已有 1 次(初审)→ 本次是终审
+	expectApproveCounts(mock, 1, 0) // 已有 1 次(初审)→ 本次是终审
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(32, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -267,8 +271,7 @@ func TestApplyManualReviewApproveAdvancesToHumanReviewing(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.`).WillReturnRows(reviewSubmissionRows("manual_review"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .tasks.`).WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("manual_review"))
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	expectApproveCounts(mock, 0, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	// 跨状态推进到 human_reviewing,但不动 task_items / tasks(尚未终审)。
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -447,7 +450,7 @@ func TestApplyDetectsConcurrentSubmissionUpdate(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .tasks.`).WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
 	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	expectApproveCounts(mock, 2, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .+ WHERE id = .+ AND status = .+`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
@@ -455,6 +458,26 @@ func TestApplyDetectsConcurrentSubmissionUpdate(t *testing.T) {
 	_, err := Apply(db, ApplyInput{SubmissionID: 42, Verdict: "approve", ReviewerID: 9, Roles: []string{"admin"}})
 	if !errors.Is(err, ErrConcurrentWrite) {
 		t.Fatalf("err = %v, want ErrConcurrentWrite", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestApplyRejectsDuplicateApproveBySameReviewer(t *testing.T) {
+	db, mock, sqlDB := newReviewMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .tasks.`).WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).AddRow(1, 7, "published"))
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .submissions.+FOR UPDATE`).WillReturnRows(reviewSubmissionRows("human_reviewing"))
+	expectApproveCounts(mock, 1, 1)
+	mock.ExpectRollback()
+
+	_, err := Apply(db, ApplyInput{SubmissionID: 42, Verdict: "approve", ReviewerID: 9, Roles: []string{"admin"}})
+	if !errors.Is(err, ErrDuplicateReviewerApproval) {
+		t.Fatalf("err = %v, want ErrDuplicateReviewerApproval", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

@@ -412,6 +412,8 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission has no revision")
 		case errors.Is(err, review.ErrForbidden):
 			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+		case errors.Is(err, review.ErrDuplicateReviewerApproval):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", "this reviewer already approved the current revision; another reviewer is required")
 		case errors.Is(err, review.ErrConcurrentWrite):
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission changed during review, please reload")
 		default:
@@ -499,6 +501,8 @@ func batchReviewErrorMessage(err error) string {
 		return "submission has no revision"
 	case errors.Is(err, review.ErrForbidden):
 		return "reviewer is not assigned to this task"
+	case errors.Is(err, review.ErrDuplicateReviewerApproval):
+		return "this reviewer already approved the current revision; another reviewer is required"
 	case errors.Is(err, review.ErrConcurrentWrite):
 		return "submission changed during review, please reload"
 	default:

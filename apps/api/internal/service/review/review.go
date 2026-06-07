@@ -90,6 +90,8 @@ var (
 	ErrInvalidVerdict = errors.New("review: verdict must be approve, reject, or revise")
 	// ErrForbidden:当前 reviewer 未被授权审核该 submission。handler 映射 403。
 	ErrForbidden = errors.New("review: reviewer is not allowed for this task")
+	// ErrDuplicateReviewerApproval:同一 reviewer 不能在同一 revision 上重复 approve 推进多级审核。
+	ErrDuplicateReviewerApproval = errors.New("review: reviewer already approved this revision")
 	// ErrConcurrentWrite:并发写导致 RowsAffected != 1。handler 映射 409。
 	ErrConcurrentWrite = errors.New("review: concurrent write detected")
 )
@@ -171,6 +173,17 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 				Where("submission_id = ? AND revision_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, "approve").
 				Count(&approveCount).Error; err != nil {
 				return err
+			}
+			if humanVerdict == "approve" {
+				var reviewerApproveCount int64
+				if err := tx.Model(&model.HumanReview{}).
+					Where("submission_id = ? AND revision_id = ? AND reviewer_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, input.ReviewerID, "approve").
+					Count(&reviewerApproveCount).Error; err != nil {
+					return err
+				}
+				if reviewerApproveCount > 0 {
+					return ErrDuplicateReviewerApproval
+				}
 			}
 		}
 		stage, _ := StageForApproveCount(int(approveCount))

@@ -503,8 +503,7 @@ func TestBatchReviewAppliesApproveForSelectedSubmissions(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	// 已有 2 条 approve → batch approve 这一条触发终审,落到 approved。
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	expectReviewApproveCounts(mock, 2, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(71, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions.`).

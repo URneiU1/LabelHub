@@ -195,9 +195,7 @@ func Save(db *gorm.DB, input SaveInput) (model.Submission, error) {
 					return err
 				}
 			case overlapNeedsArbitration:
-				if err := tx.Model(&model.Submission{}).
-					Where("item_id = ? AND id <> ? AND status = ?", item.ID, sub.ID, statemachine.StateSubmitted).
-					Update("status", statemachine.StateNeedsArbitration).Error; err != nil {
+				if err := transitionArbitrationPeers(tx, item.ID, sub.ID); err != nil {
 					return err
 				}
 				if err := releaseOverlapClaim(tx, item.ID, ItemStatusNeedsArbitration); err != nil {

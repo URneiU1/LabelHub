@@ -45,6 +45,13 @@ func expectReviewSubmissionLockSequence(mock sqlmock.Sqlmock, revisionID uint64)
 			AddRow(501, 1, 11, "human_reviewing", revisionID))
 }
 
+func expectReviewApproveCounts(mock sqlmock.Sqlmock, total int64, sameReviewer int64) {
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews. WHERE .+verdict = \?`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(total))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews. WHERE .+reviewer_id = \?.+verdict = \?`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(sameReviewer))
+}
+
 // 两级审核端到端:approve #1(初审)只 advance stage 并停留 human_reviewing 等终审。
 func TestReviewSubmission_IntermediateApproveStaysHumanReviewing(t *testing.T) {
 	cases := []struct {
@@ -61,8 +68,7 @@ func TestReviewSubmission_IntermediateApproveStaysHumanReviewing(t *testing.T) {
 			revisionID := uint64(901)
 
 			expectReviewSubmissionLockSequence(mock, revisionID)
-			mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(tc.existingCount))
+			expectReviewApproveCounts(mock, int64(tc.existingCount), 0)
 			mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 				WillReturnResult(sqlmock.NewResult(31, 1))
 			// 中间级:只 UPDATE updated_at,不动 task_items / tasks。
@@ -103,8 +109,7 @@ func TestReviewSubmission_FinalApproveGoesApproved(t *testing.T) {
 	revisionID := uint64(901)
 
 	expectReviewSubmissionLockSequence(mock, revisionID)
-	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .human_reviews.`).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1)) // 已有 1 次(初审)→ 本次终审
+	expectReviewApproveCounts(mock, 1, 0) // 已有 1 次(初审)→ 本次终审
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).WillReturnResult(sqlmock.NewResult(31, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).WillReturnResult(sqlmock.NewResult(0, 1))
