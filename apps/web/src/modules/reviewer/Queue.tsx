@@ -382,7 +382,8 @@ export default function ReviewerQueue() {
   const ruleLoadSeq = useRef(0)
   // 详情加载用独立序号,和规则面板的 ruleLoadSeq 解耦:开关「规则配置」不应误失效正在加载的详情。
   const detailLoadSeq = useRef(0)
-  // 顶部视图切换:审核工作台 / 仲裁 / 审核结果列表。进入 /reviewer/results 时默认落到「审核结果」。
+  // /reviewer/results 已提升为外层导航入口;组件内部仍保留 results view 用来渲染该路由。
+  // 工作台内的顶部切换只保留「审核工作台 / 仲裁」,避免与侧栏「审核结果」重复。
   // 用 window.location 而非 useLocation:组件在测试里不一定包 Router;路由对两条路径用不同 key 强制重挂载,首次挂载读路径即正确。
   const [view, setView] = useState<ReviewerView>(() => (window.location.pathname.endsWith('/results') ? 'results' : 'workbench'))
   // 工作台内的队列分区:全部 / AI 通过待初审 / 转人工复核。
@@ -661,35 +662,28 @@ export default function ReviewerQueue() {
         </div>
       </header>
 
-      <div className="hr-side__tabs" role="tablist" style={viewTabsStyle}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'workbench'}
-          className={`hr-side__tab${view === 'workbench' ? ' hr-side__tab--active' : ''}`}
-          onClick={() => setView('workbench')}
-        >
-          审核工作台
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'arbitration'}
-          className={`hr-side__tab${view === 'arbitration' ? ' hr-side__tab--active' : ''}`}
-          onClick={() => setView('arbitration')}
-        >
-          仲裁
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'results'}
-          className={`hr-side__tab${view === 'results' ? ' hr-side__tab--active' : ''}`}
-          onClick={() => setView('results')}
-        >
-          审核结果
-        </button>
-      </div>
+      {view === 'results' ? null : (
+        <div className="hr-side__tabs" role="tablist" style={viewTabsStyle}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'workbench'}
+            className={`hr-side__tab${view === 'workbench' ? ' hr-side__tab--active' : ''}`}
+            onClick={() => setView('workbench')}
+          >
+            审核工作台
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'arbitration'}
+            className={`hr-side__tab${view === 'arbitration' ? ' hr-side__tab--active' : ''}`}
+            onClick={() => setView('arbitration')}
+          >
+            仲裁
+          </button>
+        </div>
+      )}
 
       {view === 'results' ? (
         <ReviewResults onOpenResult={(result) => { void openResultDetail(result) }} />
@@ -1421,7 +1415,7 @@ const headerActionsStyle: CSSProperties = {
   alignItems: 'center',
 }
 
-// 顶部视图切换 tab(审核工作台 / 审核结果)沿用 .hr-side__tabs 样式但收窄。
+// 顶部视图切换 tab(审核工作台 / 仲裁)沿用 .hr-side__tabs 样式但收窄。
 const viewTabsStyle: CSSProperties = {
   maxWidth: 320,
 }

@@ -316,6 +316,7 @@ describe('ReviewerQueue schema runtime flow', () => {
 
   it('lists finalized review results and opens one read-only', async () => {
     const user = userEvent.setup()
+    window.history.replaceState(null, '', '/reviewer/results')
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/reviewer/submissions') {
         return [submission]
@@ -360,9 +361,7 @@ describe('ReviewerQueue schema runtime flow', () => {
 
     render(<ReviewerQueue />)
 
-    await screen.findByText('Submission #501')
-    await user.click(screen.getByRole('tab', { name: '审核结果' }))
-
+    expect(screen.queryByRole('tab', { name: '审核结果' })).not.toBeInTheDocument()
     const resultRow = await screen.findByLabelText('查看 Submission #777 审核结果')
     expect(resultRow).toHaveTextContent('SUB-777')
     expect(resultRow).toHaveTextContent('决定 通过')
