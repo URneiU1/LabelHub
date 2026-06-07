@@ -22,7 +22,14 @@ type ParsedSchema =
 type View = 'plaza' | 'answer'
 type PlazaTab = 'tasks' | 'mydata'
 
-export default function LabelerPlaza() {
+interface LabelerPlazaProps {
+  initialView?: View
+  initialPlazaTab?: PlazaTab
+}
+
+// 初始视图由路由经 props 注入(侧栏三入口用不同 key 重挂载):任务广场 / 标注工作台 / 我的贡献。
+// 用 props 而非读 window.location,既不破坏「不包 Router 的测试」,也不打断 React Compiler 的记忆化。
+export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 'tasks' }: LabelerPlazaProps = {}) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [mySubmissions, setMySubmissions] = useState<Submission[]>([])
   const [bundle, setBundle] = useState<TaskBundle | null>(null)
@@ -44,9 +51,9 @@ export default function LabelerPlaza() {
   const [assistText, setAssistText] = useState('')
   const [assistError, setAssistError] = useState('')
 
-  // 4.3 视图编排:plaza(任务广场 + 我的数据)与 answer(三列作答页)切换。
-  const [view, setView] = useState<View>('plaza')
-  const [plazaTab, setPlazaTab] = useState<PlazaTab>('tasks')
+  // 4.3 视图编排:plaza(任务广场 + 我的数据)与 answer(三列作答页)切换。初始值由路由经 props 注入。
+  const [view, setView] = useState<View>(initialView)
+  const [plazaTab] = useState<PlazaTab>(initialPlazaTab)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [itemNav, setItemNav] = useState<LabelerTaskItems | null>(null)
   const [itemNavLoading, setItemNavLoading] = useState(false)
@@ -430,30 +437,9 @@ export default function LabelerPlaza() {
       <div className="lz-shell">
         <div className="lh-page-head lh-hflex" style={{ alignItems: 'flex-start' }}>
           <div>
-            <h1 className="lh-page-head__title">标注工作台</h1>
-            <div className="lh-page-head__crumb">在任务广场领取题目,或在我的数据查看标注记录</div>
+            <h1 className="lh-page-head__title">{plazaTab === 'mydata' ? '我的贡献' : '任务广场'}</h1>
+            <div className="lh-page-head__crumb">{plazaTab === 'mydata' ? '查看我的标注记录与状态' : '领取题目开始标注'}</div>
           </div>
-        </div>
-
-        <div className="lz-tabs" role="tablist" aria-label="工作台视图">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={plazaTab === 'tasks'}
-            className={'lz-tab' + (plazaTab === 'tasks' ? ' lz-tab--active' : '')}
-            onClick={() => setPlazaTab('tasks')}
-          >
-            任务广场
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={plazaTab === 'mydata'}
-            className={'lz-tab' + (plazaTab === 'mydata' ? ' lz-tab--active' : '')}
-            onClick={() => setPlazaTab('mydata')}
-          >
-            我的数据
-          </button>
         </div>
 
         {plazaTab === 'tasks' ? (

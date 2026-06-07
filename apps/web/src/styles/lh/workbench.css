@@ -381,13 +381,9 @@
   gap: 8px;
 }
 
-/* Right panel */
+/* Right panel —— 作答页隐藏「我的贡献」侧栏,把宽度让给标注主区(wb-main flex:1 自动撑满)。 */
 .wb-right {
-  flex: 0 0 280px;
-  padding: 20px;
-  background: #fff;
-  border-left: 1px solid var(--lh-border);
-  overflow-y: auto;
+  display: none;
 }
 
 .wb-right__title {
