@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import AppLayout from './AppLayout'
@@ -39,6 +40,29 @@ describe('AppLayout navigation', () => {
     expect(screen.getAllByText('任务管理').length).toBeGreaterThan(0)
     expect(screen.queryByText('标注工作台')).not.toBeInTheDocument()
     expect(screen.queryByText('审核中心')).not.toBeInTheDocument()
+  })
+
+  it('collapses and expands the shared side navigation', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <MemoryRouter initialEntries={['/owner']}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="/owner" element={<div>owner page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const shell = container.querySelector('.lh-shell')
+    expect(shell).not.toHaveClass('lh-shell--side-collapsed')
+
+    await user.click(screen.getByRole('button', { name: '收起侧边导航' }))
+    expect(shell).toHaveClass('lh-shell--side-collapsed')
+    expect(screen.getByRole('button', { name: '展开侧边导航' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '展开侧边导航' }))
+    expect(shell).not.toHaveClass('lh-shell--side-collapsed')
   })
 
   function renderAt(path: string) {

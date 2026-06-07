@@ -15,7 +15,7 @@ import { resolveStage } from './stage'
 import '../../styles/lh/humanreview.css'
 import '../../styles/lh/aireview.css'
 
-type ReviewerView = 'workbench' | 'arbitration' | 'results'
+type ReviewerView = 'workbench' | 'arbitration' | 'timeline' | 'results'
 
 // M-10:演示样例数据只在显式 ?demo=1 时启用,默认队列为空就展示空状态,
 // 不再用假 demo 顶替真实队列(否则会掩盖仲裁队列不可见、且假"审核成功"误导演示者)。
@@ -383,7 +383,7 @@ export default function ReviewerQueue() {
   // 详情加载用独立序号,和规则面板的 ruleLoadSeq 解耦:开关「规则配置」不应误失效正在加载的详情。
   const detailLoadSeq = useRef(0)
   // /reviewer/results 已提升为外层导航入口;组件内部仍保留 results view 用来渲染该路由。
-  // 工作台内的顶部切换只保留「审核工作台 / 仲裁」,避免与侧栏「审核结果」重复。
+  // 工作台内的顶部切换保留「审核工作台 / 仲裁 / 审计时间线」,避免与侧栏「审核结果」重复。
   // 用 window.location 而非 useLocation:组件在测试里不一定包 Router;路由对两条路径用不同 key 强制重挂载,首次挂载读路径即正确。
   const [view, setView] = useState<ReviewerView>(() => (window.location.pathname.endsWith('/results') ? 'results' : 'workbench'))
   // 工作台内的队列分区:全部 / AI 通过待初审 / 转人工复核。
@@ -682,6 +682,15 @@ export default function ReviewerQueue() {
           >
             仲裁
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'timeline'}
+            className={`hr-side__tab${view === 'timeline' ? ' hr-side__tab--active' : ''}`}
+            onClick={() => setView('timeline')}
+          >
+            审计时间线
+          </button>
         </div>
       )}
 
@@ -689,6 +698,15 @@ export default function ReviewerQueue() {
         <ReviewResults onOpenResult={(result) => { void openResultDetail(result) }} />
       ) : view === 'arbitration' ? (
         <ArbitrationQueue />
+      ) : view === 'timeline' ? (
+        <section style={timelineTabPanelStyle}>
+          <Timeline
+            auditLogs={showingDemo ? undefined : detail?.auditLogs}
+            submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id}
+            demoEvents={showingDemo ? selectedDemoDetail.timeline : undefined}
+            demoMode={showingDemo}
+          />
+        </section>
       ) : (
         <div className="hr-shell" style={shellStyle}>
           <aside className="hr-side" style={hrSideStyle}>
@@ -809,9 +827,8 @@ export default function ReviewerQueue() {
 
           </main>
 
-          <aside className="hr-right" style={hrRightStyle}>
-            {showingDemo ? <MetricGrid /> : null}
-            {rulePanelOpen ? (
+          {rulePanelOpen ? (
+            <aside className="hr-right" style={hrRightStyle}>
               <RuleConfigPanel
                 prompts={ruleConfigs}
                 selectedRule={selectedRule}
@@ -828,14 +845,8 @@ export default function ReviewerQueue() {
                   setRuleLoading(false)
                 }}
               />
-            ) : null}
-            <Timeline
-              auditLogs={showingDemo ? undefined : detail?.auditLogs}
-              submissionId={showingDemo ? selectedDemo.id : detail?.submission?.id}
-              demoEvents={showingDemo ? selectedDemoDetail.timeline : undefined}
-              demoMode={showingDemo}
-            />
-          </aside>
+            </aside>
+          ) : null}
         </div>
       )}
     </div>
@@ -1138,26 +1149,6 @@ function CompareBox({ title, rows, highlight = false }: { title: string, rows: A
           </div>
         ))}
       </div>
-    </div>
-  )
-}
-
-function MetricGrid() {
-  return (
-    <div style={metricGridStyle}>
-      <Metric label="我今日已审" value="214" tone="blue" />
-      <Metric label="我今日通过率" value="87%" tone="green" />
-      <Metric label="待我审核" value="47" tone="orange" />
-      <Metric label="SLA 剩余" value="02:14:00" tone="blue" />
-    </div>
-  )
-}
-
-function Metric({ label, value, tone }: { label: string, value: string, tone: 'blue' | 'green' | 'orange' }) {
-  return (
-    <div style={metricStyle}>
-      <span>{label}</span>
-      <strong style={{ color: tone === 'green' ? 'var(--color-success)' : tone === 'orange' ? '#f97316' : 'var(--color-accent)' }}>{value}</strong>
     </div>
   )
 }
@@ -1505,9 +1496,9 @@ const headerActionsStyle: CSSProperties = {
   alignItems: 'center',
 }
 
-// 顶部视图切换 tab(审核工作台 / 仲裁)沿用 .hr-side__tabs 样式但收窄。
+// 顶部视图切换 tab(审核工作台 / 仲裁 / 审计时间线)沿用 .hr-side__tabs 样式但收窄。
 const viewTabsStyle: CSSProperties = {
-  maxWidth: 320,
+  maxWidth: 480,
 }
 
 // hr-shell 默认是 flex 全高布局,这里包在卡片内,允许内容区收缩。
@@ -1531,6 +1522,13 @@ const hrRightStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
   alignContent: 'start',
+}
+
+const timelineTabPanelStyle: CSSProperties = {
+  border: '1px solid var(--lh-border)',
+  borderRadius: 'var(--lh-radius-lg)',
+  background: 'var(--lh-bg-card)',
+  padding: 'var(--space-lg)',
 }
 
 const demoQueueButtonStyle: CSSProperties = {
@@ -1811,22 +1809,6 @@ const errorBannerStyle: CSSProperties = {
   border: '1px solid var(--color-danger)',
   color: 'var(--color-danger)',
   background: '#fff1f0',
-}
-
-const metricGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: 'var(--space-sm)',
-}
-
-const metricStyle: CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  background: 'var(--color-panel-header)',
-  borderRadius: 'var(--radius-md)',
-  padding: 'var(--space-md)',
-  fontSize: 'var(--text-sm)',
-  color: 'var(--color-text-muted)',
 }
 
 const rulePanelStyle: CSSProperties = {

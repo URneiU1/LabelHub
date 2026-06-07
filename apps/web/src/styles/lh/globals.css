@@ -178,13 +178,65 @@ button {
   background: #fff;
   border-right: 1px solid var(--lh-border);
   padding: 20px 12px;
+  transition: flex-basis 160ms ease, padding 160ms ease;
+  overflow: hidden;
+}
+
+.lh-shell--side-collapsed .lh-shell__side {
+  flex-basis: 64px;
+  padding: 16px 8px;
 }
 
 .lh-shell__main {
   flex: 1 1 auto;
+  min-width: 0;
   padding: 24px 32px;
   padding-bottom: calc(24px + var(--lh-demo-nav-safe-bottom));
   overflow: auto;
+}
+
+.lh-shell__side-head {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.lh-shell__side-toggle {
+  width: 100%;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  background: var(--lh-bg-card);
+  color: var(--lh-text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.lh-shell__side-toggle:hover {
+  background: var(--lh-bg-elev);
+  color: var(--lh-primary);
+}
+
+.lh-shell__side-toggle-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lh-shell--side-collapsed .lh-shell__side-toggle {
+  justify-content: center;
+  padding: 0;
+}
+
+.lh-shell--side-collapsed .lh-shell__side-toggle-text,
+.lh-shell--side-collapsed .lh-side-section__title,
+.lh-shell--side-collapsed .lh-side-item__label {
+  display: none;
 }
 
 .lh-side-section {
@@ -208,6 +260,12 @@ button {
   cursor: pointer;
   font-size: 14px;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.lh-shell--side-collapsed .lh-side-item {
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .lh-side-item:hover {

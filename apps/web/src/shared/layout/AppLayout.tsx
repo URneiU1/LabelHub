@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, NavLink, useParams } from 'react-router-dom'
 import { clearToken, getCurrentUser, hasAnyRole } from '../api/client'
 import {
@@ -59,6 +59,7 @@ function primaryRole(roles: string[]): string {
 export default function AppLayout() {
   const params = useParams()
   const user = getCurrentUser()
+  const [sideCollapsed, setSideCollapsed] = useState(false)
   const visibleNavItems = NAV_ITEMS.filter((item) => hasAnyRole(item.roles))
   // Owner/admin 的左栏是「工作区」三组分节(对齐 demo SideNav)。每个分节是独立路由页
   // (/owner/:section),侧栏用 NavLink 跳转;分节页内容渲染在 Owner 页(Dashboard)。
@@ -106,9 +107,21 @@ export default function AppLayout() {
           </div>
         </div>
       </header>
-      <div className={'lh-shell' + (isDesigner ? ' lh-shell--designer' : '')}>
+      <div className={'lh-shell' + (isDesigner ? ' lh-shell--designer' : '') + (sideCollapsed ? ' lh-shell--side-collapsed' : '')}>
         {isDesigner ? null : (
-        <aside className="lh-shell__side">
+        <aside className="lh-shell__side" aria-label="全局导航">
+          <div className="lh-shell__side-head">
+            <button
+              type="button"
+              className="lh-shell__side-toggle"
+              aria-label={sideCollapsed ? '展开侧边导航' : '收起侧边导航'}
+              aria-expanded={!sideCollapsed}
+              onClick={() => setSideCollapsed((current) => !current)}
+            >
+              <Icon name="list" size={16} />
+              <span className="lh-shell__side-toggle-text">{sideCollapsed ? '展开导航' : '收起导航'}</span>
+            </button>
+          </div>
           {ownerWorkspace ? (
             OWNER_NAV_GROUPS.map((group) => (
               <nav className="lh-side-section" key={group.title} aria-label={group.title}>
@@ -117,6 +130,8 @@ export default function AppLayout() {
                   <NavLink
                     key={key}
                     to={`/owner/${key}`}
+                    aria-label={label}
+                    title={label}
                     className={({ isActive }) =>
                       'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                     }
@@ -125,7 +140,7 @@ export default function AppLayout() {
                       name={OWNER_SECTION_ICON[key] ?? 'list'}
                       className="lh-side-item__icon"
                     />
-                    {label}
+                    <span className="lh-side-item__label">{label}</span>
                   </NavLink>
                 ))}
               </nav>
@@ -138,6 +153,8 @@ export default function AppLayout() {
                   key={item.to}
                   to={item.to}
                   end
+                  aria-label={item.label}
+                  title={item.label}
                   className={({ isActive }) =>
                     'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                   }
@@ -146,7 +163,7 @@ export default function AppLayout() {
                     name={ROLE_NAV_ICON[item.to] ?? 'list'}
                     className="lh-side-item__icon"
                   />
-                  {item.label}
+                  <span className="lh-side-item__label">{item.label}</span>
                 </NavLink>
               ))}
             </div>
@@ -158,6 +175,8 @@ export default function AppLayout() {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  aria-label={item.label}
+                  title={item.label}
                   className={({ isActive }) =>
                     'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                   }
@@ -166,7 +185,7 @@ export default function AppLayout() {
                     name={ROLE_NAV_ICON[item.to] ?? 'list'}
                     className="lh-side-item__icon"
                   />
-                  {item.label}
+                  <span className="lh-side-item__label">{item.label}</span>
                 </NavLink>
               ))}
             </div>

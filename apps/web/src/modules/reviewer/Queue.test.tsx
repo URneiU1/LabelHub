@@ -183,6 +183,13 @@ describe('ReviewerQueue schema runtime flow', () => {
 
     expect(arbitrationTab).toHaveAttribute('aria-selected', 'true')
     expect(await screen.findByText('仲裁队列')).toBeInTheDocument()
+
+    const timelineTab = screen.getByRole('tab', { name: '审计时间线' })
+    timelineTab.focus()
+    await user.keyboard('{Enter}')
+
+    expect(timelineTab).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText('暂无审计记录')).toBeInTheDocument()
   })
 
   it('opens submission detail and renders historical template as read-only', async () => {
@@ -265,6 +272,10 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getByText('综合分：92.5')).toBeInTheDocument()
     expect(screen.getByText('关键词覆盖充分，建议通过。')).toBeInTheDocument()
     expect(screen.getByText('请审核商品标题')).toBeInTheDocument()
+    expect(screen.queryByText('审计时间线（SUB-501）')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('审计时间线（SUB-501）')).toBeInTheDocument()
     expect(screen.getAllByText('AI 预审通过').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/AI Agent · AI 预审中 → 人工审核中/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0)

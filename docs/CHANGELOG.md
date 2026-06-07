@@ -11,6 +11,8 @@
 
 ## 最近完成
 
+- 2026-06-07 `global-sidebar-collapse`:三角色全局左侧导航支持收起/展开。**本次完成**:在 `AppLayout` 的共用侧栏顶部新增「收起导航 / 展开导航」按钮,Owner / Labeler / Reviewer 三角色同时生效;折叠后侧栏变成 64px 图标 rail,隐藏分组标题与文字标签,主内容区自动获得更多横向空间。保留链接 `aria-label`/`title`,避免折叠后只剩图标不可识别。**验证记录**:新增 `AppLayout.test.tsx` 覆盖折叠/展开 class 切换。
+- 2026-06-07 `reviewer-timeline-tab`:把 Reviewer 审计时间线从右侧栏移到顶部 tab。**本次完成**:顶部视图切换新增「审计时间线」并放在「仲裁」之后;工作台默认不再渲染右侧 Timeline,中间审核详情获得原右栏宽度;「规则配置」仍按需打开右侧临时面板。清理随右栏移除后未使用的 demo 指标组件。**验证记录**:更新 `Queue.test.tsx` 覆盖「审计时间线」tab 切换、空态展示,以及提交详情中时间线标题只在切到 tab 后出现。
 - 2026-06-07 `reviewer-audit-timeline-time`:让 Reviewer 审计时间线真正显示时间。**本次完成**:右侧「审计时间线」每条记录改成「时间 · 操作者」+「事件 · 状态流转」两行结构,真实审计使用 `createdAt` 格式化时间,demo 时间线使用样例事件时间,避免时间线只有 actor/event/state 看不出发生顺序。**验证记录**:更新 `Queue.test.tsx` 断言审计详情存在 `HH:MM:SS` 时间文本。
 - 2026-06-07 `reviewer-audit-i18n`:收口 Reviewer 详情页审计与 AI 结论文案。**本次完成**:把「处理日志 / 审计」和「审计时间线」中原样暴露的 `ai_done`、`ai_reviewing`、`human_reviewing`、`ai_worker` 等后端枚举映射为中文展示,同时把 AI 预审结论里的 `AI pass`、`verdict: pass`、`score:`、`tokens`、`latency` 改成中文产品文案。修复「规则：v1」徽标在 flex/grid 场景下被撑成大圆块的问题,给 tag/pill 明确 inline-flex、非拉伸和 nowrap 约束。**验证记录**:更新 `Queue.test.tsx` 断言中文审计文案;本地 `git diff --check` 通过;本地 `pnpm -F web exec tsc -b --pretty false` 60 秒无输出后终止;生产 Docker `pnpm -F web build` 通过,线上 `/reviewer` 返回 200,构建 JS 包含「AI 预审通过 / 人工审核中」中文映射。
 - 2026-06-07 `reviewer-decision-actions-dedupe`:去掉 Reviewer 详情区重复审核动作。**本次完成**:保留三张大决策卡「打回 / 拒绝 / 通过」作为唯一操作入口,删除其下方旧版普通按钮行「打回修改 / 拒绝 / 通过」和遗留样式,避免同一组动作重复出现。同步更新 `Queue.test.tsx` 的禁用态断言到大决策卡。**验证记录**:普通 diff 与 `rg` 检查确认旧按钮和 `legacyActionRowStyle` 已移除;本地 `git diff --check`/`git status` 偶发卡住,已清理对应进程。
