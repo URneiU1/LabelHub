@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 // Owner 后台的左栏分节由全局「工作区」侧栏(AppLayout)驱动,但分节内容渲染在
 // Owner 页(Dashboard)。两个组件分属不同子树(侧栏在 shell,页面在 <Outlet/>),
 // 用这个极简外部 store 桥接:侧栏 setOwnerSection,页面 useOwnerSection 订阅。
-export type OwnerSection = 'tasks' | 'template' | 'dataset' | 'ai' | 'review' | 'stats' | 'export'
+export type OwnerSection = 'tasks' | 'template' | 'dataset' | 'ai' | 'review' | 'acceptance' | 'stats' | 'export'
 
 export interface OwnerNavGroup {
   title: string
@@ -15,11 +15,11 @@ export interface OwnerNavGroup {
 // Reviewer 角色,Owner 的「审核结果」只读。
 export const OWNER_NAV_GROUPS: ReadonlyArray<OwnerNavGroup> = [
   { title: '数据生产', items: [['tasks', '任务管理'], ['template', '模板搭建'], ['dataset', '数据集']] },
-  { title: '审核与质检', items: [['ai', 'AI 预审'], ['review', '审核结果']] },
-  { title: '数据交付', items: [['stats', '数据看板'], ['export', '数据导出']] },
+  { title: '质量控制', items: [['ai', 'AI 预审配置'], ['review', '审核质检']] },
+  { title: '数据交付', items: [['acceptance', '数据验收'], ['stats', '生产看板'], ['export', '数据导出']] },
 ]
 
-const OWNER_SECTION_KEYS: ReadonlyArray<OwnerSection> = ['tasks', 'template', 'dataset', 'ai', 'review', 'stats', 'export']
+const OWNER_SECTION_KEYS: ReadonlyArray<OwnerSection> = ['tasks', 'template', 'dataset', 'ai', 'review', 'acceptance', 'stats', 'export']
 
 // 路由 param 校验:把 /owner/:section 的字符串收敛回合法分节,否则回退默认。
 export function isOwnerSection(value: string | undefined): value is OwnerSection {

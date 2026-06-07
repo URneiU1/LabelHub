@@ -7,6 +7,7 @@ import StatusBadge from '../../shared/components/StatusBadge'
 import ExportPanel from './ExportPanel'
 import ImportPanel from './ImportPanel'
 import ReviewResultsPanel from './ReviewResultsPanel'
+import AcceptancePanel from './AcceptancePanel'
 import TaskManagePanel from './TaskManagePanel'
 import { useOwnerSection, useOwnerSubView } from '../../shared/state/ownerSection'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
@@ -900,23 +901,27 @@ export default function OwnerDashboard() {
               )}
 
               {detailSection === 'review' && (
-                <section style={aiPromptSectionStyle} aria-label="审核结果">
+                <section style={aiPromptSectionStyle} aria-label="审核质检">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
-                    <h3 style={subHeadingStyle}>审核结果(只读)</h3>
+                    <h3 style={subHeadingStyle}>审核质检(只读)</h3>
                     <StatusBadge status="draft" label="只读视图" />
                   </div>
                   <p style={mutedStyle}>
-                    人工审核的初审 / 复审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
+                    人工审核的初审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
                   </p>
                   <div style={controlStripStyle}>
                     <MetricCell label="PROGRESS" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
                     <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
                   </div>
                   <p style={mutedStyle}>
-                    通过率、AI vs 人工差异、三级审核进度等汇总图表见左侧「数据看板」;下方是逐条质检结果,用于回看 AI 预审标准。
+                    通过率、AI vs 人工差异、两级审核进度等汇总图表见左侧「生产看板」;下方是逐条质检结果,用于回看 AI 预审标准。
                   </p>
                   <ReviewResultsPanel taskId={selected.id} />
                 </section>
+              )}
+
+              {detailSection === 'acceptance' && (
+                <AcceptancePanel taskId={selected.id} />
               )}
 
               {detailSection === 'stats' && (

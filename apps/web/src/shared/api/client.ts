@@ -619,3 +619,55 @@ export type LabelerTaskItems = {
   items: LabelerTaskItem[]
   counts: Record<string, number>
 }
+
+// --- Owner data-acceptance loop ---
+
+export type AcceptanceBatch = {
+  id: number
+  taskId: number
+  status: string // pending | accepted | rejected
+  approvedCount: number
+  note: string | null
+  decidedBy: number | null
+  decidedAt: string | null
+  createdAt: string
+}
+
+export type AcceptanceSpotCheck = {
+  id: number
+  batchId: number
+  submissionId: number
+  result: string // ok | flag
+  note: string | null
+  checkedBy: number
+  createdAt: string
+}
+
+export type AcceptanceStatus = {
+  batch: AcceptanceBatch | null
+  spotChecks: AcceptanceSpotCheck[]
+  approvedCount: number
+}
+
+export function getAcceptance(taskId: number) {
+  return apiGet<AcceptanceStatus>(`/tasks/${taskId}/acceptance`)
+}
+
+export function startAcceptance(taskId: number) {
+  return apiPost<{ batch: AcceptanceBatch }>(`/tasks/${taskId}/acceptance`, {})
+}
+
+export function recordAcceptanceSpotCheck(
+  taskId: number,
+  body: { batch_id: number, submission_id: number, result: 'ok' | 'flag', note?: string },
+) {
+  return apiPost<{ spotCheck: AcceptanceSpotCheck }>(`/tasks/${taskId}/acceptance/spot-checks`, body)
+}
+
+export function acceptAcceptanceBatch(taskId: number, body: { batch_id: number, note?: string }) {
+  return apiPost<{ batch: AcceptanceBatch }>(`/tasks/${taskId}/acceptance/accept`, body)
+}
+
+export function rejectAcceptanceBatch(taskId: number, body: { batch_id: number, note?: string }) {
+  return apiPost<{ batch: AcceptanceBatch, reopenedCount: number }>(`/tasks/${taskId}/acceptance/reject`, body)
+}
