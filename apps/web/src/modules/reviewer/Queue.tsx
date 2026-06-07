@@ -1109,15 +1109,15 @@ function RealAIDiagnostics({ answer, aiReview, auditLogs }: { answer?: string, a
           {aiReview ? (
             <div style={processLogRowStyle}>
               <span>{formatTime(aiReview.createdAt)}</span>
-              <span style={neutralPillStyle}>ai_review</span>
-              <strong>{aiReview.status} · {aiReview.verdict ?? 'no verdict'} · {formatAIScore(aiReview.overallScore)}</strong>
+              <span style={neutralPillStyle}>AI 预审</span>
+              <strong>{aiReviewStatusLabel(aiReview.status)} · {aiVerdictLabel(aiReview.verdict)} · {formatAIScore(aiReview.overallScore)}</strong>
             </div>
           ) : null}
           {auditLogs.map((log) => (
             <div key={log.id} style={processLogRowStyle}>
               <span>{formatTime(log.createdAt)}</span>
-              <span style={neutralPillStyle}>{log.event}</span>
-              <strong>{log.actorType} · {auditStateText(log)}</strong>
+              <span style={neutralPillStyle}>{auditEventLabel(log.event)}</span>
+              <strong>{auditActorLabel(log.actorType)} · {auditStateText(log)}</strong>
             </div>
           ))}
         </div>
@@ -1181,8 +1181,8 @@ function Timeline({
           <div key={log.id} style={timelineRowStyle}>
             <span style={{ ...timelineDotStyle, background: log.actorType === 'ai_worker' || log.event.startsWith('ai_') ? '#7c3aed' : 'var(--color-success)' }} />
             <div>
-              <strong>{log.actorType}</strong>
-              <p>{log.event} · {auditStateText(log)}</p>
+              <strong>{auditActorLabel(log.actorType)}</strong>
+              <p>{auditEventLabel(log.event)} · {auditStateText(log)}</p>
             </div>
           </div>
         ))}
@@ -1349,9 +1349,100 @@ function formatRuleDimensions(raw: unknown) {
   return JSON.stringify(raw ?? [], null, 2)
 }
 
+const AI_REVIEW_STATUS_LABELS: Record<string, string> = {
+  pending: '待处理',
+  running: '处理中',
+  succeeded: '成功',
+  failed: '失败',
+  dead: '失败终止',
+}
+
+const AI_VERDICT_LABELS: Record<string, string> = {
+  pass: '通过',
+  reject: '打回',
+  uncertain: '需人工复核',
+  manual: '需人工复核',
+}
+
+const AUDIT_EVENT_LABELS: Record<string, string> = {
+  save: '保存草稿',
+  submit: '标注提交',
+  enqueue: '进入 AI 预审队列',
+  skip_ai: '跳过 AI 预审',
+  ai_done: 'AI 预审通过',
+  ai_uncertain: 'AI 转人工复核',
+  ai_reject: 'AI 预审打回',
+  ai_fail_max: 'AI 失败转人工',
+  ai_retry: 'AI 预审重试',
+  consensus_conflict: '重叠仲裁冲突',
+  consensus_evidence: '重叠证据归档',
+  sampling_auto_approved: '抽样免审通过',
+  approve: '人工通过',
+  reject: '人工拒绝',
+  revise: '打回修改',
+  human_approve_stage: '人工审核通过一级',
+  arbitration_sibling_rejected: '仲裁同题提交拒绝',
+  acceptance_reopen: '验收不通过返审',
+  queued: '已入队',
+  exported: '已导出',
+}
+
+const AUDIT_STATE_LABELS: Record<string, string> = {
+  draft: '草稿',
+  submitted: '已提交',
+  ai_reviewing: 'AI 预审中',
+  manual_review: '人工复核',
+  human_reviewing: '人工审核中',
+  revising: '返修中',
+  approved: '已通过',
+  rejected: '已拒绝',
+  needs_arbitration: '待仲裁',
+  consensus_evidence: '共识证据',
+  queued: '排队中',
+  pending: '待处理',
+  running: '处理中',
+  succeeded: '成功',
+  failed: '失败',
+  dead: '失败终止',
+}
+
+const AUDIT_ACTOR_LABELS: Record<string, string> = {
+  user: '人工',
+  system: '系统',
+  ai_worker: 'AI Agent',
+  owner: '任务负责人',
+  reviewer: '审核员',
+  labeler: '标注员',
+}
+
+function aiReviewStatusLabel(status: string | null | undefined) {
+  return labelFromMap(AI_REVIEW_STATUS_LABELS, status, '未知状态')
+}
+
+function aiVerdictLabel(verdict: string | null | undefined) {
+  return labelFromMap(AI_VERDICT_LABELS, verdict, '暂无结论')
+}
+
+function auditEventLabel(event: string) {
+  return labelFromMap(AUDIT_EVENT_LABELS, event, event)
+}
+
+function auditStateLabel(state: string) {
+  return labelFromMap(AUDIT_STATE_LABELS, state, state)
+}
+
+function auditActorLabel(actorType: string) {
+  return labelFromMap(AUDIT_ACTOR_LABELS, actorType, actorType)
+}
+
+function labelFromMap(labels: Record<string, string>, value: string | null | undefined, fallback: string) {
+  const key = (value ?? '').trim()
+  return key ? labels[key] ?? key : fallback
+}
+
 function auditStateText(log: AuditLog) {
   const fromState = log.fromState ?? ''
-  return fromState ? `${fromState} → ${log.toState}` : log.toState
+  return fromState ? `${auditStateLabel(fromState)} → ${auditStateLabel(log.toState)}` : auditStateLabel(log.toState)
 }
 
 function canRetryAIReview(aiReview: AIReviewDetail | null | undefined) {
@@ -1457,12 +1548,20 @@ const queueCardButtonStyle: CSSProperties = {
 }
 
 const neutralPillStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: '0 0 auto',
+  width: 'fit-content',
+  maxWidth: '100%',
   borderRadius: 999,
   background: 'var(--color-panel-header)',
   color: 'var(--color-text-secondary)',
   padding: '2px 8px',
   fontSize: 'var(--text-sm)',
   fontWeight: 600,
+  lineHeight: 1.3,
+  whiteSpace: 'nowrap',
 }
 
 const successPillStyle: CSSProperties = {
@@ -1580,6 +1679,7 @@ const previousReviewStyle: CSSProperties = {
 const sectionTitleRowStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
+  alignItems: 'center',
   gap: 'var(--space-md)',
 }
 
@@ -1684,7 +1784,7 @@ const processLogStyle: CSSProperties = {
 
 const processLogRowStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '72px 72px 1fr',
+  gridTemplateColumns: '72px minmax(112px, max-content) minmax(0, 1fr)',
   gap: 'var(--space-sm)',
   alignItems: 'center',
   padding: 'var(--space-sm) 0',
