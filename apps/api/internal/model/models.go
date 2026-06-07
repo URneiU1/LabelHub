@@ -347,3 +347,35 @@ type OutboxEvent struct {
 }
 
 func (OutboxEvent) TableName() string { return "outbox_events" }
+
+// ============================================================
+// 19. acceptance_batches / acceptance_spot_checks
+// ============================================================
+
+// AcceptanceBatch 是一次 Owner 数据验收:对某任务当前已通过数据的快照批次。
+type AcceptanceBatch struct {
+	ID            uint64     `gorm:"primaryKey" json:"id"`
+	TaskID        uint64     `json:"taskId"`
+	Status        string     `gorm:"default:pending" json:"status"`
+	ApprovedCount int        `json:"approvedCount"`
+	Note          NullString `json:"note"`
+	DecidedBy     *uint64    `json:"decidedBy"`
+	DecidedAt     NullTime   `json:"decidedAt"`
+	CreatedBy     uint64     `json:"createdBy"`
+	CreatedAt     time.Time  `json:"createdAt"`
+}
+
+func (AcceptanceBatch) TableName() string { return "acceptance_batches" }
+
+// AcceptanceSpotCheck 是验收批次内对单条已通过提交的抽检记录(ok / flag)。
+type AcceptanceSpotCheck struct {
+	ID           uint64     `gorm:"primaryKey" json:"id"`
+	BatchID      uint64     `json:"batchId"`
+	SubmissionID uint64     `json:"submissionId"`
+	Result       string     `json:"result"`
+	Note         NullString `json:"note"`
+	CheckedBy    uint64     `json:"checkedBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+}
+
+func (AcceptanceSpotCheck) TableName() string { return "acceptance_spot_checks" }

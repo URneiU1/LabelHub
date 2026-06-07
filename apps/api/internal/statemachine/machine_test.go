@@ -129,8 +129,8 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 }
 
 func TestTransitionTableCoversPlan(t *testing.T) {
-	if got := len(Transitions()); got != 20 {
-		t.Fatalf("Transitions() len = %d, want 20", got)
+	if got := len(Transitions()); got != 21 {
+		t.Fatalf("Transitions() len = %d, want 21", got)
 	}
 }
 
@@ -162,5 +162,22 @@ func plannedTransitions() []plannedTransition {
 		{StateNeedsArbitration, EventApprove, StateApproved},
 		{StateNeedsArbitration, EventReject, StateRejected},
 		{StateSubmitted, EventSamplingAutoApproved, StateApproved},
+		{StateApproved, EventAcceptanceReopen, StateHumanReviewing},
+	}
+}
+
+func TestAcceptanceReopenTransition(t *testing.T) {
+	if !Can(StateApproved, EventAcceptanceReopen, StateHumanReviewing) {
+		t.Error("approved --acceptance_reopen--> human_reviewing should be allowed")
+	}
+	if err := Apply(StateApproved, EventAcceptanceReopen, StateHumanReviewing); err != nil {
+		t.Errorf("Apply approved->human_reviewing should succeed: %v", err)
+	}
+	// 验收打回绝不能把数据直接留在/推回 approved,也不能跳到其它终态。
+	if Can(StateApproved, EventAcceptanceReopen, StateApproved) {
+		t.Error("acceptance_reopen must not keep/return approved")
+	}
+	if Can(StateApproved, EventAcceptanceReopen, StateRejected) {
+		t.Error("acceptance_reopen must not jump to rejected")
 	}
 }

@@ -33,6 +33,8 @@ const (
 	EventApprove              = "approve"
 	EventReject               = "reject"
 	EventRevise               = "revise"
+	// EventAcceptanceReopen:Owner 数据验收不通过时,把被抽检标记的「已通过」提交打回人工复审。
+	EventAcceptanceReopen = "acceptance_reopen"
 )
 
 type Key struct {
@@ -68,6 +70,8 @@ var transitions = map[Key]Transition{
 	{StateNeedsArbitration, EventApprove}: {From: StateNeedsArbitration, Event: EventApprove, To: []string{StateApproved}},
 	{StateNeedsArbitration, EventReject}:  {From: StateNeedsArbitration, Event: EventReject, To: []string{StateRejected}},
 	{StateRevising, EventSubmit}:          {From: StateRevising, Event: EventSubmit, To: []string{StateSubmitted}},
+	// 验收不通过:已通过数据被打回人工复审(Owner 质检闭环;AI 仍绝不自动通过)。
+	{StateApproved, EventAcceptanceReopen}: {From: StateApproved, Event: EventAcceptanceReopen, To: []string{StateHumanReviewing}},
 }
 
 func Can(from string, event string, to string) bool {
