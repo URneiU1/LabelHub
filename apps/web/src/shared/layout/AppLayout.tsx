@@ -20,7 +20,9 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/owner', label: '任务管理', roles: ['owner', 'admin'] },
-  { to: '/labeler', label: '标注工作台', roles: ['labeler'] },
+  { to: '/labeler', label: '任务广场', roles: ['labeler'] },
+  { to: '/labeler/workbench', label: '标注工作台', roles: ['labeler'] },
+  { to: '/labeler/mine', label: '我的贡献', roles: ['labeler'] },
   { to: '/reviewer', label: '审核工作台', roles: ['reviewer', 'admin'] },
   { to: '/reviewer/results', label: '审核结果', roles: ['reviewer', 'admin'] },
 ]
@@ -39,13 +41,16 @@ const OWNER_SECTION_ICON: Record<string, IconName> = {
   dataset: 'database',
   ai: 'sparkle',
   review: 'userCheck',
+  acceptance: 'checkCircle',
   stats: 'barChart',
   export: 'download',
 }
 
 const ROLE_NAV_ICON: Record<string, IconName> = {
   '/owner': 'list',
-  '/labeler': 'edit',
+  '/labeler': 'box',
+  '/labeler/workbench': 'edit',
+  '/labeler/mine': 'barChart',
   '/reviewer': 'userCheck',
 }
 
@@ -118,8 +123,12 @@ export default function AppLayout() {
               aria-expanded={!sideCollapsed}
               onClick={() => setSideCollapsed((current) => !current)}
             >
-              <Icon name="list" size={16} />
-              <span className="lh-shell__side-toggle-text">{sideCollapsed ? '展开导航' : '收起导航'}</span>
+              <span
+                className="lh-shell__side-toggle-arrow"
+                style={{ display: 'inline-flex', transition: 'transform 160ms ease', transform: sideCollapsed ? 'rotate(180deg)' : 'none' }}
+              >
+                <Icon name="chevronLeft" size={18} />
+              </span>
             </button>
           </div>
           {ownerWorkspace ? (

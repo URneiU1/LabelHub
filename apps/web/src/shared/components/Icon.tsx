@@ -14,6 +14,8 @@ export type IconName =
   | 'barChart'
   | 'download'
   | 'edit'
+  | 'chevronLeft'
+  | 'checkCircle'
 
 // 统一的内联 SVG 图标集（lucide 风格）：currentColor 描边、24 视窗、stroke 2。
 // 取代散落各处的 emoji / 生僻 unicode 字形与空占位方块，保证跨系统渲染一致。
@@ -102,6 +104,15 @@ const GLYPHS: Record<IconName, ReactNode> = {
     <>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </>
+  ),
+  chevronLeft: (
+    <path d="m15 18-6-6 6-6" />
+  ),
+  checkCircle: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m9 12 2 2 4-4" />
     </>
   ),
 }
