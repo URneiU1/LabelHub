@@ -31,6 +31,8 @@ func TestClaim_ReleasesExpiredClaimsBeforeServingNextAvailableItem(t *testing.T)
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(7, 1, "available"))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. WHERE item_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
 		WillReturnResult(sqlmock.NewResult(901, 1))
 	mock.ExpectCommit()
@@ -84,6 +86,8 @@ func TestClaim_OverlapExcludesItemsAlreadySubmittedByLabeler(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(8, 1, "available"))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. WHERE item_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
 		WillReturnResult(sqlmock.NewResult(902, 1))
 	mock.ExpectCommit()
@@ -144,6 +148,8 @@ func TestClaim_QuotaAllowsBelowLimit(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(7, 1, "available"))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. WHERE item_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
 		WillReturnResult(sqlmock.NewResult(901, 1))
 	mock.ExpectCommit()
@@ -203,6 +209,8 @@ func TestClaim_AssignedAllowsAssignedLabeler(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status"}).AddRow(7, 1, "available"))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. WHERE item_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?is)^INSERT INTO .submissions.`).
 		WillReturnResult(sqlmock.NewResult(901, 1))
 	mock.ExpectCommit()

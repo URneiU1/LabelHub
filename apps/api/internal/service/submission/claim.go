@@ -117,18 +117,11 @@ func Claim(db *gorm.DB, input ClaimInput) (ClaimResult, error) {
 		item.ClaimedBy = &input.LabelerID
 		result.Item = item
 
-		version, err := templateVersionForTask(tx, task)
+		// 用 findOrCreateSubmission 而非裸 Create:releaseExpiredClaims 会把过期认领的 item 放回
+		// available 却保留其草稿 submission;同一 labeler 再领到同一题时,裸 Create 会撞唯一键
+		// (item_id, labeler_id) 报 1062 → 500。复用已有草稿让领取对 (item, labeler) 幂等。
+		sub, err := findOrCreateSubmission(tx, task, item, input.LabelerID)
 		if err != nil {
-			return err
-		}
-		sub := model.Submission{
-			TaskID:          task.ID,
-			ItemID:          item.ID,
-			TemplateVersion: version,
-			LabelerID:       input.LabelerID,
-			Status:          statemachine.StateDraft,
-		}
-		if err := tx.Create(&sub).Error; err != nil {
 			return err
 		}
 		result.Submission = sub

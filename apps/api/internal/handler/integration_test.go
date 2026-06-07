@@ -86,6 +86,9 @@ func TestClaimItem_HappyPath(t *testing.T) {
 			AddRow(11, 1, itemStatusAvailable))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// findOrCreateSubmission 先查 (item,labeler) 既有 submission(无)→ 再按冻结模板版本新建。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. WHERE item_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 2, `{}`))
