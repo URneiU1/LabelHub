@@ -115,6 +115,7 @@ logs/
 
 # --- 课题资料(★ 不进仓库)---
 *.pdf
+!submission/assets/AI-Coding-Process.pdf
 
 # --- Docker 临时 ---
 .docker/

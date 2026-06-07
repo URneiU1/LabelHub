@@ -10,6 +10,7 @@
 - [ ] `cp .env.example .env`
 - [ ] `make dev` 起栈,等到 "Development stack is ready" 提示
 - [ ] 三终端起好:`make api` / `make worker` / `make web`
+- [ ] 确认 `qa_quality` 官方任务显示 AI REVIEW = ON,且已有 active prompt 与 Golden Sample
 - [ ] http://localhost:5173 已加载首屏
 - [ ] 浏览器开发者面板关闭 / 缩放 100%(避免视频里看到 devtools)
 - [ ] 录屏分辨率 1920×1080,鼠标光标可见
@@ -50,7 +51,7 @@
 - 切到 **Golden Sample** 区,选一条样本点 **Run dry-run**
 - 弹出 history / trend,展示 matched / mismatch 对比
 
-> "AI Prompt 走豆包 Function Calling,Go 端严格校验 verdict/score/dimensions schema。Golden Sample 是 dry-run 沙盒——评委可以提前知道 prompt 在已知答案上的表现。这里看 dry-run 结果与 expected verdict 匹配。"
+> "AI Prompt 本地默认走 deterministic mock,配置豆包后可切到真实 Function Calling。Go 端严格校验 verdict/score/dimensions schema。Golden Sample 是 dry-run 沙盒——评委可以提前知道 prompt 在已知答案上的表现。这里看 dry-run 结果与 expected verdict 匹配。"
 
 #### 1.4 Stats Board(2:30 - 3:00) · 30s
 - 切到 **Stats** tab,展示进度 / 通过率 / AI vs 人工 / 维度均分 chart
@@ -97,7 +98,7 @@
 - 右侧:AI verdict(pass/reject/uncertain)+ 三维度评分柱 + reason 文本 + tokens/latency 元数据
 - *【10 min only】* 演示右侧 **规则** tab,切换历史 prompt 版本看 dry-run 历史
 
-> "AI verdict 是辅助而非自动决策——除非 Owner 在 AI Prompt 启用 'pass 自动 approved' 才会跳过人工。这里我手动通过。"
+> "AI verdict 是辅助而非自动决策。AI pass 进入人工初审,AI uncertain 进入人工复核,AI reject 会直接打回标注员修改;最终入库仍由人工终审决定。这里我手动通过。"
 
 #### 3.3 通过(6:30 - 7:00) · 30s
 - 点 **通过**,review 事务内双锁 + RowsAffected 守状态机
@@ -133,9 +134,9 @@
 
 ## 录制后
 
-- [ ] 视频导出为 `assets/demo.mp4`(MP4 / H.264 / 1080p / 30fps)
+- [ ] 视频导出为最终提交附件(MP4 / H.264 / 1080p / 30fps,不放入 Git 仓库)
 - [ ] 5min 与 10min 各导一份(`demo-5min.mp4` / `demo-10min.mp4`)
-- [ ] 在 4 个关键节点截图(Owner Designer / Labeler 答题 / Reviewer 详情 / 导出 history)放到 `assets/screenshots/`
+- [ ] 如界面有变化,刷新 4 个关键节点截图(Owner Designer / Labeler 答题 / Reviewer 详情 / 导出 history)到 `assets/screenshots/`
 - [ ] 在本文件顶部追加 "录制日期 / 视频时长 / 备注"
 
 ## 备用素材路径(若现场出问题)

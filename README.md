@@ -37,22 +37,22 @@ make web       # 终端 C — http://localhost:5173
 
 ### 演示账号
 
-`make seed` 会创建以下账号(密码均为 `pass`):
+`make seed` 会创建以下账号(密码均为 `123456`):
 
 | 用户名 | 角色 | 用途 |
 |---|---|---|
 | `owner1` | Owner | 任务/模板/AI Prompt/Golden Sample 配置 |
 | `labeler1` | Labeler | 任务广场领题、作答、提交 |
 | `reviewer1` | Reviewer | 审核队列、verdict、规则查看 |
-| `admin` | Admin | 全局管理 |
+| `admin1` | Admin | 全局管理 |
 | `system_ai` | System | AI 预审 Agent(后台,不需登录) |
 
 ### 5 分钟评委路径
 
-1. 浏览器打开 http://localhost:5173 → 登 `owner1/pass`
-2. 进 **Owner Dashboard** → 选官方 `qa_quality` 任务 → 看模板/AI Prompt/Golden Sample/Stats Board
-3. 退出登 `labeler1/pass` → **任务广场** → 领取一题 → 触发 AI 预审 → 提交
-4. 退出登 `reviewer1/pass` → **审核队列** → 看 AI verdict + 维度评分 → 通过/打回
+1. 浏览器打开 http://localhost:5173 → 登 `owner1/123456`
+2. 进 **Owner Dashboard** → 选官方 `qa_quality` 任务 → 看模板/AI Prompt/Golden Sample/Stats Board(官方任务 seed 后已启用 AI review)
+3. 退出登 `labeler1/123456` → **任务广场** → 领取一题 → 作答并提交,触发 AI 预审
+4. 退出登 `reviewer1/123456` → **审核队列** → 看 AI verdict + 维度评分 → 通过/打回
 5. 回 `owner1` → **导出**(JSON/JSONL/CSV/XLSX 任选)→ 下载
 
 完整 walkthrough 见 [`submission/DEMO_SCRIPT.md`](submission/DEMO_SCRIPT.md)。
@@ -63,7 +63,7 @@ make web       # 终端 C — http://localhost:5173
 apps/web        React 18 + TypeScript(strict)+ Semi Design(单一 SPA,角色路由)
 apps/api        Go + Gin + GORM REST API(:8080)
 apps/ai-worker  Go + Asynq AI 预审 Worker(豆包 Function Calling)
-pkg/exporter    共享多格式导出器(JSON / JSONL / CSV / XLSX)
+pkg/exporter    共享多格式导出器(JSON / JSONL / CSV / XLSX / Markdown)
 pkg/llmreview   共享 LLM provider(mock / OpenAI-compatible / 豆包)
 ```
 

@@ -13,16 +13,16 @@
 |---|---|---|---|
 | 1 | 源码 Monorepo | 仓库根目录(`apps/` + `pkg/`) | 功能完备性 60% + 工程质量 25% |
 | 2 | 评委 README + 5 分钟评估路径 | 本文件 + [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | 产品体验 15% |
-| 3 | 演示视频(5-10 分钟) | [`assets/demo.mp4`](assets/) — *待录制* | 产品体验 15% |
-| 4 | 架构图 + 关键技术点 | [`ARCHITECTURE.md`](ARCHITECTURE.md) + [`assets/architecture.png`](assets/) | 工程质量 25% |
-| 5 | Demo 截图 | [`assets/screenshots/`](assets/) — *待截取* | 产品体验 15% |
-| 6 | AI Coding 过程记录(8-15 页 PDF) | [`assets/AI-Coding-Process.pdf`](assets/) — *待写*;原料 [`../docs/CHANGELOG.md`](../docs/CHANGELOG.md) | 工程质量 25%(附加) |
+| 3 | 演示视频脚本(5-10 分钟) | [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md);视频二进制由最终提交平台上传,不纳入 Git | 产品体验 15% |
+| 4 | 架构图 + 关键技术点 | [`ARCHITECTURE.md`](ARCHITECTURE.md)(含 Mermaid topology / 状态机 / outbox sequence) | 工程质量 25% |
+| 5 | Demo 截图 | [`assets/screenshots/`](assets/screenshots/) — 6 张主流程截图 + 1 张修复前问题证据已入库 | 产品体验 15% |
+| 6 | AI Coding 过程记录(8-15 页 PDF) | [`assets/AI-Coding-Process.pdf`](assets/AI-Coding-Process.pdf) + [`assets/AI-Coding-Process.md`](assets/AI-Coding-Process.md) | 工程质量 25%(附加) |
 | 7 | 部署说明 | [`DEPLOY.md`](DEPLOY.md) | 工程质量 25% |
 | 8 | API 文档 | [`api/openapi.yaml`](api/openapi.yaml) + [`api/postman_collection.json`](api/postman_collection.json) | 工程质量 25% |
 | 9 | 交付前 Code Review | [`CODE-REVIEW-FINAL.md`](CODE-REVIEW-FINAL.md) | 工程质量 25%(附加) |
 | 10 | License | [`LICENSE`](LICENSE) — MIT | — |
 
-> *待* 标注的三项(视频/截图/PDF)在最终提交前由作者补齐,本文档内置占位与说明。
+> 大体积视频文件不放入 Git 仓库;最终提交时按 [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) 录制并上传到比赛平台或外部附件。
 
 ---
 
@@ -166,11 +166,10 @@ submission/
 │   ├── openapi.yaml          OpenAPI 3 主流程契约
 │   └── postman_collection.json   按 3 角色组织的请求集
 └── assets/
-    ├── README.md             视频/截图/PDF 占位说明
-    ├── demo.mp4              [待录制]
-    ├── architecture.png      [待渲染]
-    ├── AI-Coding-Process.pdf [待写]
-    └── screenshots/          [待截取]
+    ├── README.md             素材说明与最终提交检查
+    ├── AI-Coding-Process.md  AI Coding 过程源文件
+    ├── AI-Coding-Process.pdf AI Coding 过程 PDF
+    └── screenshots/          Owner/Designer/Labeler/Reviewer/Export 截图
 ```
 
 ## ❓ 联系

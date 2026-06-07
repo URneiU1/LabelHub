@@ -34,15 +34,19 @@ stateDiagram-v2
   draft --> submitted: submit
   submitted --> ai_reviewing: ai queued
   submitted --> human_reviewing: no ai
-  ai_reviewing --> approved: ai_auto_approved
-  ai_reviewing --> human_reviewing: ai_done / ai_fail_max
+  ai_reviewing --> human_reviewing: ai_done(pass) / ai_fail_max
+  ai_reviewing --> manual_review: ai_uncertain
+  ai_reviewing --> revising: ai_reject
+  manual_review --> human_reviewing: approve first review
+  manual_review --> rejected: reject
+  manual_review --> revising: revise
   human_reviewing --> approved: approve
   human_reviewing --> rejected: reject
   human_reviewing --> revising: revise
   revising --> submitted: resubmit
 ```
 
-The state machine is centralized under `apps/api/internal/statemachine`. Review and submission services lock rows in transactions and reject invalid transitions instead of letting handlers mutate states ad hoc.
+The state machine is centralized under `apps/api/internal/statemachine`. AI review never auto-approves data into the final dataset: `pass` enters human review, `uncertain` enters the manual-review lane, `reject` returns to the labeler for revision, and provider failover goes to human review. Review and submission services lock rows in transactions and reject invalid transitions instead of letting handlers mutate states ad hoc.
 
 ## Outbox And Queueing
 
