@@ -807,13 +807,6 @@ export default function ReviewerQueue() {
               </button>
             </div>
 
-            {selected ? (
-              <div style={legacyActionRowStyle}>
-                <Button aria-label="打回修改" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('revise')} theme="light">打回修改</Button>
-                <Button aria-label="拒绝" disabled={loading || !schema.ok} loading={loading} onClick={() => void review('reject')} theme="light" type="danger">拒绝</Button>
-                <Button aria-label="通过" disabled={loading || !schema.ok} loading={loading} theme="solid" onClick={() => void review('approve')}>通过</Button>
-              </div>
-            ) : null}
           </main>
 
           <aside className="hr-right" style={hrRightStyle}>
@@ -1698,12 +1691,6 @@ const processLogRowStyle: CSSProperties = {
   borderBottom: '1px dashed var(--color-border-light)',
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
-}
-
-const legacyActionRowStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'flex-end',
-  gap: 'var(--space-md)',
 }
 
 const rendererShellStyle: CSSProperties = {

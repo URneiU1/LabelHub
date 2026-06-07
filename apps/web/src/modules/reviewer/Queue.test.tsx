@@ -439,9 +439,9 @@ describe('ReviewerQueue schema runtime flow', () => {
     await user.click(await screen.findByText('Submission #501'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('fields[0].options')
-    expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /打回/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /通过/ })).toBeDisabled()
   })
 
   it('disables review actions while a review request is pending', async () => {
@@ -476,12 +476,12 @@ describe('ReviewerQueue schema runtime flow', () => {
     render(<ReviewerQueue />)
 
     await user.click(await screen.findByText('Submission #501'))
-    await user.click(screen.getByRole('button', { name: '通过' }))
+    await user.click(screen.getByRole('button', { name: /通过/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
-      expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
-      expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /打回/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /通过/ })).toBeDisabled()
     })
 
     await act(async () => {
