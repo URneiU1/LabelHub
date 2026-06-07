@@ -36,9 +36,9 @@ func LoadApprovedRows(ctx context.Context, db *sql.DB, taskID uint64, includeRev
 	defer rows.Close()
 
 	type base struct {
-		subID, itemID    uint64
-		externalID       sql.NullString
-		payload, answer  string
+		subID, itemID   uint64
+		externalID      sql.NullString
+		payload, answer string
 	}
 	var bases []base
 	var subIDs []uint64
@@ -82,6 +82,7 @@ func LoadApprovedRows(ctx context.Context, db *sql.DB, taskID uint64, includeRev
 				Cell{"ai_review.overall_score", nullFloatToAny(ai.overallScore)},
 				Cell{"ai_review.dimensions", jsonOrNil(ai.dimensions)},
 				Cell{"ai_review.reason", nullStrToAny(ai.reason)},
+				Cell{"ai_review.prompt_config_id", nullIntToAny(ai.promptConfigID)},
 				Cell{"ai_review.prompt_version", nullIntToAny(ai.promptVersion)},
 				Cell{"ai_review.created_at", nullTimeToAny(ai.createdAt)},
 				Cell{"human_review.verdict", nullStrToAny(h.verdict)},
@@ -97,12 +98,13 @@ func LoadApprovedRows(ctx context.Context, db *sql.DB, taskID uint64, includeRev
 }
 
 type aiReviewRow struct {
-	verdict       sql.NullString
-	overallScore  sql.NullFloat64
-	dimensions    sql.NullString
-	reason        sql.NullString
-	promptVersion sql.NullInt64
-	createdAt     sql.NullTime
+	verdict        sql.NullString
+	overallScore   sql.NullFloat64
+	dimensions     sql.NullString
+	reason         sql.NullString
+	promptConfigID sql.NullInt64
+	promptVersion  sql.NullInt64
+	createdAt      sql.NullTime
 }
 
 type humanReviewRow struct {
@@ -114,7 +116,7 @@ type humanReviewRow struct {
 }
 
 func latestAIReviews(ctx context.Context, db *sql.DB, subIDs []uint64) (map[uint64]aiReviewRow, error) {
-	q := `SELECT submission_id, verdict, overall_score, dimensions, reason, prompt_version, created_at
+	q := `SELECT submission_id, verdict, overall_score, dimensions, reason, prompt_config_id, prompt_version, created_at
 	      FROM ai_reviews WHERE submission_id IN (` + inPlaceholders(len(subIDs)) + `) ORDER BY id DESC`
 	rows, err := db.QueryContext(ctx, q, toArgs(subIDs)...)
 	if err != nil {
@@ -125,7 +127,7 @@ func latestAIReviews(ctx context.Context, db *sql.DB, subIDs []uint64) (map[uint
 	for rows.Next() {
 		var sid uint64
 		var r aiReviewRow
-		if err := rows.Scan(&sid, &r.verdict, &r.overallScore, &r.dimensions, &r.reason, &r.promptVersion, &r.createdAt); err != nil {
+		if err := rows.Scan(&sid, &r.verdict, &r.overallScore, &r.dimensions, &r.reason, &r.promptConfigID, &r.promptVersion, &r.createdAt); err != nil {
 			return nil, err
 		}
 		if _, seen := out[sid]; !seen {

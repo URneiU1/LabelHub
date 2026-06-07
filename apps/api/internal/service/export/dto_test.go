@@ -3,6 +3,8 @@ package export
 import (
 	"encoding/json"
 	"testing"
+
+	"labelhub-api/internal/model"
 )
 
 // DecodeJSONFallback:坏 JSON 应原样返回字符串,而非 panic / 静默 nil。
@@ -17,6 +19,19 @@ func TestDecodeJSONFallback(t *testing.T) {
 	}
 	if got := DecodeJSONFallback(`[1,2,3]`); !sliceLen(got, 3) {
 		t.Errorf("array JSON unparsed: %v", got)
+	}
+}
+
+func TestAIReviewToMapIncludesPromptConfigID(t *testing.T) {
+	got := AIReviewToMap(model.AIReview{
+		PromptConfigID: 33,
+		PromptVersion:  3,
+	})
+	if got["prompt_config_id"] != uint64(33) {
+		t.Fatalf("prompt_config_id = %v", got["prompt_config_id"])
+	}
+	if got["prompt_version"] != 3 {
+		t.Fatalf("prompt_version = %v", got["prompt_version"])
 	}
 }
 
