@@ -1181,7 +1181,10 @@ function Timeline({
           <div key={log.id} style={timelineRowStyle}>
             <span style={{ ...timelineDotStyle, background: log.actorType === 'ai_worker' || log.event.startsWith('ai_') ? '#7c3aed' : 'var(--color-success)' }} />
             <div>
-              <strong>{auditActorLabel(log.actorType)}</strong>
+              <div style={timelineMetaStyle}>
+                <span>{formatTime(log.createdAt)}</span>
+                <strong>{auditActorLabel(log.actorType)}</strong>
+              </div>
               <p>{auditEventLabel(log.event)} · {auditStateText(log)}</p>
             </div>
           </div>
@@ -1204,7 +1207,10 @@ function Timeline({
         <div key={`${event.time}-${event.actor}`} style={timelineRowStyle}>
           <span style={{ ...timelineDotStyle, background: event.tone === 'green' ? 'var(--color-success)' : event.tone === 'red' ? 'var(--color-danger)' : 'var(--color-accent)' }} />
           <div>
-            <strong>{event.actor}</strong>
+            <div style={timelineMetaStyle}>
+              <span>{event.time}</span>
+              <strong>{event.actor}</strong>
+            </div>
             <p>{event.action}</p>
           </div>
         </div>
@@ -1908,4 +1914,13 @@ const timelineDotStyle: CSSProperties = {
   height: 8,
   borderRadius: 99,
   marginTop: 5,
+}
+
+const timelineMetaStyle: CSSProperties = {
+  display: 'flex',
+  gap: 'var(--space-xs)',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
 }

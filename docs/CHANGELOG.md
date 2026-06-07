@@ -11,6 +11,7 @@
 
 ## 最近完成
 
+- 2026-06-07 `reviewer-audit-timeline-time`:让 Reviewer 审计时间线真正显示时间。**本次完成**:右侧「审计时间线」每条记录改成「时间 · 操作者」+「事件 · 状态流转」两行结构,真实审计使用 `createdAt` 格式化时间,demo 时间线使用样例事件时间,避免时间线只有 actor/event/state 看不出发生顺序。**验证记录**:更新 `Queue.test.tsx` 断言审计详情存在 `HH:MM:SS` 时间文本。
 - 2026-06-07 `reviewer-audit-i18n`:收口 Reviewer 详情页审计与 AI 结论文案。**本次完成**:把「处理日志 / 审计」和「审计时间线」中原样暴露的 `ai_done`、`ai_reviewing`、`human_reviewing`、`ai_worker` 等后端枚举映射为中文展示,同时把 AI 预审结论里的 `AI pass`、`verdict: pass`、`score:`、`tokens`、`latency` 改成中文产品文案。修复「规则：v1」徽标在 flex/grid 场景下被撑成大圆块的问题,给 tag/pill 明确 inline-flex、非拉伸和 nowrap 约束。**验证记录**:更新 `Queue.test.tsx` 断言中文审计文案;本地 `git diff --check` 通过;本地 `pnpm -F web exec tsc -b --pretty false` 60 秒无输出后终止;生产 Docker `pnpm -F web build` 通过,线上 `/reviewer` 返回 200,构建 JS 包含「AI 预审通过 / 人工审核中」中文映射。
 - 2026-06-07 `reviewer-decision-actions-dedupe`:去掉 Reviewer 详情区重复审核动作。**本次完成**:保留三张大决策卡「打回 / 拒绝 / 通过」作为唯一操作入口,删除其下方旧版普通按钮行「打回修改 / 拒绝 / 通过」和遗留样式,避免同一组动作重复出现。同步更新 `Queue.test.tsx` 的禁用态断言到大决策卡。**验证记录**:普通 diff 与 `rg` 检查确认旧按钮和 `legacyActionRowStyle` 已移除;本地 `git diff --check`/`git status` 偶发卡住,已清理对应进程。
 - 2026-06-07 `reviewer-results-nav-dedupe`:去掉 Reviewer 工作台内部重复的「审核结果」子导航。**本次完成**:`/reviewer/results` 已经是外层侧栏入口,因此 `Queue.tsx` 的工作台内顶部切换只保留「审核工作台 / 仲裁」;结果列表仍由 `/reviewer/results` 路由渲染,点击结果行仍可打开只读详情。同步更新 `Queue.test.tsx`,改为直接从 `/reviewer/results` 进入结果列表并断言内部不再出现「审核结果」tab。**仍需提升**:本机 Vitest worker 仍卡住无输出,未完成前端单测执行。**验证记录**:`git diff --check` 通过;尝试 `vitest run src/modules/reviewer/Queue.test.tsx --pool=forks --maxWorkers=1` 仍卡住,已结束该进程。

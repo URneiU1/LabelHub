@@ -267,6 +267,7 @@ describe('ReviewerQueue schema runtime flow', () => {
     expect(screen.getByText('请审核商品标题')).toBeInTheDocument()
     expect(screen.getAllByText('AI 预审通过').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/AI Agent · AI 预审中 → 人工审核中/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0)
     expect(screen.queryByText('ai_done')).not.toBeInTheDocument()
     expect(screen.queryByText('ai_reviewing → human_reviewing')).not.toBeInTheDocument()
   })
