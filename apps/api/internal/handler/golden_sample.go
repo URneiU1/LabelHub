@@ -397,7 +397,7 @@ func (h GoldenSampleHandler) DryRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := enforceDryRunGuard(h.db, task.ID, 1); err != nil {
+	if err := enforceDryRunGuard(h.db, task.ID, repeatCount); err != nil {
 		if errors.Is(err, errDryRunQuotaExceeded) || errors.Is(err, errDryRunCircuitOpen) {
 			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 			return
@@ -466,7 +466,7 @@ func (h GoldenSampleHandler) BatchDryRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := enforceDryRunGuard(h.db, task.ID, len(sampleIDs)); err != nil {
+	if err := enforceDryRunGuard(h.db, task.ID, len(sampleIDs)*repeatCount); err != nil {
 		if errors.Is(err, errDryRunQuotaExceeded) || errors.Is(err, errDryRunCircuitOpen) {
 			httpx.Error(c, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 			return
