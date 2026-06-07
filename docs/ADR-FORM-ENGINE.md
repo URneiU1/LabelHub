@@ -82,14 +82,14 @@ and it does so with a schema surface the backend can mirror. The concrete reason
    for free.** A frontend-only form library does not protect the server. With
    the custom schema, the backend reuses the *same* JSON shape:
    - `apps/api/internal/service/submission/validate.go` enforces runtime
-     **required / requiredWhen / visibility** parity: it loads the frozen
-     template by `template_version`, recurses Group/Tabs exactly once, skips
-     fields hidden by `visibleWhen`, treats `ShowItem` as value-less, and
-     rejects an answer whose visible required (or `requiredWhen`-triggered)
-     fields are empty (`ErrIncompleteAnswer`). `answerIsEmpty` and `jsonEquals`
-     mirror the frontend's emptiness and cross-type `equals` semantics. This is
-     covered by `validate_test.go` (hidden containers do not block submit;
-     visible required children do; numeric `equals`; frozen-version lookup).
+     answer parity: it loads the frozen template by `template_version`, recurses
+     Group/Tabs exactly once, skips fields hidden by `visibleWhen`, treats
+     `ShowItem` as value-less, rejects empty visible required /
+     `requiredWhen`-triggered fields, and enforces `minLength` / `maxLength` /
+     `regex` / the approved `customRule` subset. `answerIsEmpty`, `jsonEquals`,
+     UTF-16 string length, and the Go `customrule` evaluator mirror the frontend
+     runtime behavior. This is covered by `validate_test.go` and
+     `customrule_test.go`.
    - `apps/api/internal/handler/template_validate.go` rejects, **at template
      save time**, any rule the backend cannot stand behind: bad regex
      (`regexp.Compile`), malformed `customRule.expr` (balanced
@@ -97,12 +97,11 @@ and it does so with a schema surface the backend can mirror. The concrete reason
      `min > max`, reserved/duplicate field names, unknown widgets, dangling
      `requiredWhen`/`visibleWhen`/`target_field` references, and size caps.
 
-   Extending answer-value runtime parity to `minLength` / `maxLength` /
-   `regex` / the approved `customRule` subset is exactly the work tracked under
-   **P0 (Backend Runtime Validation Parity)** in
-   `docs/PLAN-TECH-CHALLENGES-IMPL.md`. Adopting Formily would not advance that
-   server-side work — the backend would still need its own Go validator over the
-   schema — so a migration would add risk without removing the P0 task.
+   This completed the P0 backend-runtime parity work tracked in
+   `docs/PLAN-TECH-CHALLENGES-IMPL.md`. Adopting Formily would not remove this
+   server-side responsibility — the backend still needs its own validator over
+   the schema — so a migration would add risk without replacing the critical
+   safety work.
 
 5. **Migration cost is high and the deadline is close.** Formily would replace
    the renderer, the Designer's drag model, the parser's typed schema, and the
@@ -132,10 +131,9 @@ and it does so with a schema surface the backend can mirror. The concrete reason
 - The `customRule` expression language is intentionally a small `expr-eval`
   subset; complex cross-field rules must stay within what both `expr-eval` and
   the backend's `customRule` checks can express.
-- Answer-value backend parity for `minLength` / `maxLength` / `regex` /
-  `customRule` is not complete yet (tracked under P0); until then those three
-  rules are enforced on the frontend and gated at template save, with `required`
-  / visibility additionally enforced at submit time.
+- Any future custom-rule operator or new validation primitive must be added in
+  both places: the TypeScript parser/validator and the Go template/runtime
+  validator. Unsupported `customRule` syntax is rejected at template save time.
 
 ## When we would migrate to Formily
 
