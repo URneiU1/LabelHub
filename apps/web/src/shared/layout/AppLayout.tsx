@@ -21,7 +21,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/owner', label: '任务管理', roles: ['owner', 'admin'] },
   { to: '/labeler', label: '标注工作台', roles: ['labeler'] },
-  { to: '/reviewer', label: '审核中心', roles: ['reviewer', 'admin'] },
+  { to: '/reviewer', label: '审核工作台', roles: ['reviewer', 'admin'] },
+  { to: '/reviewer/results', label: '审核结果', roles: ['reviewer', 'admin'] },
 ]
 
 const ROLE_LABEL: Record<string, string> = {
@@ -136,6 +137,7 @@ export default function AppLayout() {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  end
                   className={({ isActive }) =>
                     'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
                   }

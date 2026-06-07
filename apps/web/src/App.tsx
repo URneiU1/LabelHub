@@ -27,7 +27,9 @@ export default function App() {
             <Route path="/owner/:section" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
             <Route path="/owner/:section/:sub" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
             <Route path="/labeler" element={<RequireRole roles={['labeler']}><LabelerPlaza /></RequireRole>} />
-            <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue /></RequireRole>} />
+            {/* 不同 key 让 /reviewer 与 /reviewer/results 切换时重新挂载,使队列初始视图按路由落位。 */}
+            <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue key="reviewer-workbench" /></RequireRole>} />
+            <Route path="/reviewer/results" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue key="reviewer-results" /></RequireRole>} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/auth/login" replace />} />

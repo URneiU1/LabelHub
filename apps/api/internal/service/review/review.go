@@ -1,9 +1,9 @@
 // Package review 封装 reviewer 审批(approve / reject / revise)的事务编排。
 //
-// 多级人工审核:approve 需要 RequiredHumanReviewLevels(=3)次,
-// 依次落到 first(初审)/ second(复审)/ final(终审)三个 stage。
+// 多级人工审核:approve 需要 RequiredHumanReviewLevels(=2)次,
+// 依次落到 first(初审)/ final(终审)两个 stage。
 // 当前 stage 由"当前 revision 已记录的 approve 数"派生,不依赖额外的列:
-// 0 → first,1 → second,2 → final。revise 让 labeler 重提产生新 revision,
+// 0 → first,1 → final。revise 让 labeler 重提产生新 revision,
 // approve 计数随之归零(per current revision),故 stage 自动重置。
 //
 // 入口态:human_reviewing(AI 通过待初审)、manual_review(AI 可疑转人工复核,独立初审入口)、

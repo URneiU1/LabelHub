@@ -382,8 +382,9 @@ export default function ReviewerQueue() {
   const ruleLoadSeq = useRef(0)
   // 详情加载用独立序号,和规则面板的 ruleLoadSeq 解耦:开关「规则配置」不应误失效正在加载的详情。
   const detailLoadSeq = useRef(0)
-  // 顶部视图切换:审核工作台 / 仲裁 / 审核结果列表。
-  const [view, setView] = useState<ReviewerView>('workbench')
+  // 顶部视图切换:审核工作台 / 仲裁 / 审核结果列表。进入 /reviewer/results 时默认落到「审核结果」。
+  // 用 window.location 而非 useLocation:组件在测试里不一定包 Router;路由对两条路径用不同 key 强制重挂载,首次挂载读路径即正确。
+  const [view, setView] = useState<ReviewerView>(() => (window.location.pathname.endsWith('/results') ? 'results' : 'workbench'))
   // 工作台内的队列分区:全部 / AI 通过待初审 / 转人工复核。
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all')
   // 演示样例只在显式 ?demo=1 时启用,默认空队列展示空状态(M-10)。
@@ -648,7 +649,7 @@ export default function ReviewerQueue() {
     <div style={pageStyle}>
       <header className="lh-page-header" style={topBarStyle}>
         <div className="lh-page-header-title">
-          <div style={breadcrumbStyle}>审核与质检 / <strong>{showingDemo ? 'AI 预审规则 · 队列' : (detail?.task.title ?? '人工审核工作台')}</strong></div>
+          <div style={breadcrumbStyle}>审核中心 / <strong>{showingDemo ? 'AI 预审规则 · 队列' : (detail?.task.title ?? '人工审核工作台')}</strong></div>
           <h1 style={pageTitleStyle}>{showingDemo ? 'AI 自动预审队列' : '人工审核工作台'}</h1>
           <p style={pageSubTitleStyle}>异步消费提交数据 → 按评分维度调用 LLM 结构化输出 → 通过 / 打回 / 转人工复核</p>
         </div>
