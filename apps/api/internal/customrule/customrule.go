@@ -14,8 +14,9 @@
 //   - 标识符:答案字段名、value(当前字段值)、answer(整张答案表)
 //   - 成员访问:answer.field(一层)
 //   - 函数:仅 len(x)
-//   - 一元:-、not、!
-//   - 算术:+ - * / %(+ 兼容字符串拼接)
+//   - 一元:-、not(! 不支持:expr-eval 里 ! 是阶乘而非逻辑非,会与服务端不一致,用 not)
+//   - 算术:+ - * / %(+ 仅数值,两侧非数字得 NaN,对齐 expr-eval 的 Number(a)+Number(b);
+//     除零按 IEEE-754 给 ±Inf / NaN,与 JS 一致;字符串拼接非本子集)
 //   - 比较:== != < <= > >=
 //   - 逻辑:and、or(仅关键字;不支持 && / ||,因为 expr-eval 里 || 是拼接而非或)
 //   - 三元:cond ? a : b
@@ -152,7 +153,7 @@ func (n unaryNode) eval(s *Scope) (any, error) {
 			return nil, fmt.Errorf("customrule: unary - on non-number")
 		}
 		return -f, nil
-	case "!", "not":
+	case "not":
 		return !truthy(v), nil
 	}
 	return nil, fmt.Errorf("customrule: unknown unary operator %q", n.op)
@@ -211,7 +212,7 @@ func (n binaryNode) eval(s *Scope) (any, error) {
 	case "<", "<=", ">", ">=":
 		return compare(n.op, left, right)
 	case "+":
-		return addOrConcat(left, right)
+		return addNumbers(left, right)
 	case "-", "*", "/", "%":
 		return arithmetic(n.op, left, right)
 	}
@@ -332,19 +333,16 @@ func stringCompare(op string, a, b string) bool {
 	return false
 }
 
-func addOrConcat(a, b any) (any, error) {
-	if an, aok := toNumber(a); aok {
-		if bn, bok := toNumber(b); bok {
-			return an + bn, nil
-		}
-		return nil, fmt.Errorf("customrule: cannot add number and non-number")
+// addNumbers 实现 +,对齐 expr-eval 的 Number(a)+Number(b):两侧都是数字才相加,
+// 否则返回 NaN(假值)。不做字符串拼接 —— expr-eval 的 + 对字符串同样走 Number() 得 NaN
+// (拼接在 expr-eval 里是 ||,本子集不支持),故这里与前端保持一致地不拼接。
+func addNumbers(a, b any) (any, error) {
+	an, aok := toNumber(a)
+	bn, bok := toNumber(b)
+	if !aok || !bok {
+		return math.NaN(), nil
 	}
-	as, aok := a.(string)
-	bs, bok := b.(string)
-	if aok && bok {
-		return as + bs, nil
-	}
-	return nil, fmt.Errorf("customrule: + requires two numbers or two strings")
+	return an + bn, nil
 }
 
 func arithmetic(op string, a, b any) (any, error) {
@@ -359,14 +357,10 @@ func arithmetic(op string, a, b any) (any, error) {
 	case "*":
 		return an * bn, nil
 	case "/":
-		if bn == 0 {
-			return nil, fmt.Errorf("customrule: division by zero")
-		}
+		// 除零交给 IEEE-754:x/0 → ±Inf,0/0 → NaN,与前端 expr-eval(JS)一致。
 		return an / bn, nil
 	case "%":
-		if bn == 0 {
-			return nil, fmt.Errorf("customrule: modulo by zero")
-		}
+		// math.Mod(x, 0) → NaN,与 JS x % 0 一致。
 		return math.Mod(an, bn), nil
 	}
 	return nil, fmt.Errorf("customrule: unknown operator %q", op)

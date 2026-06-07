@@ -136,8 +136,12 @@ func scanOperator(runes []rune, start int) (string, int, error) {
 		return two, start + 2, nil
 	}
 	switch runes[start] {
-	case '(', ')', '.', ',', '?', ':', '<', '>', '+', '-', '*', '/', '%', '!':
+	case '(', ')', '.', ',', '?', ':', '<', '>', '+', '-', '*', '/', '%':
 		return string(runes[start]), start + 1, nil
+	case '!':
+		// != 已由上面的双字符分支处理;落到这里只可能是前缀 ! ,
+		// 而 expr-eval 里前缀 ! 是阶乘(数值)而非逻辑非,会与服务端逻辑非语义不一致,故拒绝。
+		return "", 0, fmt.Errorf("customrule: '!' is not supported, use 'not' instead")
 	}
 	return "", 0, fmt.Errorf("customrule: unsupported operator %q", string(runes[start]))
 }
@@ -333,7 +337,7 @@ func (p *parser) parseMultiplicative() (node, error) {
 }
 
 func (p *parser) parseUnary() (node, error) {
-	if op, ok := p.matchOp("-", "!"); ok {
+	if op, ok := p.matchOp("-"); ok {
 		arg, err := p.parseUnary()
 		if err != nil {
 			return nil, err

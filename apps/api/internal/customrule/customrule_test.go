@@ -14,6 +14,7 @@ func TestParse_RejectsUnsupportedSyntax(t *testing.T) {
 		"'unterminated",                       // unterminated string
 		"value ? 1",                           // ternary missing ':'
 		"@value",                              // unsupported char
+		"!value",                              // prefix ! is factorial in expr-eval; rejected (use `not`)
 	}
 	for _, src := range cases {
 		if _, err := Parse(src); err == nil {
@@ -128,10 +129,37 @@ func TestEval_ErrorsTreatedByCaller(t *testing.T) {
 	if _, evalErr := expr.Eval(Scope{Value: "not-a-number"}); evalErr == nil {
 		t.Error("comparing string with number should error")
 	}
-	// 除零 → 错误。
-	expr2, _ := Parse("value / 0 > 1")
-	if _, evalErr := expr2.Eval(Scope{Value: float64(5)}); evalErr == nil {
-		t.Error("division by zero should error")
+}
+
+func TestEval_PlusIsNumericNotConcat(t *testing.T) {
+	// expr-eval 的 + 走 Number(a)+Number(b):字符串相加得 NaN,不拼接。
+	// 故 (value + 'x') == 'ax' 在前后端都应为假(NaN == 'ax' → false)。
+	if evalBool(t, "value + 'x' == 'ax'", Scope{Value: "a"}) {
+		t.Error("string + must not concat: 'a' + 'x' should not equal 'ax'")
+	}
+	// 纯数值相加照常工作。
+	if !evalBool(t, "value + 1 == 3", Scope{Value: float64(2)}) {
+		t.Error("numeric + still works: 2 + 1 == 3")
+	}
+}
+
+func TestEval_DivisionByZeroMatchesJS(t *testing.T) {
+	// 5/0 = +Inf > 0.5 为真,与前端 expr-eval(JS Infinity)一致。
+	if !evalBool(t, "value / 0 > 0.5", Scope{Value: float64(5)}) {
+		t.Error("5/0 = +Inf should be > 0.5 (parity with expr-eval)")
+	}
+	// 0/0 = NaN 为假。
+	if evalBool(t, "value / 0 > 0.5", Scope{Value: float64(0)}) {
+		t.Error("0/0 = NaN should be falsy")
+	}
+}
+
+func TestParse_RejectsBangPrefixButKeepsNotEqual(t *testing.T) {
+	if _, err := Parse("!value"); err == nil {
+		t.Error("Parse('!value') should reject prefix '!' (use 'not')")
+	}
+	if _, err := Parse("value != 3"); err != nil {
+		t.Errorf("Parse('value != 3') should still accept '!=': %v", err)
 	}
 }
 
