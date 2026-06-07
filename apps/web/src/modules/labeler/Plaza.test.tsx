@@ -548,6 +548,10 @@ describe('LabelerPlaza offline draft preservation (P3)', () => {
       // 提交被阻断:never hits the submit endpoint, friendly copy shown.
       expect(mockApiPost).not.toHaveBeenCalledWith('/tasks/1/items/11/submit', expect.anything())
       expect(Toast.error).toHaveBeenCalledWith(expect.stringContaining('无法提交审核'))
+      const draft = loadLocalDraft(draftKey)
+      expect(draft).not.toBeNull()
+      expect(draft!.answer).toEqual({ summary: '离线作答' })
+      expect(draft!.synced).toBe(false)
     } finally {
       onlineSpy.mockRestore()
     }

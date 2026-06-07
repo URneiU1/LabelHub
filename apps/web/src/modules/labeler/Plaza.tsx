@@ -164,6 +164,9 @@ export default function LabelerPlaza() {
     }
     // P3:本阶段最终提交仅限在线。离线时阻断提交并友好提示,保留本地草稿(不清理)。
     if (!navigator.onLine) {
+      if (localDraftKey) {
+        saveLocalDraft(localDraftKey, answer, templateVersion)
+      }
       setLocalDraftSaved(true)
       Toast.error('当前网络已断开,无法提交审核;你的答案已保存在本地草稿,联网后可再提交。')
       return
