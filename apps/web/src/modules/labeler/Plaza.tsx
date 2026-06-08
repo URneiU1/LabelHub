@@ -6,6 +6,7 @@ import { validateAnswer } from '../../renderer/validator'
 import { apiGet, apiPost, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
+import { normalizeStatus } from '../../shared/components/status'
 import StatusBadge from '../../shared/components/StatusBadge'
 import ItemNav from './ItemNav'
 import MyData from './MyData'
@@ -39,6 +40,8 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
   const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const lastSavedDraftKey = useRef('')
   const autoSaveSeq = useRef(0)
+  // 标注工作台直达时只尝试一次「自动恢复进行中任务」,避免随依赖变化或重复加载反复触发。
+  const didAutoResumeRef = useRef(false)
 
   // P3 离线草稿:localDraftSaved 表示自动保存网络失败但本地草稿已留底(非阻塞提示);
   // recoverableDraft 是「本地有比服务端更新的未同步草稿」时供用户恢复/丢弃的待恢复答案。
@@ -67,20 +70,25 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [])
 
-  const loadMySubmissions = useCallback(async () => {
+  const loadMySubmissions = useCallback(async (): Promise<Submission[]> => {
     try {
       const data = await apiGet<Submission[]>('/me/submissions')
       setMySubmissions(data)
+      return data
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载我的提交失败')
+      return []
     }
   }, [])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
-    void loadMySubmissions()
-  }, [loadMySubmissions, loadTasks])
+    // 标注工作台(answer)由下方「自动恢复进行中任务」effect 自行拉取我的提交,避免重复请求。
+    if (initialView !== 'answer') {
+      void loadMySubmissions()
+    }
+  }, [initialView, loadMySubmissions, loadTasks])
 
   const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
@@ -382,6 +390,23 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     void openSubmission(submission)
   }, [loadItemNav, openSubmission, tasks])
 
+  // 标注工作台直达(侧栏「标注工作台」,initialView='answer')时,自动恢复该 labeler 最近一条
+  // 「进行中」(draft 已领未提交 / revising 被打回待重做)的提交。没有这一步,领题后从侧栏进入工作台
+  // 会因重挂载丢失内存里的活动任务而看不到题目,导致反复重领同一题。无可恢复项时不做事,
+  // 由 isEmptyWorkbench 兜底回落到任务广场。仅在挂载后跑一次(didAutoResumeRef 守卫)。
+  useEffect(() => {
+    if (initialView !== 'answer' || didAutoResumeRef.current) {
+      return
+    }
+    didAutoResumeRef.current = true
+    void loadMySubmissions().then((subs) => {
+      const resumable = subs.find((submission) => isResumable(submission.status))
+      if (resumable) {
+        openFromMyData(resumable)
+      }
+    })
+  }, [initialView, loadMySubmissions, openFromMyData])
+
   const backToPlaza = useCallback(() => {
     setView('plaza')
     setBundle(null)
@@ -654,6 +679,13 @@ function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
 
 function answerDraftKey(answer: AnswerValue) {
   return JSON.stringify(answer)
+}
+
+// 「进行中」的提交 = labeler 仍需亲自动手的状态:draft(已领未提交)与 revising(被打回待重做)。
+// 工作台直达时优先恢复这些,审核中 / 终态的提交不算「进行中」。
+function isResumable(status: string): boolean {
+  const normalized = normalizeStatus(status)
+  return normalized === 'draft' || normalized === 'revising'
 }
 
 // 由 bundle 推导本地草稿坐标键(taskId:itemId:submissionId:revisionNo)。

@@ -569,3 +569,73 @@ describe('LabelerPlaza workbench empty-state fallback', () => {
     expect(screen.queryByText('准备开始标注')).not.toBeInTheDocument()
   })
 })
+
+describe('LabelerPlaza workbench resumes in-progress task', () => {
+  const schema = {
+    title: 'qa_resume',
+    layout: 'single_page',
+    fields: [{ name: 'summary', widget: 'Input', label: '一句话总评', required: true }],
+  }
+
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    mockApiPost.mockReset()
+    mockApiPost.mockImplementation(async (path) => {
+      throw new Error(`unexpected POST ${path}`)
+    })
+  })
+
+  it('auto-resumes the most-recent draft (claimed-unsubmitted) submission on workbench mount', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        // 已领未提交的草稿应被恢复,而不是回落到任务广场(否则用户会反复重领同一题)。
+        return [{ id: 42, taskId: 1, itemId: 11, status: 'draft' }]
+      }
+      if (path === '/tasks/1/labeler/items') {
+        return itemNav
+      }
+      if (path === '/tasks/1/items/11') {
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+          revision: null,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<LabelerPlaza initialView="answer" />)
+
+    // 自动进入作答页(渲染出表单),而不是停在任务广场。
+    expect(await screen.findByLabelText('一句话总评')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith('/tasks/1/items/11')
+    })
+    expect(screen.queryByText('领取题目开始标注')).not.toBeInTheDocument()
+    // 不应触发任何领取请求(纯恢复,不消耗新题)。
+    expect(mockApiPost).not.toHaveBeenCalledWith('/tasks/1/claim', expect.anything())
+  })
+
+  it('still falls back to the task plaza when no submission is resumable', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        // 仅有终态/审核中提交 → 无可恢复项 → 回落任务广场。
+        return [{ id: 7, taskId: 1, itemId: 9, status: 'approved' }]
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<LabelerPlaza initialView="answer" />)
+
+    expect(await screen.findByText('领取题目开始标注')).toBeInTheDocument()
+    expect(screen.queryByText('准备开始标注')).not.toBeInTheDocument()
+  })
+})
