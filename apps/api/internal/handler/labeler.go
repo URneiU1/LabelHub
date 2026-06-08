@@ -13,6 +13,7 @@ import (
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/policy"
 	"labelhub-api/internal/service/submission"
+	"labelhub-api/internal/statemachine"
 )
 
 // LabelerHandler 封装 labeler 角色端点:任务广场、领单、作答(draft / submit)、我的提交。
@@ -31,6 +32,7 @@ func (h LabelerHandler) Register(api gin.IRouter) {
 	api.POST("/tasks/:taskId/items/:itemId/draft", middleware.RequireRoles("labeler"), h.SaveDraft)
 	api.POST("/tasks/:taskId/items/:itemId/submit", middleware.RequireRoles("labeler"), h.SubmitItem)
 	api.GET("/me/submissions", middleware.RequireRoles("labeler"), h.MySubmissions)
+	api.GET("/me/tasks", middleware.RequireRoles("labeler"), h.MyTasks)
 	api.GET("/tasks/:taskId/labeler/items", middleware.RequireRoles("labeler"), h.ListMyTaskItems)
 }
 
@@ -214,6 +216,90 @@ func (h LabelerHandler) MySubmissions(c *gin.Context) {
 		return
 	}
 	httpx.PageOK(c, submissions, httpx.Page{})
+}
+
+// myTaskView 是「已领取的任务」里的一项:大任务本身 + 当前 labeler 在该任务里的进度
+// (各状态计数、总数、进行中数量)与可恢复目标(最近一条 draft/revising 的 itemId)。
+type myTaskView struct {
+	Task         model.Task     `json:"task"`
+	MyCounts     map[string]int `json:"myCounts"`
+	MyTotal      int            `json:"myTotal"`
+	MyInProgress int            `json:"myInProgress"`
+	ResumeItemID *uint64        `json:"resumeItemId"`
+}
+
+type myTasksResponse struct {
+	Tasks []myTaskView `json:"tasks"`
+}
+
+// MyTasks 返回当前 labeler 已领取(有提交)的大任务,按最近活跃排序,供任务广场「已领取的任务」
+// 区块与工作台大任务切换器使用。两次查询(我的提交 + 这些任务) + 内存聚合,避免复杂联表。
+func (h LabelerHandler) MyTasks(c *gin.Context) {
+	claims, _ := middleware.Claims(c)
+
+	var subs []model.Submission
+	if err := h.db.Where("labeler_id = ?", claims.UserID).Order("updated_at DESC").Find(&subs).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list submissions")
+		return
+	}
+	if len(subs) == 0 {
+		httpx.OK(c, myTasksResponse{Tasks: []myTaskView{}})
+		return
+	}
+
+	type taskAgg struct {
+		counts       map[string]int
+		total        int
+		inProgress   int
+		resumeItemID *uint64
+	}
+	order := make([]uint64, 0)
+	byTask := make(map[uint64]*taskAgg)
+	for _, s := range subs {
+		agg, ok := byTask[s.TaskID]
+		if !ok {
+			agg = &taskAgg{counts: map[string]int{}}
+			byTask[s.TaskID] = agg
+			order = append(order, s.TaskID) // subs 已按 updated_at DESC,首次出现即最近活跃
+		}
+		agg.total++
+		agg.counts[s.Status]++
+		if s.Status == statemachine.StateDraft || s.Status == statemachine.StateRevising {
+			agg.inProgress++
+			if agg.resumeItemID == nil {
+				id := s.ItemID
+				agg.resumeItemID = &id // 首个进行中(最近)作为恢复目标
+			}
+		}
+	}
+
+	var tasks []model.Task
+	if err := h.db.Where("id IN ?", order).Find(&tasks).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load tasks")
+		return
+	}
+	taskByID := make(map[uint64]model.Task, len(tasks))
+	for _, t := range tasks {
+		taskByID[t.ID] = t
+	}
+
+	views := make([]myTaskView, 0, len(order))
+	for _, id := range order {
+		agg := byTask[id]
+		task, ok := taskByID[id]
+		if !ok {
+			task = model.Task{ID: id} // 任务可能已不可见;占位 id,前端仍可显示「任务 #id」
+		}
+		views = append(views, myTaskView{
+			Task:         task,
+			MyCounts:     agg.counts,
+			MyTotal:      agg.total,
+			MyInProgress: agg.inProgress,
+			ResumeItemID: agg.resumeItemID,
+		})
+	}
+
+	httpx.OK(c, myTasksResponse{Tasks: views})
 }
 
 func (h LabelerHandler) saveRevision(c *gin.Context, draft bool) {

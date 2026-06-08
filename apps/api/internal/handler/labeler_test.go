@@ -68,6 +68,107 @@ func TestListMyTaskItemsMergesPerItemStatus(t *testing.T) {
 	}
 }
 
+// 验证 MyTasks 把当前 labeler 的提交按大任务聚合:按最近活跃排序、附带我的各状态计数、
+// 进行中数量与可恢复目标(最近 draft/revising 的 itemId)。
+func TestMyTasksGroupsByBigTaskWithMyProgress(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	const me = 5
+
+	// 我的提交按 updated_at DESC:任务2 的 draft 最近;任务1 有 submitted + approved。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(42, 2, 31, me, "draft").
+			AddRow(10, 1, 11, me, "submitted").
+			AddRow(11, 1, 12, me, "approved"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "status", "total_items", "finished_items"}).
+			AddRow(1, "Task One", "published", 30, 7).
+			AddRow(2, "Task Two", "published", 12, 0))
+
+	r := newGinWithClaims(&auth.Claims{UserID: me, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodGet, "/me/tasks", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	tasks, _ := data["tasks"].([]any)
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d (body=%s)", len(tasks), rec.Body.String())
+	}
+
+	// 最近活跃的任务2 在前,带进行中草稿可恢复。
+	first := tasks[0].(map[string]any)
+	firstTask := first["task"].(map[string]any)
+	if firstTask["id"].(float64) != 2 {
+		t.Fatalf("first task id = %v, want 2 (most recent)", firstTask["id"])
+	}
+	if first["myInProgress"].(float64) != 1 {
+		t.Fatalf("task2 myInProgress = %v, want 1", first["myInProgress"])
+	}
+	if first["resumeItemId"].(float64) != 31 {
+		t.Fatalf("task2 resumeItemId = %v, want 31", first["resumeItemId"])
+	}
+	if first["myTotal"].(float64) != 1 {
+		t.Fatalf("task2 myTotal = %v, want 1", first["myTotal"])
+	}
+
+	// 任务1:2 条提交,无进行中,无 resume。
+	second := tasks[1].(map[string]any)
+	secondTask := second["task"].(map[string]any)
+	if secondTask["id"].(float64) != 1 {
+		t.Fatalf("second task id = %v, want 1", secondTask["id"])
+	}
+	if second["myTotal"].(float64) != 2 {
+		t.Fatalf("task1 myTotal = %v, want 2", second["myTotal"])
+	}
+	if second["myInProgress"].(float64) != 0 {
+		t.Fatalf("task1 myInProgress = %v, want 0", second["myInProgress"])
+	}
+	if second["resumeItemId"] != nil {
+		t.Fatalf("task1 resumeItemId = %v, want nil", second["resumeItemId"])
+	}
+	counts := second["myCounts"].(map[string]any)
+	if counts["submitted"].(float64) != 1 || counts["approved"].(float64) != 1 {
+		t.Fatalf("task1 myCounts = %v", counts)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// 没有任何提交时,MyTasks 返回空列表且不查 tasks。
+func TestMyTasksEmptyWhenNoSubmissions(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 9, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodGet, "/me/tasks", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	if tasks, _ := data["tasks"].([]any); len(tasks) != 0 {
+		t.Fatalf("expected 0 tasks, got %d", len(tasks))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestListMyTaskItemsKeepsReleasedOverlapItemAvailable(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
