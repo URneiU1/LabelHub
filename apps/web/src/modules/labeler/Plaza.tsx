@@ -442,7 +442,10 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [activeTask, bundle?.submission?.status, loadItemNav, view])
 
-  if (view === 'plaza') {
+  // 标注工作台(initialView='answer')在没有激活任务时,不停在"准备开始标注"的空作答页,
+  // 直接回落到任务广场,让用户先领题(避免侧栏直达工作台时进入死胡同)。
+  const isEmptyWorkbench = view === 'answer' && !activeTask && !bundle && !loading
+  if (view === 'plaza' || isEmptyWorkbench) {
     return (
       <div className="lz-shell">
         <div className="lh-page-head lh-hflex" style={{ alignItems: 'flex-start' }}>

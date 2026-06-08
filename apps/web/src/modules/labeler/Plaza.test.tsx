@@ -554,3 +554,18 @@ describe('LabelerPlaza offline draft preservation (P3)', () => {
     }
   })
 })
+
+describe('LabelerPlaza workbench empty-state fallback', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    mockApiPost.mockReset()
+    mockApiGet.mockResolvedValue([])
+  })
+
+  it('falls back to the task plaza when the workbench has no active task', async () => {
+    render(<LabelerPlaza initialView="answer" />)
+    // 应回落到任务广场,而不是停在"准备开始标注"空作答页
+    expect(await screen.findByText('领取题目开始标注')).toBeInTheDocument()
+    expect(screen.queryByText('准备开始标注')).not.toBeInTheDocument()
+  })
+})
