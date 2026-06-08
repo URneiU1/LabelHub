@@ -375,6 +375,65 @@ describe('LabelerPlaza schema runtime flow', () => {
     expect(progress).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('2 / 4 · 进度 50%')).toBeInTheDocument()
   })
+
+  it('locks non-owned nav items (待标/他人) so they cannot re-claim; own items stay open-able', async () => {
+    const user = userEvent.setup()
+    const schema = {
+      title: 'qa_nav_lock',
+      layout: 'single_page',
+      fields: [{ name: 'summary', widget: 'Input', label: '一句话总评', required: true }],
+    }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        return []
+      }
+      if (path === '/tasks/1/labeler/items') {
+        return {
+          taskId: 1,
+          total: 3,
+          items: [
+            { itemId: 11, externalId: 'Q0001', status: 'draft', mine: true, submissionId: 42 },
+            { itemId: 14, externalId: 'Q0004', status: 'available', mine: false, submissionId: null },
+            { itemId: 15, externalId: 'Q0005', status: 'taken', mine: false, submissionId: null },
+          ],
+          counts: { draft: 1, available: 1, taken: 1 },
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    let claimCalls = 0
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        claimCalls += 1
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+          revision: null,
+        }
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza />)
+    await user.click(await screen.findByRole('button', { name: '查看任务详情 QA 质量标注' }))
+    await user.click(await screen.findByRole('button', { name: '符合要求 领取任务 QA 质量标注' }))
+    await screen.findByLabelText('一句话总评')
+    expect(claimCalls).toBe(1)
+
+    // 待标 / 他人的题不可点(disabled);只有自己的草稿题可点。
+    expect(screen.getByRole('button', { name: '第 2 题 Q0004 待标' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '第 3 题 Q0005 他人' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '第 1 题 Q0001 草稿' })).not.toBeDisabled()
+
+    // 点击待标项是 no-op(按钮 disabled),不会再触发领取 → 不再狂刷「已领取题目」。
+    fireEvent.click(screen.getByRole('button', { name: '第 2 题 Q0004 待标' }))
+    expect(claimCalls).toBe(1)
+  })
 })
 
 describe('LabelerPlaza offline draft preservation (P3)', () => {

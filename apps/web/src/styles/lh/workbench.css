@@ -51,6 +51,17 @@
   background: var(--lh-bg-elev);
 }
 
+/* 待标 / 他人的题不可直接打开(导航只在自己的题间跳转,领新题走页脚「下一题 / 跳过」),禁用并弱化 */
+.wb-side__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--lh-bg-elev);
+}
+
+.wb-side__item:disabled:hover {
+  background: var(--lh-bg-elev);
+}
+
 .wb-side__item--active {
   background: var(--lh-primary-soft);
   border-color: var(--lh-primary);

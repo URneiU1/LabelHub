@@ -60,10 +60,15 @@ export default function ItemNav({ nav, loading, activeItemId, onSelect, onBack }
         const view = statusView(item.status)
         const active = item.itemId === activeItemId
         const label = item.externalId || `题目 ${item.itemId}`
+        // 只能打开自己的题(已领/有提交);待标/他人的题不可点 —— 题目按顺序领取,无法从导航定向领某一题,
+        // 领新题走页脚「下一题 / 跳过」。这样点导航只在自己的题间跳转,不会误触发领取。
+        const openable = item.mine || item.submissionId != null
         return (
           <button
             key={item.itemId}
             type="button"
+            disabled={!openable}
+            title={openable ? undefined : '该题尚未领取,无法直接打开;用下方「下一题 / 跳过」领取下一题'}
             aria-label={`第 ${index + 1} 题 ${label} ${view.label}`}
             className={'wb-side__item' + (active ? ' wb-side__item--active' : '')}
             onClick={() => onSelect(item)}
