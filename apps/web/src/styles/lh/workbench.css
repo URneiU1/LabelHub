@@ -67,6 +67,36 @@
   border-color: var(--lh-primary);
 }
 
+/* 大任务切换器:作答页侧栏在多个已领取任务间切换 */
+.wb-side__task {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.wb-side__task-label {
+  display: block;
+  font-size: 11px;
+  color: var(--lh-text-3);
+  margin-bottom: 4px;
+}
+
+.wb-side__task-select {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 8px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  background: #fff;
+  color: var(--lh-text-1);
+  cursor: pointer;
+}
+
+.wb-side__task-select:focus {
+  outline: none;
+  border-color: var(--lh-primary);
+}
+
 .wb-side__no {
   color: var(--lh-text-3);
   font-family: var(--lh-font-mono);

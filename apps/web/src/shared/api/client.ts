@@ -182,6 +182,24 @@ export type Task = {
   publishedAt?: string | null
 }
 
+// 当前 labeler 已领取(有提交)的一个大任务 + 我在其中的进度:
+// myCounts 各状态计数、myTotal 我的提交总数、myInProgress 进行中(draft/revising)数量、
+// resumeItemId 最近一条进行中提交的题目 id(用于「继续标注」直接恢复),无进行中则为 null。
+export type MyTask = {
+  task: Task
+  myCounts: Record<string, number>
+  myTotal: number
+  myInProgress: number
+  resumeItemId: number | null
+}
+
+// 拉取「已领取的任务」(大任务粒度),按最近活跃排序。供任务广场「已领取的任务」区块与
+// 标注工作台的大任务切换器使用。
+export async function listMyTasks(): Promise<MyTask[]> {
+  const data = await apiGet<{ tasks: MyTask[] }>('/me/tasks')
+  return data?.tasks ?? []
+}
+
 // 任务基础信息 create/update 的输入。后端会把 JSON 字段(richDescription/tags/rewardConfig)
 // 原样存进 json 列,所以这里用结构化值,提交前序列化成 JSON。
 export type TaskInfoInput = {

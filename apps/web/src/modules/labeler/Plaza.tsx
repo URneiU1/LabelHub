@@ -3,7 +3,7 @@ import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
-import { apiGet, apiPost, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import { apiGet, apiPost, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
 import { normalizeStatus } from '../../shared/components/status'
@@ -33,6 +33,8 @@ interface LabelerPlazaProps {
 export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 'tasks' }: LabelerPlazaProps = {}) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [mySubmissions, setMySubmissions] = useState<Submission[]>([])
+  // 已领取的任务(大任务粒度 + 我的进度):任务广场「已领取的任务」区块 + 工作台大任务切换器共用。
+  const [myTasks, setMyTasks] = useState<MyTask[]>([])
   const [bundle, setBundle] = useState<TaskBundle | null>(null)
   const [answer, setAnswer] = useState<AnswerValue>({})
   const [errors, setErrors] = useState<ValidationError[]>([])
@@ -81,14 +83,24 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [])
 
+  const loadMyTasks = useCallback(async () => {
+    try {
+      setMyTasks(await listMyTasks())
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载已领取的任务失败')
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
+    // 「已领取的任务」两个视图都要用(广场区块 + 工作台切换器),无条件加载。
+    void loadMyTasks()
     // 标注工作台(answer)由下方「自动恢复进行中任务」effect 自行拉取我的提交,避免重复请求。
     if (initialView !== 'answer') {
       void loadMySubmissions()
     }
-  }, [initialView, loadMySubmissions, loadTasks])
+  }, [initialView, loadMyTasks, loadMySubmissions, loadTasks])
 
   const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
@@ -390,6 +402,27 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     void openSubmission(submission)
   }, [loadItemNav, openSubmission, tasks])
 
+  // 进入某个「已领取的任务」继续标注:记录活动任务、加载题目导航;有进行中题(resumeItemId)直接恢复,
+  // 否则领下一题。任务广场「继续标注」与工作台大任务切换器共用。
+  const openTask = useCallback((myTask: MyTask) => {
+    setActiveTask(myTask.task)
+    setView('answer')
+    void loadItemNav(myTask.task.id)
+    if (myTask.resumeItemId != null) {
+      void openByItem(myTask.task.id, myTask.resumeItemId)
+    } else {
+      void claim(myTask.task.id)
+    }
+  }, [claim, loadItemNav, openByItem])
+
+  // 工作台大任务切换器:切到我领取的另一个大任务(走 openTask 恢复/领题)。
+  const switchToTask = useCallback((taskId: number) => {
+    const target = myTasks.find((myTask) => myTask.task.id === taskId)
+    if (target) {
+      openTask(target)
+    }
+  }, [myTasks, openTask])
+
   // 标注工作台直达(侧栏「标注工作台」,initialView='answer')时,自动恢复该 labeler 最近一条
   // 「进行中」(draft 已领未提交 / revising 被打回待重做)的提交。没有这一步,领题后从侧栏进入工作台
   // 会因重挂载丢失内存里的活动任务而看不到题目,导致反复重领同一题。无可恢复项时不做事,
@@ -424,7 +457,8 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setAssistError('')
     void loadTasks()
     void loadMySubmissions()
-  }, [loadMySubmissions, loadTasks])
+    void loadMyTasks()
+  }, [loadMyTasks, loadMySubmissions, loadTasks])
 
   // P3:把本地草稿恢复为当前答案。沿用 onChange 的同步推进:推进 autoSaveSeq、置 idle 触发后续自动保存。
   function restoreLocalDraft() {
@@ -459,13 +493,15 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setAssistError('')
   }, [bundle?.item?.id])
 
-  // 提交/保存后刷新导航状态,保持左侧进度与状态点同步。仅在 bundle.submission?.status 变化时拉取。
+  // 提交/保存后刷新导航状态 + 我的任务进度,保持左侧进度、状态点与大任务切换器同步。
+  // 仅在 bundle.submission?.status 变化时拉取(领题/提交后状态变,切换器也能纳入刚领取的任务)。
   useEffect(() => {
     if (view === 'answer' && activeTask) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadItemNav(activeTask.id)
+      void loadMyTasks()
     }
-  }, [activeTask, bundle?.submission?.status, loadItemNav, view])
+  }, [activeTask, bundle?.submission?.status, loadItemNav, loadMyTasks, view])
 
   // 标注工作台(initialView='answer')在没有激活任务时,不停在"准备开始标注"的空作答页,
   // 直接回落到任务广场,让用户先领题(避免侧栏直达工作台时进入死胡同)。
@@ -481,7 +517,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
         </div>
 
         {plazaTab === 'tasks' ? (
-          <TaskPlaza tasks={tasks} loading={loading} onEnter={enterTask} />
+          <TaskPlaza tasks={tasks} myTasks={myTasks} loading={loading} onEnter={enterTask} onContinue={openTask} />
         ) : (
           <MyData submissions={mySubmissions} onOpen={openFromMyData} />
         )}
@@ -495,6 +531,9 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
         nav={itemNav}
         loading={itemNavLoading}
         activeItemId={bundle?.item?.id}
+        myTasks={myTasks}
+        activeTaskId={activeTask?.id}
+        onSwitchTask={switchToTask}
         onSelect={selectNavItem}
         onBack={backToPlaza}
       />

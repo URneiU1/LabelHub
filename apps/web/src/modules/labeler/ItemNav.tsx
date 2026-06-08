@@ -1,4 +1,4 @@
-import type { LabelerTaskItem, LabelerTaskItems } from '../../shared/api/client'
+import type { LabelerTaskItem, LabelerTaskItems, MyTask } from '../../shared/api/client'
 import { normalizeStatus } from '../../shared/components/status'
 
 // 题目导航里每种状态对应的中文标签 + 颜色 dot 类(复用 workbench.css 的 .wb-side__status--*)。
@@ -33,19 +33,41 @@ type ItemNavProps = {
   activeItemId: number | undefined
   onSelect: (item: LabelerTaskItem) => void
   onBack: () => void
+  myTasks?: MyTask[]
+  activeTaskId?: number
+  onSwitchTask?: (taskId: number) => void
 }
 
-export default function ItemNav({ nav, loading, activeItemId, onSelect, onBack }: ItemNavProps) {
+export default function ItemNav({ nav, loading, activeItemId, onSelect, onBack, myTasks = [], activeTaskId, onSwitchTask }: ItemNavProps) {
   const items = nav?.items ?? []
   const total = nav?.total ?? items.length
   const done = items.filter(isDoneItem).length
   const percent = total > 0 ? Math.round((done / total) * 100) : 0
+  // 仅当我领取了多个大任务、且当前任务在其中时,才显示大任务切换器(避免受控 select 值不在选项内告警)。
+  const canSwitchTask = !!onSwitchTask && myTasks.length > 1 && myTasks.some((myTask) => myTask.task.id === activeTaskId)
 
   return (
     <aside className="wb-side">
       <button type="button" className="lh-btn lh-btn--ghost lh-btn--sm wb-side__back" onClick={onBack}>
         ← 返回任务广场
       </button>
+      {canSwitchTask ? (
+        <label className="wb-side__task">
+          <span className="wb-side__task-label">当前任务</span>
+          <select
+            className="wb-side__task-select"
+            aria-label="切换标注任务"
+            value={activeTaskId}
+            onChange={(event) => onSwitchTask?.(Number(event.target.value))}
+          >
+            {myTasks.map((myTask) => (
+              <option key={myTask.task.id} value={myTask.task.id}>
+                {(myTask.task.title || `任务 #${myTask.task.id}`) + (myTask.myInProgress > 0 ? `（进行中 ${myTask.myInProgress}）` : '')}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <div className="wb-side__title">题目导航</div>
       <div className="wb-side__meta">{done} / {total} · 进度 {percent}%</div>
       <div className="wb-side__progress" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="标注进度">

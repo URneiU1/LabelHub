@@ -6,10 +6,19 @@ import LabelerPlaza from './Plaza'
 import { apiGet, apiPost } from '../../shared/api/client'
 import { buildDraftKey, loadLocalDraft } from './offlineDraftStore'
 
-vi.mock('../../shared/api/client', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
-}))
+vi.mock('../../shared/api/client', () => {
+  const apiGet = vi.fn()
+  const apiPost = vi.fn()
+  return {
+    apiGet,
+    apiPost,
+    // listMyTasks 走同一个 mock 的 apiGet,测试只需 mock '/me/tasks' 的返回即可。
+    listMyTasks: async () => {
+      const data = await apiGet('/me/tasks')
+      return data?.tasks ?? []
+    },
+  }
+})
 
 vi.mock('@douyinfe/semi-ui', () => ({
   Button: ({ children, loading, theme, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean, theme?: string }) => {
@@ -696,5 +705,125 @@ describe('LabelerPlaza workbench resumes in-progress task', () => {
 
     expect(await screen.findByText('领取题目开始标注')).toBeInTheDocument()
     expect(screen.queryByText('准备开始标注')).not.toBeInTheDocument()
+  })
+})
+
+describe('LabelerPlaza claimed-tasks (已领取的任务) + 大任务切换', () => {
+  const schema = {
+    title: 'qa_claimed',
+    layout: 'single_page',
+    fields: [{ name: 'summary', widget: 'Input', label: '一句话总评', required: true }],
+  }
+  const task2 = { ...task, id: 2, title: '第二个任务' }
+
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    mockApiPost.mockReset()
+  })
+
+  it('任务广场 shows 已领取的任务 and 继续标注 resumes the in-progress item without claiming', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task]
+      }
+      if (path === '/me/submissions') {
+        return []
+      }
+      if (path === '/me/tasks') {
+        return { tasks: [{ task, myCounts: { draft: 1 }, myTotal: 1, myInProgress: 1, resumeItemId: 11 }] }
+      }
+      if (path === '/tasks/1/labeler/items') {
+        return itemNav
+      }
+      if (path === '/tasks/1/items/11') {
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+          revision: null,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    let claimCalls = 0
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/1/claim') {
+        claimCalls += 1
+        return {}
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza />)
+
+    // 「已领取的任务」区块出现,带「继续标注」入口。
+    expect(await screen.findByText('已领取的任务')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: '继续标注 QA 质量标注' }))
+
+    // 直接恢复进行中的题(openByItem GET /tasks/1/items/11),进入作答页;不触发领取。
+    expect(await screen.findByLabelText('一句话总评')).toBeInTheDocument()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/tasks/1/items/11'))
+    expect(claimCalls).toBe(0)
+  })
+
+  it('工作台 shows a 大任务 switcher and switches between my claimed tasks', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [task, task2]
+      }
+      if (path === '/me/submissions') {
+        // 自动恢复最近的进行中草稿 → 任务1。
+        return [{ id: 42, taskId: 1, itemId: 11, status: 'draft' }]
+      }
+      if (path === '/me/tasks') {
+        return {
+          tasks: [
+            { task, myCounts: { draft: 1 }, myTotal: 1, myInProgress: 1, resumeItemId: 11 },
+            { task: task2, myCounts: { draft: 1 }, myTotal: 1, myInProgress: 1, resumeItemId: 21 },
+          ],
+        }
+      }
+      if (path === '/tasks/1/labeler/items') {
+        return itemNav
+      }
+      if (path === '/tasks/2/labeler/items') {
+        return { taskId: 2, total: 1, items: [{ itemId: 21, externalId: 'P0001', status: 'draft', mine: true, submissionId: 50 }], counts: { draft: 1 } }
+      }
+      if (path === '/tasks/1/items/11') {
+        return {
+          task,
+          item,
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: { id: 42, taskId: 1, itemId: 11, status: 'draft' },
+          revision: null,
+        }
+      }
+      if (path === '/tasks/2/items/21') {
+        return {
+          task: task2,
+          item: { id: 21, taskId: 2, externalId: 'P0001', payload: JSON.stringify({ prompt: 't2' }), status: 'claimed' },
+          template: { id: 102, schemaJson: JSON.stringify(schema) },
+          submission: { id: 50, taskId: 2, itemId: 21, status: 'draft' },
+          revision: null,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockImplementation(async (path) => {
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza initialView="answer" />)
+
+    // 自动恢复任务1 → 作答页出现;切换器列出我的两个大任务。
+    await screen.findByLabelText('一句话总评')
+    const switcher = await screen.findByLabelText('切换标注任务')
+
+    // 切到任务2 → 加载任务2 导航并恢复其进行中题(GET /tasks/2/items/21)。
+    await user.selectOptions(switcher, '2')
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/tasks/2/items/21'))
   })
 })

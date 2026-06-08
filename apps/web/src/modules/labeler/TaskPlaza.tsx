@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react'
 import { Input, Select } from '@douyinfe/semi-ui'
-import type { Task } from '../../shared/api/client'
+import type { MyTask, Task } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { Markdown } from '../../shared/markdown'
 import StatusBadge from '../../shared/components/StatusBadge'
 
 type TaskPlazaProps = {
   tasks: Task[]
+  myTasks: MyTask[]
   loading: boolean
   onEnter: (task: Task) => void
+  onContinue: (myTask: MyTask) => void
 }
 
 const STATUS_OPTIONS = [
@@ -29,7 +31,7 @@ const STATUS_TEXT: Record<string, string> = {
 // 任务广场:标注员浏览可领取任务。搜索按标题客户端过滤,状态下拉过滤,任务以卡片展示。
 // 点击卡片先看任务详情(标题/描述/进度/状态/基线说明),确认「符合要求」后再调 onEnter 领取,
 // 而不是点卡片立即领取(对应流程图「是否符合?→是→领取」)。
-export default function TaskPlaza({ tasks, loading, onEnter }: TaskPlazaProps) {
+export default function TaskPlaza({ tasks, myTasks, loading, onEnter, onContinue }: TaskPlazaProps) {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   // detailTask: 当前在详情弹层里查看的任务;null 表示弹层关闭。本地 state,不改 Plaza。
@@ -50,6 +52,35 @@ export default function TaskPlaza({ tasks, loading, onEnter }: TaskPlazaProps) {
 
   return (
     <div className="lz-plaza">
+      {myTasks.length > 0 ? (
+        <section className="lz-claimed" aria-label="已领取的任务">
+          <div className="lz-claimed__title">已领取的任务</div>
+          <div className="lz-cards">
+            {myTasks.map((myTask) => {
+              const claimedTask = myTask.task
+              const title = claimedTask.title || `任务 #${claimedTask.id}`
+              const inProgress = myTask.myInProgress > 0
+              return (
+                <button
+                  key={claimedTask.id}
+                  type="button"
+                  aria-label={`继续标注 ${title}`}
+                  className="lz-card lz-card--claimed"
+                  onClick={() => onContinue(myTask)}
+                >
+                  <div className="lz-card__head">
+                    <span className="lz-card__title">{title}</span>
+                    {inProgress ? <span className="lz-chip lz-chip--active">进行中 {myTask.myInProgress}</span> : null}
+                  </div>
+                  <div className="lz-card__meta">任务 #{claimedTask.id} · 我的提交 {myTask.myTotal} 条</div>
+                  <div className="lz-card__cta">{inProgress ? '继续标注 →' : '继续领取 →'}</div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
+
       <div className="tasks-filters">
         <Input
           aria-label="搜索任务"
