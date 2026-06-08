@@ -26,7 +26,10 @@ export default function App() {
             <Route path="/owner/tasks/:taskId/templates/:templateId" element={<RequireRole roles={['owner', 'admin']}><TemplateDesigner /></RequireRole>} />
             <Route path="/owner/:section" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
             <Route path="/owner/:section/:sub" element={<RequireRole roles={['owner', 'admin']}><OwnerDashboard /></RequireRole>} />
-            <Route path="/labeler" element={<RequireRole roles={['labeler']}><LabelerPlaza /></RequireRole>} />
+            {/* 不同 key 让 labeler 三个侧栏入口切换时重挂载,使初始视图(任务广场/标注工作台/我的贡献)按路由落位。 */}
+            <Route path="/labeler" element={<RequireRole roles={['labeler']}><LabelerPlaza key="labeler-plaza" initialView="plaza" initialPlazaTab="tasks" /></RequireRole>} />
+            <Route path="/labeler/workbench" element={<RequireRole roles={['labeler']}><LabelerPlaza key="labeler-workbench" initialView="answer" /></RequireRole>} />
+            <Route path="/labeler/mine" element={<RequireRole roles={['labeler']}><LabelerPlaza key="labeler-mine" initialView="plaza" initialPlazaTab="mydata" /></RequireRole>} />
             {/* 不同 key 让 /reviewer 与 /reviewer/results 切换时重新挂载,使队列初始视图按路由落位。 */}
             <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue key="reviewer-workbench" /></RequireRole>} />
             <Route path="/reviewer/results" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue key="reviewer-results" /></RequireRole>} />

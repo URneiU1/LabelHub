@@ -276,10 +276,9 @@ describe('LabelerPlaza schema runtime flow', () => {
       throw new Error(`unexpected POST ${path}`)
     })
 
-    render(<LabelerPlaza />)
+    render(<LabelerPlaza initialPlazaTab="mydata" />)
 
-    // Switch to 我的数据 tab, then open the revising submission.
-    await user.click(await screen.findByRole('tab', { name: '我的数据' }))
+    // Start from 我的数据, then open the revising submission.
     await user.click(await screen.findByRole('button', { name: '打开提交 #42' }))
 
     expect(await screen.findByText('上一轮原因：关键词缺失')).toBeInTheDocument()
@@ -310,9 +309,7 @@ describe('LabelerPlaza schema runtime flow', () => {
       throw new Error(`unexpected GET ${path}`)
     })
 
-    render(<LabelerPlaza />)
-
-    await user.click(await screen.findByRole('tab', { name: '我的数据' }))
+    render(<LabelerPlaza initialPlazaTab="mydata" />)
 
     // 已提交 = submitted + human_reviewing = 2; 通过 = 1; 打回 = 1; 待修改 = 1.
     // "已提交" 同时出现在 stat 卡片标签和 StatusBadge 中,故把查询限定在 .lh-stats 容器内。

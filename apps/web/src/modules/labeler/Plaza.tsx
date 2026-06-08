@@ -101,12 +101,12 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
 
   // P3:载入某题后,若本地存在比服务端更新的未同步草稿(且模板版本一致),
   // 暂存为待恢复草稿(非阻塞,由作答页横幅让用户「恢复 / 丢弃」)。每次载题先清旧的离线状态。
-  function detectRecoverableDraft(data: TaskBundle, serverAnswer: AnswerValue) {
+  const detectRecoverableDraft = useCallback((data: TaskBundle, serverAnswer: AnswerValue) => {
     setLocalDraftSaved(false)
     setRecoverableDraft(computeRecoverableDraft(data, serverAnswer))
-  }
+  }, [])
 
-  async function claim(taskId: number) {
+  const claim = useCallback(async (taskId: number) => {
     setLoading(true)
     try {
       const data = await apiPost<TaskBundle>(`/tasks/${taskId}/claim`, {})
@@ -124,9 +124,9 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     } finally {
       setLoading(false)
     }
-  }
+  }, [detectRecoverableDraft])
 
-  async function openSubmission(submission: Submission) {
+  const openSubmission = useCallback(async (submission: Submission) => {
     setLoading(true)
     try {
       const data = await apiGet<TaskBundle>(`/tasks/${submission.taskId}/items/${submission.itemId}`)
@@ -143,9 +143,29 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     } finally {
       setLoading(false)
     }
-  }
+  }, [detectRecoverableDraft])
 
-  async function saveDraft() {
+  const answerKey = useMemo(() => answerDraftKey(answer), [answer])
+  const bundleTaskId = bundle?.task?.id ?? null
+  const bundleItemId = bundle?.item?.id ?? null
+  const bundleSubmissionId = bundle?.submission?.id ?? null
+  const bundleRevisionNo = bundle?.submission?.currentRevisionId ?? bundle?.revision?.id ?? null
+
+  // 当前题目对应的本地草稿键 + 模板版本(autosave / 提交 / 恢复共用)。bundle 缺失时为 null。
+  const localDraftKey = useMemo(() => {
+    if (bundleTaskId == null || bundleItemId == null) {
+      return null
+    }
+    return buildDraftKey({
+      taskId: bundleTaskId,
+      itemId: bundleItemId,
+      submissionId: bundleSubmissionId,
+      revisionNo: bundleRevisionNo,
+    })
+  }, [bundleItemId, bundleRevisionNo, bundleSubmissionId, bundleTaskId])
+  const templateVersion = bundle?.template?.version ?? null
+
+  const saveDraft = useCallback(async () => {
     if (!bundle?.task || !bundle.item) {
       return
     }
@@ -159,9 +179,9 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '保存失败')
     }
-  }
+  }, [answer, bundle])
 
-  async function submit() {
+  const submit = useCallback(async () => {
     if (!bundle?.task || !bundle.item) {
       return
     }
@@ -203,14 +223,14 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '提交失败')
     }
-  }
+  }, [answer, bundle, loadMySubmissions, localDraftKey, schema, templateVersion])
 
   // Ctrl/Cmd+Enter 提交:用 ref 持有最新 submit,只注册一次监听,避免随 answer 频繁重挂。
   // submit 内部已对无 bundle / schema 错误 / 校验失败兜底,这里无需重复判断。
   const submitRef = useRef(submit)
   useEffect(() => {
     submitRef.current = submit
-  })
+  }, [submit])
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -224,7 +244,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
 
   // 调 /llm/inline 求助:把当前 schema 摘要 + 题目数据 + 当前答案作为不可信数据发给后端(后端再转豆包)。
   // 不阻塞作答:用独立 loading,失败给中文友好提示,不打断表单填写。
-  async function askAssist() {
+  const askAssist = useCallback(async () => {
     if (!bundle?.item) {
       return
     }
@@ -243,20 +263,14 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     } finally {
       setAssistLoading(false)
     }
-  }
-
-  const answerKey = useMemo(() => answerDraftKey(answer), [answer])
-
-  // 当前题目对应的本地草稿键 + 模板版本(autosave / 提交 / 恢复共用)。bundle 缺失时为 null。
-  const localDraftKey = useMemo(() => (bundle ? bundleDraftKey(bundle) : null), [bundle])
-  const templateVersion = bundle?.template?.version ?? null
+  }, [answer, bundle?.item, payload, schema])
 
   useEffect(() => {
-    if (!bundle?.task || !bundle.item || !schema.ok || answerKey === lastSavedDraftKey.current) {
+    if (bundleTaskId == null || bundleItemId == null || !schema.ok || answerKey === lastSavedDraftKey.current) {
       return
     }
-    const taskId = bundle.task.id
-    const itemId = bundle.item.id
+    const taskId = bundleTaskId
+    const itemId = bundleItemId
     const timer = window.setTimeout(() => {
       // 在触发时捕获当前活动序号(已由最近一次 onChange / 手动保存推进),且不在定时器里改写它;
       // 任何更晚的改动或保存都会推进序号,使本次 autosave 的回调因序号不等而作废,
@@ -291,7 +305,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
         })
     }, 3000)
     return () => window.clearTimeout(timer)
-  }, [answer, answerKey, bundle?.item, bundle?.task, schema, localDraftKey, templateVersion])
+  }, [answer, answerKey, bundleItemId, bundleTaskId, schema, localDraftKey, templateVersion])
 
   // ---- 4.3 新增导航编排(不触碰上方既有 claim/saveDraft/submit/autosave/快捷键逻辑) ----
 
@@ -323,8 +337,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setView('answer')
     void loadItemNav(task.id)
     void claim(task.id)
-    // claim 是每次渲染重建的组件方法,仅在点击时同步调用,不影响 enterTask 的语义。
-  }, [loadItemNav])
+  }, [claim, loadItemNav])
 
   // 选中导航里的一题:我的题(mine 或有 submissionId)→ 直接打开;available/他人 → 领取下一题。
   const selectNavItem = useCallback((item: LabelerTaskItem) => {
@@ -336,8 +349,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     } else {
       void claim(activeTask.id)
     }
-    // claim 每次渲染重建,但仅在用户点击时同步调用,无需进依赖。
-  }, [activeTask, openByItem])
+  }, [activeTask, claim, openByItem])
 
   // 上一题/下一题:在题目导航列表里相对当前题移动;我的题直接打开,否则领取下一题。
   const stepItem = useCallback((delta: number) => {
@@ -352,14 +364,14 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       return
     }
     selectNavItem(items[nextIndex])
-  }, [activeTask, bundle?.item?.id, itemNav, selectNavItem])
+  }, [activeTask, bundle?.item?.id, claim, itemNav, selectNavItem])
 
   // 跳过 / 领取下一题:走既有 claim 拿下一个 available。
   const skipItem = useCallback(() => {
     if (activeTask) {
       void claim(activeTask.id)
     }
-  }, [activeTask])
+  }, [activeTask, claim])
 
   // 从"我的数据"打开一条提交:进入作答页,记录活动任务并加载题目导航,再复用既有 openSubmission。
   const openFromMyData = useCallback((submission: Submission) => {
@@ -368,8 +380,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setView('answer')
     void loadItemNav(submission.taskId)
     void openSubmission(submission)
-    // openSubmission 每次渲染重建,仅在点击时调用,无需进依赖。
-  }, [tasks, loadItemNav])
+  }, [loadItemNav, openSubmission, tasks])
 
   const backToPlaza = useCallback(() => {
     setView('plaza')
@@ -429,8 +440,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadItemNav(activeTask.id)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle?.submission?.status])
+  }, [activeTask, bundle?.submission?.status, loadItemNav, view])
 
   if (view === 'plaza') {
     return (
