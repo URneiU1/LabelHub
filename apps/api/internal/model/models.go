@@ -210,6 +210,8 @@ type HumanReview struct {
 	Reason       NullString `json:"reason"`
 	Patch        *string    `gorm:"type:json" json:"patch"`
 	CreatedAt    time.Time  `json:"createdAt"`
+	// SupersededAt:被数据验收打回(独立重审)时作废本行,使其不再计入 approve 级数。NULL = 仍有效。
+	SupersededAt NullTime `json:"supersededAt"`
 }
 
 func (HumanReview) TableName() string { return "human_reviews" }

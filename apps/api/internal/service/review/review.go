@@ -171,6 +171,7 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 		if !isArbitration {
 			if err := tx.Model(&model.HumanReview{}).
 				Where("submission_id = ? AND revision_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, "approve").
+				Where("superseded_at IS NULL").
 				Count(&approveCount).Error; err != nil {
 				return err
 			}
@@ -178,6 +179,7 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 				var reviewerApproveCount int64
 				if err := tx.Model(&model.HumanReview{}).
 					Where("submission_id = ? AND revision_id = ? AND reviewer_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, input.ReviewerID, "approve").
+					Where("superseded_at IS NULL").
 					Count(&reviewerApproveCount).Error; err != nil {
 					return err
 				}

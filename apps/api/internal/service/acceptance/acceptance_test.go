@@ -162,10 +162,13 @@ func TestRejectReopensFlaggedApprovedSubmission(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"submission_id"}).AddRow(101))
 	// load the still-approved submission
 	mock.ExpectQuery(`(?is)^SELECT \* FROM .submissions. WHERE id = \? AND task_id = \? AND status = \?`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status"}).AddRow(101, 1, 55, statemachine.StateApproved))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).AddRow(101, 1, 55, statemachine.StateApproved, 9))
 	// reopen submission approved -> human_reviewing
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET .status.+ WHERE id = \? AND status = \?`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// supersede prior human_reviews for this revision -> independent re-review
+	mock.ExpectExec(`(?is)^UPDATE .human_reviews. SET .superseded_at.+ WHERE submission_id = \? AND revision_id = \? AND superseded_at IS NULL`).
+		WillReturnResult(sqlmock.NewResult(0, 2))
 	// revert task_item finished -> claimed
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET .+ WHERE id = \? AND status = \?`).
 		WillReturnResult(sqlmock.NewResult(0, 1))

@@ -233,6 +233,13 @@ func Reject(db *gorm.DB, taskID, batchID, ownerID uint64, note string) (RejectRe
 			if subRes.RowsAffected != 1 {
 				return ErrConcurrentWrite
 			}
+			// 独立重审:作废该提交当前 revision 的历史人工审核记录,使打回项必须重新走完整的初审+终审,
+			// 而非凭历史 approve 计数被一次复确认即终结。审计历史仍完整保留在 audit_logs。
+			if sub.CurrentRevisionID != nil {
+				if err := tx.Model(&model.HumanReview{}).Where("submission_id = ? AND revision_id = ? AND superseded_at IS NULL", sub.ID, *sub.CurrentRevisionID).Update("superseded_at", NowUTC()).Error; err != nil {
+					return err
+				}
+			}
 			// 同步回退 task_item:finished -> claimed,清 finished_at,finished_items - 1,
 			// 否则重审再通过时 review.Apply 的 item 守卫(WHERE status=claimed)会匹配 0 行而失败,且统计虚高。
 			itemRes := tx.Model(&model.TaskItem{}).
