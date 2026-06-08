@@ -276,8 +276,9 @@ describe('ReviewerQueue schema runtime flow', () => {
 
     await user.click(screen.getByRole('tab', { name: '审计时间线' }))
     expect(await screen.findByText('审计时间线（SUB-501）')).toBeInTheDocument()
-    expect(screen.getAllByText('AI 预审通过').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/AI Agent · AI 预审中 → 人工审核中/).length).toBeGreaterThan(0)
+    // 审计行 body 把「事件标签 · 状态流转」合在一个 <p>,actor 单独在时间行的 <strong> 里。
+    expect(screen.getAllByText('AI 预审通过 · AI 预审中 → 人工审核中').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('AI Agent').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0)
     expect(screen.queryByText('ai_done')).not.toBeInTheDocument()
     expect(screen.queryByText('ai_reviewing → human_reviewing')).not.toBeInTheDocument()
@@ -454,9 +455,10 @@ describe('ReviewerQueue schema runtime flow', () => {
     await user.click(await screen.findByText('Submission #501'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('fields[0].options')
-    expect(screen.getByRole('button', { name: /打回/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /通过/ })).toBeDisabled()
+    // 决策按钮带图标前缀(↩/✎/✓),与侧栏批量按钮(批量通过/批量打回)区分开,避免 /通过/ /打回/ 命中多个。
+    expect(screen.getByRole('button', { name: /↩ 打回/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /✎ 拒绝/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /✓ 通过/ })).toBeDisabled()
   })
 
   it('disables review actions while a review request is pending', async () => {
@@ -491,12 +493,12 @@ describe('ReviewerQueue schema runtime flow', () => {
     render(<ReviewerQueue />)
 
     await user.click(await screen.findByText('Submission #501'))
-    await user.click(screen.getByRole('button', { name: /通过/ }))
+    await user.click(screen.getByRole('button', { name: /✓ 通过/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /打回/ })).toBeDisabled()
-      expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled()
-      expect(screen.getByRole('button', { name: /通过/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /↩ 打回/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /✎ 拒绝/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /✓ 通过/ })).toBeDisabled()
     })
 
     await act(async () => {
