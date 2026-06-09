@@ -3,7 +3,7 @@ import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseBundleSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
-import { apiGet, apiPost, claimTask, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import { ApiError, apiGet, apiPost, claimTask, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
 import { setLabelerSection } from '../../shared/state/labelerSection'
@@ -403,9 +403,17 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
 
   // 上一题/下一题:在题目导航列表里相对当前题移动;我的题直接打开,否则领取下一题。
   const stepItem = useCallback((delta: number) => {
+    if (!activeTask) {
+      return
+    }
     const items = itemNav?.items ?? []
-    if (!activeTask || items.length === 0) {
-      void claim(activeTask?.id ?? 0)
+    if (items.length === 0) {
+      // Nav not ready yet (races with claim on first entry) or genuinely empty. Only quota tasks
+      // pull a fresh item here; for first_come/assigned the whole task is already claimed and
+      // re-claiming would wrongly re-trigger "已领取题目". Don't claim while nav is still loading.
+      if (!itemNavLoading && activeTask.distribution === 'quota') {
+        void claim(activeTask.id)
+      }
       return
     }
     const currentIndex = items.findIndex((item) => item.itemId === bundle?.item?.id)
@@ -414,7 +422,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       return
     }
     selectNavItem(items[nextIndex])
-  }, [activeTask, bundle?.item?.id, claim, itemNav, selectNavItem])
+  }, [activeTask, bundle?.item?.id, claim, itemNav, itemNavLoading, selectNavItem])
 
   // 跳过:跳到当前题之后第一道「我的、还没提交」的题(claimed/draft/revising),纯导航不重新领取
   // (整体领取后所有题已是我的,没有"下一道待领题",再 claim 只会跳回第一题并误弹「已领取题目」)。
@@ -459,8 +467,16 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       if (task.distribution !== 'quota') {
         try {
           await claimTask(task.id)
-        } catch {
-          // 已拥有 / 被他人独占 → 忽略,按 resume 继续。
+        } catch (error) {
+          // 已拥有 / 被他人独占(CONFLICT)→ 忽略,按 resume 继续。
+          // 其它错误(任务不存在 / 未被指派 / 网络 / 5xx)是真失败,不能静默吞:提示并退回广场。
+          if (!(error instanceof ApiError && error.code === 'CONFLICT')) {
+            Toast.error(error instanceof Error ? error.message : '加载任务失败')
+            setView('plaza')
+            setActiveTask(null)
+            void loadMyTasks()
+            return
+          }
         }
       }
       void loadItemNav(task.id)

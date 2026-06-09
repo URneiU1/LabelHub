@@ -6,18 +6,23 @@ import LabelerPlaza from './Plaza'
 import { apiGet, apiPost } from '../../shared/api/client'
 import { buildDraftKey, loadLocalDraft } from './offlineDraftStore'
 
-vi.mock('../../shared/api/client', () => {
+vi.mock('../../shared/api/client', async () => {
+  // Spread the real module so exports the component uses but we don't override (e.g. ApiError)
+  // fall through to real implementations. A closed factory silently returns undefined for any
+  // missed export — exactly how the claimTask gap shipped a test that exercised a broken path.
+  const actual = await vi.importActual<typeof import('../../shared/api/client')>('../../shared/api/client')
   const apiGet = vi.fn()
   const apiPost = vi.fn()
   return {
+    ...actual,
     apiGet,
     apiPost,
-    // listMyTasks 走同一个 mock 的 apiGet,测试只需 mock '/me/tasks' 的返回即可。
+    // listMyTasks / claimTask route through the mocked apiGet/apiPost above, so a test only needs
+    // to mock the '/me/tasks' and '/tasks/{id}/claim-task' responses.
     listMyTasks: async () => {
       const data = await apiGet('/me/tasks')
       return data?.tasks ?? []
     },
-    // claimTask 走同一个 mock 的 apiPost,测试只需 mock '/tasks/{id}/claim-task' 的返回即可。
     claimTask: async (taskId: number) => apiPost(`/tasks/${taskId}/claim-task`, {}),
   }
 })

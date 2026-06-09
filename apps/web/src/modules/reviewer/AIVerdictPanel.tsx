@@ -21,6 +21,9 @@ export default function AIVerdictPanel({ aiReview, submission }: AIVerdictPanelP
     const displayVerdict = verdictLabel(verdict)
     const dimensions = normalizeDimensions(aiReview.dimensions)
     const tone = verdictTone(verdict)
+    // Threshold is per-prompt config, not a fixed 80 — read it from the prompt so the displayed
+    // rule and the score-bar coloring match what actually drives the verdict.
+    const passThreshold = aiReview.prompt?.passThreshold ?? PASS_THRESHOLD
     return (
       <section className="ai-section" aria-label="AI 预审结论">
         <div className="ai-section__head">
@@ -34,14 +37,14 @@ export default function AIVerdictPanel({ aiReview, submission }: AIVerdictPanelP
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>综合分：{score}</div>
         {dimensions.length > 0 ? (
           <div style={{ marginBottom: 12 }}>
-            {dimensions.map((row) => <ScoreBar key={row.label} label={row.label} value={row.value} />)}
+            {dimensions.map((row) => <ScoreBar key={row.label} label={row.label} value={row.value} threshold={passThreshold} />)}
           </div>
         ) : null}
         {aiReview.reason ? (
           <div className="ai-verdict" style={tone === 'success' ? successVerdictStyle : undefined}>
             <div className="ai-verdict__head">
               AI 评语 <span className={verdictPillClass(tone)}>{verdictLabel(verdict)}</span>{' '}
-              <span className="lh-muted">阈值：综合 &lt; {PASS_THRESHOLD} 即打回</span>
+              <span className="lh-muted">阈值：综合 &lt; {passThreshold} 即打回</span>
             </div>
             {aiReview.reason}
           </div>
@@ -81,8 +84,8 @@ export default function AIVerdictPanel({ aiReview, submission }: AIVerdictPanelP
   )
 }
 
-function ScoreBar({ label, value }: DimensionRow) {
-  const color = scoreColor(label, value)
+function ScoreBar({ label, value, threshold }: DimensionRow & { threshold: number }) {
+  const color = scoreColor(label, value, threshold)
   return (
     <div className="ai-score-row">
       <span className="ai-score-row__label">{label}</span>
@@ -124,8 +127,8 @@ function verdictPillClass(tone: 'success' | 'warning' | 'purple' | 'danger') {
 }
 
 // 安全维度低分用红,其余低分用橙,达标用绿,贴合 ui-demo 的配色语义。
-function scoreColor(label: string, value: number) {
-  if (value >= PASS_THRESHOLD) return 'var(--lh-success)'
+function scoreColor(label: string, value: number, threshold: number) {
+  if (value >= threshold) return 'var(--lh-success)'
   if (label.includes('安全')) return 'var(--lh-danger)'
   return 'var(--lh-warning)'
 }
