@@ -11,6 +11,7 @@ import {
   setOwnerSubView,
 } from '../state/ownerSection'
 import { Icon, type IconName } from '../components/Icon'
+import { labelerSectionForPath, useLabelerSection } from '../state/labelerSection'
 
 interface NavItem {
   to: string
@@ -63,6 +64,8 @@ function primaryRole(roles: string[]): string {
 
 export default function AppLayout() {
   const params = useParams()
+  // 标注员的左栏高亮跟着 LabelerPlaza 的内部视图走(继续标注/返回只切内部 view 不动 URL)。
+  const labelerSection = useLabelerSection()
   const user = getCurrentUser()
   const [sideCollapsed, setSideCollapsed] = useState(false)
   const visibleNavItems = NAV_ITEMS.filter((item) => hasAnyRole(item.roles))
@@ -164,9 +167,12 @@ export default function AppLayout() {
                   end
                   aria-label={item.label}
                   title={item.label}
-                  className={({ isActive }) =>
-                    'lh-side-item' + (isActive ? ' lh-side-item--active' : '')
-                  }
+                  className={({ isActive }) => {
+                    // labeler 三入口按内部分节高亮(URL 不随内部视图切换变);其余角色仍按路由 isActive。
+                    const seg = labelerSectionForPath(item.to)
+                    const active = seg !== undefined ? labelerSection === seg : isActive
+                    return 'lh-side-item' + (active ? ' lh-side-item--active' : '')
+                  }}
                 >
                   <Icon
                     name={ROLE_NAV_ICON[item.to] ?? 'list'}

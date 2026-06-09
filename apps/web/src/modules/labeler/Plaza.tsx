@@ -6,6 +6,7 @@ import { validateAnswer } from '../../renderer/validator'
 import { apiGet, apiPost, claimTask, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
+import { setLabelerSection } from '../../shared/state/labelerSection'
 import { normalizeStatus } from '../../shared/components/status'
 import StatusBadge from '../../shared/components/StatusBadge'
 import ItemNav from './ItemNav'
@@ -101,6 +102,14 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       void loadMySubmissions()
     }
   }, [initialView, loadMyTasks, loadMySubmissions, loadTasks])
+
+  // 把当前「实际显示」的分节同步给左栏高亮:作答页(有激活任务/题目)→ 标注工作台;
+  // 否则按 plazaTab → 任务广场 / 我的贡献。这样「继续标注 / 返回任务广场」只切内部 view 时,
+  // 侧栏也跟着对(不依赖 URL 变化)。setLabelerSection 是外部 store,非 React setState。
+  useEffect(() => {
+    const showingWorkbench = view === 'answer' && (activeTask !== null || bundle !== null || loading)
+    setLabelerSection(showingWorkbench ? 'workbench' : (plazaTab === 'mydata' ? 'mine' : 'tasks'))
+  }, [view, activeTask, bundle, loading, plazaTab])
 
   const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
