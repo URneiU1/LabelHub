@@ -206,6 +206,51 @@ export async function claimTask(taskId: number): Promise<{ task: Task }> {
   return apiPost<{ task: Task }>(`/tasks/${taskId}/claim-task`, {})
 }
 
+// 「AI 审核队列」只读视图里的一条 AI 预审 + 其提交/任务/Prompt 上下文。
+export type AIReviewRow = {
+  id: number
+  status: string
+  verdict: string | null
+  overallScore: number | null
+  dimensions: Array<{ name: string, score: number, reason?: string }> | null
+  reason: string | null
+  promptVersion: number
+  model: string
+  promptTemplate: string
+  passThreshold: number
+  uncertainMin: number
+  tokensInput: number
+  tokensOutput: number
+  latencyMs: number
+  retryCount: number
+  idempotencyKey: string
+  errorMsg: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  submissionId: number
+  taskId: number
+  taskTitle: string
+  itemId: number
+}
+
+// 拉取 AI 预审队列(最新在前,可按 status 过滤、id 游标分页)。供审核员「AI 审核队列」只读视图。
+export async function listAIReviews(params?: { status?: string, limit?: number, before?: number }): Promise<{ items: AIReviewRow[], nextBefore: number | null }> {
+  const query = new URLSearchParams()
+  if (params?.status) {
+    query.set('status', params.status)
+  }
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  if (params?.before) {
+    query.set('before', String(params.before))
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const data = await apiGet<{ items: AIReviewRow[], nextBefore: number | null }>(`/reviewer/ai-reviews${suffix}`)
+  return { items: data?.items ?? [], nextBefore: data?.nextBefore ?? null }
+}
+
 // 任务基础信息 create/update 的输入。后端会把 JSON 字段(richDescription/tags/rewardConfig)
 // 原样存进 json 列,所以这里用结构化值,提交前序列化成 JSON。
 export type TaskInfoInput = {

@@ -8,6 +8,7 @@ import TemplateDesigner from './modules/template/Designer'
 import TemplateList from './modules/template/TemplateList'
 import LabelerPlaza from './modules/labeler/Plaza'
 import ReviewerQueue from './modules/reviewer/Queue'
+import AIReviewQueue from './modules/reviewer/AIReviewQueue'
 import { getToken, hasAnyRole } from './shared/api/client'
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
             {/* 不同 key 让 /reviewer 与 /reviewer/results 切换时重新挂载,使队列初始视图按路由落位。 */}
             <Route path="/reviewer" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue key="reviewer-workbench" /></RequireRole>} />
             <Route path="/reviewer/results" element={<RequireRole roles={['reviewer', 'admin']}><ReviewerQueue key="reviewer-results" /></RequireRole>} />
+            <Route path="/reviewer/ai-queue" element={<RequireRole roles={['reviewer', 'admin']}><AIReviewQueue /></RequireRole>} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/auth/login" replace />} />

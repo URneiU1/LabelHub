@@ -25,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/labeler/workbench', label: '标注工作台', roles: ['labeler'] },
   { to: '/labeler/mine', label: '我的贡献', roles: ['labeler'] },
   { to: '/reviewer', label: '审核工作台', roles: ['reviewer', 'admin'] },
+  { to: '/reviewer/ai-queue', label: 'AI 审核队列', roles: ['reviewer', 'admin'] },
   { to: '/reviewer/results', label: '审核结果', roles: ['reviewer', 'admin'] },
 ]
 
@@ -53,6 +54,7 @@ const ROLE_NAV_ICON: Record<string, IconName> = {
   '/labeler/workbench': 'edit',
   '/labeler/mine': 'barChart',
   '/reviewer': 'userCheck',
+  '/reviewer/ai-queue': 'sparkle',
 }
 
 function primaryRole(roles: string[]): string {
