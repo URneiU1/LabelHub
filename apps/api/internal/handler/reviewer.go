@@ -224,7 +224,7 @@ func (h ReviewerHandler) approveCountsByRevision(submissions []model.Submission)
 	var rows []row
 	if err := h.db.Model(&model.HumanReview{}).
 		Select("revision_id, COUNT(*) AS total").
-		Where("revision_id IN ? AND verdict = ?", revisionIDs, "approve").
+		Where("revision_id IN ? AND verdict = ? AND superseded_at IS NULL", revisionIDs, "approve").
 		Group("revision_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -264,12 +264,15 @@ func (h ReviewerHandler) ReviewerResults(c *gin.Context) {
 		return
 	}
 	if cursor := strings.TrimSpace(c.Query("cursor")); cursor != "" {
-		cursorID, err := strconv.ParseUint(cursor, 10, 64)
+		cursorTs, cursorID, err := parseResultsCursor(cursor)
 		if err != nil {
-			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "cursor must be a positive integer")
+			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid cursor")
 			return
 		}
-		query = query.Where("submissions.id < ?", cursorID)
+		// Composite cursor matched to the (updated_at DESC, id DESC) sort. An id-only cursor would
+		// skip and duplicate rows because finalized submissions' updated_at (finalization order)
+		// diverges from id (creation order).
+		query = query.Where("submissions.updated_at < ? OR (submissions.updated_at = ? AND submissions.id < ?)", cursorTs, cursorTs, cursorID)
 	}
 
 	var submissions []model.Submission
@@ -282,7 +285,8 @@ func (h ReviewerHandler) ReviewerResults(c *gin.Context) {
 	if len(submissions) > limit {
 		submissions = submissions[:limit]
 		page.HasMore = true
-		page.NextCursor = strconv.FormatUint(submissions[len(submissions)-1].ID, 10)
+		last := submissions[len(submissions)-1]
+		page.NextCursor = formatResultsCursor(last.UpdatedAt, last.ID)
 	}
 	finalReviewers, err := h.finalReviewerBySubmission(submissions)
 	if err != nil {
@@ -307,6 +311,28 @@ func (h ReviewerHandler) ReviewerResults(c *gin.Context) {
 		items = append(items, item)
 	}
 	httpx.PageOK(c, items, page)
+}
+
+// formatResultsCursor / parseResultsCursor encode the (updated_at, id) tuple as an opaque
+// "<unixMillis>_<id>" token so ReviewerResults pagination stays aligned with its sort order.
+func formatResultsCursor(updatedAt time.Time, id uint64) string {
+	return strconv.FormatInt(updatedAt.UnixMilli(), 10) + "_" + strconv.FormatUint(id, 10)
+}
+
+func parseResultsCursor(cursor string) (time.Time, uint64, error) {
+	parts := strings.SplitN(cursor, "_", 2)
+	if len(parts) != 2 {
+		return time.Time{}, 0, errors.New("malformed cursor")
+	}
+	ms, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	id, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	return time.UnixMilli(ms).UTC(), id, nil
 }
 
 // finalReviewerBySubmission 取每条 submission 最近一次 human_review 的 reviewer_id
