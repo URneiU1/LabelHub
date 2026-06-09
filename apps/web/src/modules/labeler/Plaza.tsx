@@ -429,16 +429,28 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
 
   // 进入某个「已领取的任务」继续标注:记录活动任务、加载题目导航;有进行中题(resumeItemId)直接恢复,
   // 否则领下一题。任务广场「继续标注」与工作台大任务切换器共用。
+  // first_come / assigned 任务进入时幂等地整体领取一次,确保该任务所有题都解锁(不止恢复的那道)。
   const openTask = useCallback((myTask: MyTask) => {
-    setActiveTask(myTask.task)
+    const task = myTask.task
+    setActiveTask(task)
     setView('answer')
-    void loadItemNav(myTask.task.id)
-    if (myTask.resumeItemId != null) {
-      void openByItem(myTask.task.id, myTask.resumeItemId)
-    } else {
-      void claim(myTask.task.id)
-    }
-  }, [claim, loadItemNav, openByItem])
+    void (async () => {
+      if (task.distribution !== 'quota') {
+        try {
+          await claimTask(task.id)
+        } catch {
+          // 已拥有 / 被他人独占 → 忽略,按 resume 继续。
+        }
+      }
+      void loadItemNav(task.id)
+      if (myTask.resumeItemId != null) {
+        void openByItem(task.id, myTask.resumeItemId)
+      } else {
+        void claim(task.id)
+      }
+      void loadMyTasks()
+    })()
+  }, [claim, loadItemNav, loadMyTasks, openByItem])
 
   // 工作台大任务切换器:切到我领取的另一个大任务(走 openTask 恢复/领题)。
   const switchToTask = useCallback((taskId: number) => {
