@@ -55,7 +55,7 @@ export const SECTION_DEFAULT_SUB: Partial<Record<OwnerSection, string>> = {
   export: 'config',
 }
 
-export const DEFAULT_SECTION: OwnerSection = 'ai'
+export const DEFAULT_SECTION: OwnerSection = 'tasks'
 
 let currentSection: OwnerSection = DEFAULT_SECTION
 const listeners = new Set<() => void>()
