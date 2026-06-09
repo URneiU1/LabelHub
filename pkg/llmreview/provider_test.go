@@ -111,6 +111,42 @@ func TestValidateThresholdConsistencyRejectsMismatchedVerdict(t *testing.T) {
 	}
 }
 
+func TestValidateThresholdConsistencyBoundaries(t *testing.T) {
+	prompt := llmreview.PromptConfig{PassThreshold: 80, UncertainMin: 60}
+	cases := []struct {
+		name    string
+		score   float64
+		verdict string
+		valid   bool
+	}{
+		{"score at pass threshold is pass", 80, llmreview.VerdictPass, true},
+		{"score just below pass threshold is not pass", 79, llmreview.VerdictPass, false},
+		{"score just below pass threshold is uncertain", 79, llmreview.VerdictUncertain, true},
+		{"score at uncertain min is uncertain", 60, llmreview.VerdictUncertain, true},
+		{"score at uncertain min is not reject", 60, llmreview.VerdictReject, false},
+		{"score just below uncertain min is reject", 59, llmreview.VerdictReject, true},
+		{"score at pass threshold is not uncertain", 80, llmreview.VerdictUncertain, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := llmreview.ValidateThresholdConsistency(
+				llmreview.EvaluationResult{Verdict: tc.verdict, OverallScore: tc.score}, prompt)
+			if tc.valid {
+				if err != nil {
+					t.Fatalf("expected valid, got error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected boundary mismatch to be rejected")
+			}
+			if !llmreview.IsNonRetryableEvaluationError(err) {
+				t.Fatalf("boundary mismatch must be non-retryable, got %T %v", err, err)
+			}
+		})
+	}
+}
+
 func TestOpenAICompatibleProviderRetriesRateLimit(t *testing.T) {
 	t.Setenv("LLM_PROVIDER", "openai")
 	t.Setenv("LLM_BASE_URL", "http://provider.test")

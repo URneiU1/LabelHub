@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Modal } from '@douyinfe/semi-ui'
 import AcceptancePanel from './AcceptancePanel'
-import { getAcceptance, startAcceptance, type AcceptanceBatch } from '../../shared/api/client'
+import { acceptAcceptanceBatch, getAcceptance, recordAcceptanceSpotCheck, rejectAcceptanceBatch, startAcceptance, type AcceptanceBatch } from '../../shared/api/client'
 
 vi.mock('../../shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api/client')>('../../shared/api/client')
@@ -23,6 +24,10 @@ vi.mock('@douyinfe/semi-ui', () => ({
 
 const mockGet = vi.mocked(getAcceptance)
 const mockStart = vi.mocked(startAcceptance)
+const mockAccept = vi.mocked(acceptAcceptanceBatch)
+const mockReject = vi.mocked(rejectAcceptanceBatch)
+const mockSpotCheck = vi.mocked(recordAcceptanceSpotCheck)
+const mockConfirm = vi.mocked(Modal.confirm)
 
 const pendingBatch: AcceptanceBatch = {
   id: 42,
@@ -65,5 +70,35 @@ describe('AcceptancePanel', () => {
     await waitFor(() => expect(screen.getByText('验收通过')).toBeInTheDocument())
     expect(screen.getByText('验收不通过(打回不合格项)')).toBeInTheDocument()
     expect(screen.getByText('验收中')).toBeInTheDocument()
+  })
+
+  it('accepts a pending batch with the entered note', async () => {
+    mockGet.mockResolvedValue({ batch: pendingBatch, spotChecks: [], approvedCount: 3 })
+    mockAccept.mockResolvedValue(undefined as never)
+    render(<AcceptancePanel taskId={1} />)
+    await userEvent.type(await screen.findByLabelText('验收备注'), '看过了')
+    await userEvent.click(screen.getByText('验收通过'))
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledWith(1, { batch_id: 42, note: '看过了' }))
+  })
+
+  it('rejects a pending batch only after confirmation, sending the batch id', async () => {
+    mockGet.mockResolvedValue({ batch: pendingBatch, spotChecks: [], approvedCount: 3 })
+    mockReject.mockResolvedValue({ reopenedCount: 2 } as never)
+    render(<AcceptancePanel taskId={1} />)
+    await userEvent.click(await screen.findByText('验收不通过(打回不合格项)'))
+    // Reject is gated behind a confirm dialog — clicking alone must not fire the destructive call.
+    expect(mockReject).not.toHaveBeenCalled()
+    const confirmArg = mockConfirm.mock.calls[0][0] as { onOk: () => Promise<void> | void }
+    await confirmArg.onOk()
+    await waitFor(() => expect(mockReject).toHaveBeenCalledWith(1, { batch_id: 42, note: '' }))
+  })
+
+  it('records a spot check with the submission id and result', async () => {
+    mockGet.mockResolvedValue({ batch: pendingBatch, spotChecks: [], approvedCount: 3 })
+    mockSpotCheck.mockResolvedValue(undefined as never)
+    render(<AcceptancePanel taskId={1} />)
+    await userEvent.type(await screen.findByLabelText('提交 ID'), '77')
+    await userEvent.click(screen.getByText('不合格'))
+    await waitFor(() => expect(mockSpotCheck).toHaveBeenCalledWith(1, { batch_id: 42, submission_id: 77, result: 'flag', note: '' }))
   })
 })
