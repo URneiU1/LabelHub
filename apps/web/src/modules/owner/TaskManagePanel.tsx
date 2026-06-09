@@ -277,7 +277,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                         当前分发策略为「{distributionLabel(drawerTask.distribution ?? 'first_come')}」。
                         {drawerTask.distribution === 'quota'
                           ? `每人配额:${drawerTask.quotaPerUser || 0} 题(在「基础信息」里修改)。`
-                          : '改为「指派」后可在此管理指派的标注员。'}
+                          : '在「基础信息」标签页把分发策略改为「指派」并保存后,回到此处即可管理指派的标注员。'}
                       </div>
                     )
                   ) : null}
