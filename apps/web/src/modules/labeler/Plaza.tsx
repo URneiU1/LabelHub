@@ -411,12 +411,28 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     selectNavItem(items[nextIndex])
   }, [activeTask, bundle?.item?.id, claim, itemNav, selectNavItem])
 
-  // 跳过 / 领取下一题:走既有 claim 拿下一个 available。
+  // 跳过:跳到当前题之后第一道「我的、还没提交」的题(claimed/draft/revising),纯导航不重新领取
+  // (整体领取后所有题已是我的,没有"下一道待领题",再 claim 只会跳回第一题并误弹「已领取题目」)。
+  // 仅当配额任务、且确有 available 题时,跳过才真去领下一道。
   const skipItem = useCallback(() => {
-    if (activeTask) {
-      void claim(activeTask.id)
+    if (!activeTask) {
+      return
     }
-  }, [activeTask, claim])
+    const items = itemNav?.items ?? []
+    const isWorkableMine = (item: LabelerTaskItem) =>
+      (item.mine || item.submissionId != null) && (item.status === 'claimed' || item.status === 'draft' || item.status === 'revising')
+    const currentIndex = items.findIndex((item) => item.itemId === bundle?.item?.id)
+    const next = items.slice(currentIndex + 1).find(isWorkableMine) ?? items.find(isWorkableMine)
+    if (next && next.itemId !== bundle?.item?.id) {
+      void openByItem(activeTask.id, next.itemId)
+      return
+    }
+    if (activeTask.distribution === 'quota' && items.some((item) => item.status === 'available')) {
+      void claim(activeTask.id)
+      return
+    }
+    Toast.info('没有更多可做的题了')
+  }, [activeTask, bundle?.item?.id, claim, itemNav, openByItem])
 
   // 从"我的数据"打开一条提交:进入作答页,记录活动任务并加载题目导航,再复用既有 openSubmission。
   const openFromMyData = useCallback((submission: Submission) => {
