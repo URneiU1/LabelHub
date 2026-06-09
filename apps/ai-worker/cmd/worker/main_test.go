@@ -37,8 +37,10 @@ func TestHandleAIReviewRejectsMismatchedIdempotencyWithoutDBClaim(t *testing.T) 
 
 	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: failingEvaluator{}}
 	rawPayload := []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"mismatch"}`)
-	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err != nil {
-		t.Fatalf("handleAIReview returned error: %v", err)
+	// A corrupt/tampered payload is rejected at parse time (no DB claim) and surfaced as a
+	// non-retryable failure so it is visible in the asynq dead queue, not silently dropped.
+	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); !errors.Is(err, asynq.SkipRetry) {
+		t.Fatalf("expected SkipRetry for mismatched idempotency key, got: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected DB call for invalid payload: %v", err)

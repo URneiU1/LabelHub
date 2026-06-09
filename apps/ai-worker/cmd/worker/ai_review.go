@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -15,8 +16,12 @@ import (
 func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error {
 	payload, err := parseAIReviewPayload(t.Payload())
 	if err != nil {
+		// Payload is produced by our own enqueue side, so a parse failure is a coding bug,
+		// not a transient error. Surface it as a non-retryable asynq failure (visible in the
+		// dead queue) instead of returning nil, which would mark the job succeeded and hide it.
+		// The submission is still rescued by the sweeper after the stall timeout.
 		h.logger.Warn("invalid ai review payload", zap.Error(err), zap.ByteString("payload", t.Payload()))
-		return nil
+		return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
 	}
 	claimed, err := h.markRunning(ctx, payload)
 	if err != nil {
