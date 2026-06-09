@@ -73,7 +73,7 @@ export default function TaskPlaza({ tasks, myTasks, loading, onEnter, onContinue
                     {inProgress ? <span className="lz-chip lz-chip--active">进行中 {myTask.myInProgress}</span> : null}
                   </div>
                   <div className="lz-card__meta">任务 #{claimedTask.id} · 我的提交 {myTask.myTotal} 条</div>
-                  <div className="lz-card__cta">{inProgress ? '继续标注 →' : '继续领取 →'}</div>
+                  <div className="lz-card__cta">继续标注 →</div>
                 </button>
               )
             })}
