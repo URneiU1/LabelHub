@@ -1,11 +1,8 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -581,7 +578,7 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 		if !llmreview.AllowedModelName(prompt.Model) {
 			return errAIRetryPromptInvalid
 		}
-		key := reviewerAIReviewIdempotencyKey(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version)
+		key := llmreview.AIReviewIdempotencyKey(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version)
 		if key != aiReviewRecord.IdempotencyKey {
 			return errAIRetryKeyMismatch
 		}
@@ -722,6 +719,11 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 			revision = &current
 		}
 	}
+	revisionHistory, err := h.loadRevisionHistory(submission.ID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load revision history")
+		return nil, false
+	}
 
 	aiReview, ok, err := h.loadLatestAIReviewDetail(submission, task.ID)
 	if err != nil {
@@ -746,7 +748,7 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 	}
 	stage := stageInfoFor(submission, approveCounts)
 
-	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision, "auditLogs": auditLogs,
+	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision, "revisionHistory": revisionHistory, "auditLogs": auditLogs,
 		"reviewStage": stage.ReviewStage, "reviewLevel": stage.ReviewLevel, "requiredLevels": stage.RequiredLevels}
 	if ok {
 		payload["aiReview"] = aiReview
@@ -760,6 +762,15 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 		payload["warnings"] = []string{"template_missing"}
 	}
 	return payload, true
+}
+
+func (h ReviewerHandler) loadRevisionHistory(submissionID uint64) ([]model.SubmissionRevision, error) {
+	var revisions []model.SubmissionRevision
+	err := h.db.
+		Where("submission_id = ? AND draft = ?", submissionID, false).
+		Order("revision_no ASC, id ASC").
+		Find(&revisions).Error
+	return revisions, err
 }
 
 func (h ReviewerHandler) loadLatestHumanReview(submissionID uint64) (humanReviewSummaryResponse, bool, error) {
@@ -942,11 +953,6 @@ func reviewerAIReviewTaskPayload(submissionID uint64, revisionID uint64, promptI
 		return "", err
 	}
 	return string(raw), nil
-}
-
-func reviewerAIReviewIdempotencyKey(submissionID uint64, revisionID uint64, promptID uint64, promptVersion int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d", submissionID, revisionID, promptID, promptVersion)))
-	return hex.EncodeToString(sum[:])
 }
 
 func nullableStringPointer(value model.NullString) *string {

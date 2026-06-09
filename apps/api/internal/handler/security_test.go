@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/auth"
+	"labelhub.local/llmreview"
 )
 
 // HIGH 1 回归:labeler 对 draft / paused / archived task 不能领新题。
@@ -254,6 +255,7 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	defer sqlDB.Close()
 
 	now := time.Date(2026, 5, 26, 13, 0, 0, 0, time.UTC)
+	previousRevisionID := uint64(900)
 	revisionID := uint64(901)
 	verdict := "pass"
 	score := 92.5
@@ -274,7 +276,11 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 			AddRow(101, 1, 3, `{"title":"v3","fields":[]}`))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submission_revisions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_no", "answer", "draft", "created_by"}).
-			AddRow(revisionID, 501, 1, `{"cleaned_title":"ok"}`, false, 8))
+			AddRow(revisionID, 501, 2, `{"cleaned_title":"ok"}`, false, 8))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_no", "answer", "draft", "created_by", "created_at"}).
+			AddRow(previousRevisionID, 501, 1, `{"cleaned_title":"old"}`, false, 8, now.Add(-time.Hour)).
+			AddRow(revisionID, 501, 2, `{"cleaned_title":"ok"}`, false, 8, now))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key", "prompt_version", "verdict", "overall_score", "dimensions", "reason", "raw_response", "tokens_input", "tokens_output", "latency_ms", "status", "retry_count", "created_at"}).
 			AddRow(31, 501, revisionID, "abc", 2, verdict, score, `[{"name":"相关性","score":92}]`, "looks good", `{"ok":true}`, 100, 20, 1420, "succeeded", 1, now))
@@ -323,6 +329,13 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	latestHumanReview := data["latestHumanReview"].(map[string]any)
 	if latestHumanReview["reason"] != "上一轮意见" {
 		t.Fatalf("latestHumanReview = %v", latestHumanReview)
+	}
+	revisionHistory := data["revisionHistory"].([]any)
+	if len(revisionHistory) != 2 {
+		t.Fatalf("revisionHistory length = %d, want 2 (%v)", len(revisionHistory), revisionHistory)
+	}
+	if revisionHistory[0].(map[string]any)["answer"] != `{"cleaned_title":"old"}` || revisionHistory[1].(map[string]any)["answer"] != `{"cleaned_title":"ok"}` {
+		t.Fatalf("revisionHistory answers = %v", revisionHistory)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -417,7 +430,7 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 	defer sqlDB.Close()
 
 	revisionID := uint64(901)
-	key := reviewerAIReviewIdempotencyKey(501, revisionID, 41, 2)
+	key := llmreview.AIReviewIdempotencyKey(501, revisionID, 41, 2)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).

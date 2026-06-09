@@ -55,6 +55,7 @@ func main() {
 	}
 }
 
+// newLogger 与 api server 的同名工厂保持一致(两者是独立 module,internal 无法跨 module 共享)。
 func newLogger() (*zap.Logger, error) {
 	if os.Getenv("GIN_MODE") == "debug" {
 		return zap.NewDevelopment()
@@ -124,6 +125,7 @@ func redisAddr() string {
 
 // mustAbsExportDir 校验 EXPORT_DIR 为绝对路径。worker 与 api 从不同工作目录启动,
 // 相对路径会各自解析到不同目录,导致 worker 写入的文件 api 下载时找不到/校验失败。
+// 与 api server 的同名函数保持一致(独立 module,不能跨 module 复用)。
 func mustAbsExportDir() string {
 	dir := os.Getenv("EXPORT_DIR")
 	if dir == "" {
@@ -135,6 +137,7 @@ func mustAbsExportDir() string {
 	return dir
 }
 
+// envOrDefault 与 api 的 internal/envutil.Default 行为一致(internal 包不能跨 module 复用,故各留一份)。
 func envOrDefault(key string, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

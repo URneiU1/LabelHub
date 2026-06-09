@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Toast } from '@douyinfe/semi-ui'
 import { listAIReviews, type AIReviewRow } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
+import { formatTime } from './format'
 
 const STATUS_FILTERS: Array<{ key: string, label: string }> = [
   { key: '', label: '全部' },
@@ -29,18 +30,6 @@ function verdictView(verdict: string | null): { label: string, tone: string } {
     default:
       return { label: '待出结论', tone: 'var(--lh-text-3)' }
   }
-}
-
-function formatTime(value: string | null): string {
-  if (!value) {
-    return '—'
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  const pad = (n: number) => n.toString().padStart(2, '0')
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 // AI 审核队列:只读展示 AI 预审 Agent 流水线 —— 每条提交的入队、按维度结构化打分、通过/打回/转人工结论、
@@ -205,8 +194,8 @@ export default function AIReviewQueue() {
                   ['Tokens', `${active.tokensInput} / ${active.tokensOutput}`],
                   ['耗时', `${active.latencyMs} ms`],
                   ['重试', String(active.retryCount)],
-                  ['入队', formatTime(active.createdAt)],
-                  ['完成', formatTime(active.finishedAt)],
+                  ['入队', formatTime(active.createdAt, 'date-time-sec')],
+                  ['完成', formatTime(active.finishedAt, 'date-time-sec')],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <div style={{ color: 'var(--lh-text-3)' }}>{label}</div>

@@ -1,8 +1,9 @@
 import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
-import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
-import type { AnswerValue, TemplateSchema } from '../../renderer/types'
+import { SchemaRenderer, parseAnswer, parseBundleSchema } from '../../renderer'
+import { formatScore } from './format'
+import type { AnswerValue } from '../../renderer/types'
 import { apiGet, apiPost, type Submission, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
@@ -21,10 +22,6 @@ type ConflictGroup = {
   taskId: number
   submissions: Submission[]
 }
-
-type ParsedSchema =
-  | { ok: true, schema: TemplateSchema }
-  | { ok: false, message: string }
 
 // groupByItem 按 itemId 聚合冲突 submission;item 升序、组内 submission 升序,保证渲染稳定。
 function groupByItem(submissions: Submission[]): ConflictGroup[] {
@@ -223,7 +220,7 @@ function ConflictCard({
           <div style={cardMetaStyle}>标注员 #{submission.labelerId ?? '—'}</div>
         </div>
         {submission.aiVerdict ? (
-          <span className="hr-tag hr-tag--ai">AI {submission.aiVerdict} · {formatAIScore(submission.aiScore)}</span>
+          <span className="hr-tag hr-tag--ai">AI {submission.aiVerdict} · {formatScore(submission.aiScore)}</span>
         ) : null}
       </div>
       <div style={cardBodyStyle}>
@@ -251,21 +248,6 @@ function ConflictCard({
       </Button>
     </section>
   )
-}
-
-function parseBundleSchema(bundle: TaskBundle | undefined): ParsedSchema {
-  if (!bundle?.template?.schemaJson) {
-    return { ok: false, message: '当前提交缺少模板快照' }
-  }
-  const result = parseTemplateSchema(bundle.template.schemaJson)
-  if (!result.ok) {
-    return { ok: false, message: `${result.error.field}: ${result.error.message}` }
-  }
-  return { ok: true, schema: result.value }
-}
-
-function formatAIScore(score: number | null | undefined) {
-  return typeof score === 'number' && Number.isFinite(score) ? String(score) : '-'
 }
 
 const shellStyle: CSSProperties = {

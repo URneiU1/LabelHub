@@ -1,5 +1,7 @@
 export { default as SchemaRenderer } from './SchemaRenderer'
 export { default as SchemaErrorBanner } from './components/SchemaErrorBanner'
 export { parseAnswer, parseTemplateSchema } from './parser'
+export { parseBundleSchema } from './bundleSchema'
+export type { ParsedSchema } from './bundleSchema'
 export { validateAnswer } from './validator'
 export type { AnswerValue, FieldSchema, RenderPayload, SchemaParseError, TemplateSchema, ValidationError, WidgetType } from './types'

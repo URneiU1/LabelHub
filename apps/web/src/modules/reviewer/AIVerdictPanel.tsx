@@ -1,6 +1,7 @@
 import type { AIReviewDetail, Submission } from '../../shared/api/client'
 import { Icon } from '../../shared/components/Icon'
 import StatusBadge from '../../shared/components/StatusBadge'
+import { formatScore } from './format'
 
 // AI 预审面板:复刻 ui-demo AiReview 的视觉(维度 ScoreBar + 评语 + 状态),
 // 数据全部来自真实 aiReview / submission,不造假。
@@ -131,10 +132,6 @@ function scoreColor(label: string, value: number) {
 
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, value))
-}
-
-function formatScore(score: number | null | undefined) {
-  return typeof score === 'number' && Number.isFinite(score) ? String(score) : '-'
 }
 
 function normalizeDimensions(raw: unknown): DimensionRow[] {

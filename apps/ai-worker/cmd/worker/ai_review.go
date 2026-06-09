@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -167,7 +164,7 @@ func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
 	if payload.SubmissionID == 0 || payload.RevisionID == 0 || payload.PromptConfigID == 0 || payload.PromptVersion <= 0 || payload.IdempotencyKey == "" {
 		return aiReviewPayload{}, errors.New("missing required ai review payload fields")
 	}
-	if payload.IdempotencyKey != aiReviewIdempotencyKey(payload.SubmissionID, payload.RevisionID, payload.PromptConfigID, payload.PromptVersion) {
+	if payload.IdempotencyKey != llmreview.AIReviewIdempotencyKey(payload.SubmissionID, payload.RevisionID, payload.PromptConfigID, payload.PromptVersion) {
 		return aiReviewPayload{}, errors.New("ai review idempotency key does not match payload anchors")
 	}
 	return payload, nil
@@ -413,9 +410,4 @@ func shouldFailover(ctx context.Context) bool {
 		return true
 	}
 	return retryCount >= maxRetry
-}
-
-func aiReviewIdempotencyKey(submissionID uint64, revisionID uint64, promptID uint64, promptVersion int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d", submissionID, revisionID, promptID, promptVersion)))
-	return hex.EncodeToString(sum[:])
 }

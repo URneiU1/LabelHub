@@ -1,9 +1,10 @@
 import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
-import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
-import type { AnswerValue, TemplateSchema } from '../../renderer/types'
-import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type ReviewResult, type Submission, type TaskBundle } from '../../shared/api/client'
+import { SchemaRenderer, parseAnswer, parseBundleSchema, type ParsedSchema } from '../../renderer'
+import { formatScore, formatTime } from './format'
+import type { AnswerValue } from '../../renderer/types'
+import { apiGet, apiPost, type AIPromptSummary, type AIReviewDetail, type AuditLog, type ReviewResult, type Submission, type SubmissionRevision, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { Icon } from '../../shared/components/Icon'
 import { parsePayload } from '../../shared/components/payload'
@@ -47,10 +48,6 @@ type ReviewerRuleConfigResponse = {
   activePromptId: number | null
   aiReviewEnabled: boolean
 }
-
-type ParsedSchema =
-  | { ok: true, schema: TemplateSchema }
-  | { ok: false, message: string }
 
 type DemoReviewItem = {
   id: string
@@ -1044,6 +1041,7 @@ function RealReviewDetail({
       <EmptyState title="等待审核" body="从左侧队列选择一条提交记录开始人工审核。" variant="queue" />
     )
   }
+  const revisionDiff = buildRevisionDiff(detail.revisionHistory, detail.revision)
 
   return (
     <>
@@ -1070,6 +1068,16 @@ function RealReviewDetail({
         )}
       </div>
 
+      {revisionDiff ? (
+        <section className="ai-section" style={previousReviewStyle}>
+          <div className="ai-section__head"><span className="ai-section__title">轮次差异</span></div>
+          <div style={diagnosticGridStyle}>
+            <CompareBox title={revisionDiff.previousTitle} rows={revisionDiff.previousRows} />
+            <CompareBox title={revisionDiff.currentTitle} rows={revisionDiff.currentRows} highlight highlightKeys={revisionDiff.changedKeys} />
+          </div>
+        </section>
+      ) : null}
+
       <AIVerdictPanel aiReview={detail.aiReview} submission={detail.submission} />
 
       {detail.latestHumanReview?.reason ? (
@@ -1090,6 +1098,80 @@ function RealReviewDetail({
       <RealAIDiagnostics answer={detail.revision?.answer} aiReview={detail.aiReview} auditLogs={detail.auditLogs ?? []} />
     </>
   )
+}
+
+function buildRevisionDiff(history: SubmissionRevision[] | undefined, currentRevision: SubmissionRevision | null | undefined) {
+  const submitted = (history ?? []).filter((revision) => !revision.draft)
+  if (submitted.length < 2) {
+    return null
+  }
+  const currentId = currentRevision?.id
+  let currentIndex = currentId ? submitted.findIndex((revision) => revision.id === currentId) : submitted.length - 1
+  if (currentIndex <= 0) {
+    currentIndex = submitted.length - 1
+  }
+  if (currentIndex <= 0) {
+    return null
+  }
+  const previous = submitted[currentIndex - 1]
+  const current = submitted[currentIndex]
+  const previousRawRows = answerRows(previous.answer)
+  const currentRawRows = answerRows(current.answer)
+  const keys = orderedRowKeys(previousRawRows, currentRawRows)
+  const previousMap = new Map(previousRawRows)
+  const currentMap = new Map(currentRawRows)
+  const previousRows = keys.map((key): [string, string] => [key, previousMap.get(key) ?? '—'])
+  const currentRows = keys.map((key): [string, string] => [key, currentMap.get(key) ?? '—'])
+  return {
+    previousRows,
+    currentRows,
+    previousTitle: `第 ${previous.revisionNo ?? currentIndex} 轮提交（上一轮）`,
+    currentTitle: `第 ${current.revisionNo ?? currentIndex + 1} 轮提交（本轮 · 修改后）`,
+    changedKeys: changedRowKeys(previousRows, currentRows),
+  }
+}
+
+function answerRows(raw: string | undefined): Array<[string, string]> {
+  if (!raw) {
+    return []
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, displayAnswerValue(value)])
+    }
+    return [['answer', displayAnswerValue(parsed)]]
+  } catch {
+    return [['answer', raw]]
+  }
+}
+
+function displayAnswerValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map(displayAnswerValue).join(', ')
+  }
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value)
+  }
+  if (value === null) {
+    return 'null'
+  }
+  if (value === undefined) {
+    return ''
+  }
+  return String(value)
+}
+
+function changedRowKeys(previousRows: Array<[string, string]>, currentRows: Array<[string, string]>) {
+  const previous = new Map(previousRows)
+  const current = new Map(currentRows)
+  const keys = new Set([...previous.keys(), ...current.keys()])
+  return new Set([...keys].filter((key) => previous.get(key) !== current.get(key)))
+}
+
+function orderedRowKeys(previousRows: Array<[string, string]>, currentRows: Array<[string, string]>) {
+  const previousKeys = new Set(previousRows.map(([key]) => key))
+  return [...previousRows.map(([key]) => key), ...currentRows.map(([key]) => key).filter((key) => !previousKeys.has(key))]
 }
 
 function RealAIDiagnostics({ answer, aiReview, auditLogs }: { answer?: string, aiReview?: AIReviewDetail | null, auditLogs: AuditLog[] }) {
@@ -1121,7 +1203,7 @@ function RealAIDiagnostics({ answer, aiReview, auditLogs }: { answer?: string, a
             <div style={processLogRowStyle}>
               <span>{formatTime(aiReview.createdAt)}</span>
               <span style={neutralPillStyle}>AI 预审</span>
-              <strong>{aiReviewStatusLabel(aiReview.status)} · {aiVerdictLabel(aiReview.verdict)} · {formatAIScore(aiReview.overallScore)}</strong>
+              <strong>{aiReviewStatusLabel(aiReview.status)} · {aiVerdictLabel(aiReview.verdict)} · {formatScore(aiReview.overallScore)}</strong>
             </div>
           ) : null}
           {auditLogs.map((log) => (
@@ -1137,7 +1219,7 @@ function RealAIDiagnostics({ answer, aiReview, auditLogs }: { answer?: string, a
   )
 }
 
-function CompareBox({ title, rows, highlight = false }: { title: string, rows: Array<[string, string]>, highlight?: boolean }) {
+function CompareBox({ title, rows, highlight = false, highlightKeys }: { title: string, rows: Array<[string, string]>, highlight?: boolean, highlightKeys?: Set<string> }) {
   return (
     <div style={compareBoxStyle}>
       <h3 style={sectionTitleStyle}>{title}</h3>
@@ -1145,12 +1227,19 @@ function CompareBox({ title, rows, highlight = false }: { title: string, rows: A
         {rows.map(([key, value]) => (
           <div key={key} style={compareRowStyle}>
             <span>{key}</span>
-            <strong style={highlight && key !== 'cleaned_title' ? highlightValueStyle : undefined}>{value}</strong>
+            <strong style={shouldHighlightCompareRow(highlight, key, highlightKeys) ? highlightValueStyle : undefined}>{value}</strong>
           </div>
         ))}
       </div>
     </div>
   )
+}
+
+function shouldHighlightCompareRow(highlight: boolean, key: string, highlightKeys: Set<string> | undefined) {
+  if (!highlight) {
+    return false
+  }
+  return highlightKeys ? highlightKeys.has(key) : key !== 'cleaned_title'
 }
 
 function Timeline({
@@ -1281,28 +1370,13 @@ function RuleConfigPanel({
   )
 }
 
-function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
-  if (!bundle?.template?.schemaJson) {
-    return { ok: false, message: '当前提交缺少模板快照' }
-  }
-  const result = parseTemplateSchema(bundle.template.schemaJson)
-  if (!result.ok) {
-    return { ok: false, message: `${result.error.field}: ${result.error.message}` }
-  }
-  return { ok: true, schema: result.value }
-}
-
 function isQueueItemActive(item: QueueItem, selected: Submission | null, selectedDemoId: string) {
   return item.kind === 'real' ? item.submission.id === selected?.id : item.item.id === selectedDemoId
 }
 
 function formatAIReviewSummary(submission: Submission) {
   if (!submission.aiVerdict) return 'AI 未预审'
-  return `AI ${submission.aiVerdict} · ${formatAIScore(submission.aiScore)}`
-}
-
-function formatAIScore(score: number | null | undefined) {
-  return typeof score === 'number' && Number.isFinite(score) ? String(score) : '-'
+  return `AI ${submission.aiVerdict} · ${formatScore(submission.aiScore)}`
 }
 
 function clampScore(value: number) {
@@ -1322,17 +1396,6 @@ function formatJSONForDisplay(raw: string | undefined) {
   } catch {
     return raw
   }
-}
-
-function formatTime(raw: string | undefined) {
-  if (!raw) {
-    return '--:--'
-  }
-  const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) {
-    return raw
-  }
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function formatRuleDimensions(raw: unknown) {

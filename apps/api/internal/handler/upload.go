@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/auth"
+	"labelhub-api/internal/envutil"
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
@@ -123,7 +124,7 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 	key := storageKey(file.Filename) + ext
-	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
+	uploadDir := envutil.Default("UPLOAD_DIR", defaultUploadBaseDir)
 	dest := filepath.Join(uploadDir, strconv.FormatUint(taskID, 10), key)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to prepare upload dir")
@@ -183,13 +184,6 @@ func (h UploadHandler) canUploadToTask(claims *auth.Claims, task model.Task) (bo
 }
 
 // --- upload-internal helpers(被 s1_test.go 引用,故保留包级符号)---
-
-func envOrDefault(key string, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
 
 func allowedMIMEKeys() []string {
 	keys := make([]string, 0, len(allowedUploadMIME))
@@ -282,7 +276,7 @@ func (h UploadHandler) Download(c *gin.Context) {
 		return
 	}
 
-	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
+	uploadDir := envutil.Default("UPLOAD_DIR", defaultUploadBaseDir)
 	dest := filepath.Join(uploadDir, strconv.FormatUint(uploaded.TaskID, 10), uploaded.StorageKey)
 	c.FileAttachment(dest, uploaded.OriginalName)
 }

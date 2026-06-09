@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
-import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
+import { SchemaRenderer, parseAnswer, parseBundleSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
 import { apiGet, apiPost, claimTask, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
@@ -16,10 +16,6 @@ import { buildDraftKey, discardLocalDraft, isLocalDraftNewer, loadLocalDraft, ma
 import '../../styles/lh/workbench.css'
 import '../../styles/lh/tasks.css'
 import './plaza.css'
-
-type ParsedSchema =
-  | { ok: true, schema: TemplateSchema }
-  | { ok: false, message: string }
 
 type View = 'plaza' | 'answer'
 type PlazaTab = 'tasks' | 'mydata'
@@ -111,7 +107,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setLabelerSection(showingWorkbench ? 'workbench' : (plazaTab === 'mydata' ? 'mine' : 'tasks'))
   }, [view, activeTask, bundle, loading, plazaTab])
 
-  const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
+  const schema = useMemo(() => parseBundleSchema(bundle, '当前任务未配置标注模板'), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
 
   // 题目导航数据(新端点)。失败时降级:返回 null,作答页仍可用领取兜底导航。
@@ -765,17 +761,6 @@ function taskStatCells(counts: Record<string, number>) {
     cells.push({ label: '打回', value: counts.rejected, toneClass: 'wb-stats-cell__value--danger' })
   }
   return cells
-}
-
-function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
-  if (!bundle?.template?.schemaJson) {
-    return { ok: false, message: '当前任务未配置标注模板' }
-  }
-  const result = parseTemplateSchema(bundle.template.schemaJson)
-  if (!result.ok) {
-    return { ok: false, message: `${result.error.field}: ${result.error.message}` }
-  }
-  return { ok: true, schema: result.value }
 }
 
 function answerDraftKey(answer: AnswerValue) {

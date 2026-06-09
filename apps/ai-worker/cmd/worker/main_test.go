@@ -13,7 +13,7 @@ import (
 )
 
 func TestParseAIReviewPayloadRequiresAnchors(t *testing.T) {
-	validKey := aiReviewIdempotencyKey(1, 2, 3, 1)
+	validKey := llmreview.AIReviewIdempotencyKey(1, 2, 3, 1)
 	_, err := parseAIReviewPayload([]byte(`{"submission_id":1,"revision_id":2,"prompt_config_id":3,"prompt_version":1,"idempotency_key":"` + validKey + `"}`))
 	if err != nil {
 		t.Fatalf("valid payload rejected: %v", err)
@@ -734,5 +734,5 @@ func newAIDryRunTask(payload []byte) *asynq.Task {
 }
 
 func validAIReviewPayloadJSON() []byte {
-	return []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"` + aiReviewIdempotencyKey(42, 901, 7, 2) + `"}`)
+	return []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"` + llmreview.AIReviewIdempotencyKey(42, 901, 7, 2) + `"}`)
 }
