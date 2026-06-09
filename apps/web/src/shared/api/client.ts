@@ -200,6 +200,12 @@ export async function listMyTasks(): Promise<MyTask[]> {
   return data?.tasks ?? []
 }
 
+// 整体领取一个大任务(first_come / assigned 独占):该任务所有题一次性锁给当前 labeler,全部解锁可做。
+// quota 任务不走这里(按题抢单,用逐题领取接口)。
+export async function claimTask(taskId: number): Promise<{ task: Task }> {
+  return apiPost<{ task: Task }>(`/tasks/${taskId}/claim-task`, {})
+}
+
 // 任务基础信息 create/update 的输入。后端会把 JSON 字段(richDescription/tags/rewardConfig)
 // 原样存进 json 列,所以这里用结构化值,提交前序列化成 JSON。
 export type TaskInfoInput = {

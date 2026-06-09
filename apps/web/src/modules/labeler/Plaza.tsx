@@ -3,7 +3,7 @@ import { Button, Toast } from '@douyinfe/semi-ui'
 import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
-import { apiGet, apiPost, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import { apiGet, apiPost, claimTask, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
 import { normalizeStatus } from '../../shared/components/status'
@@ -106,14 +106,16 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
 
   // 题目导航数据(新端点)。失败时降级:返回 null,作答页仍可用领取兜底导航。
-  const loadItemNav = useCallback(async (taskId: number) => {
+  const loadItemNav = useCallback(async (taskId: number): Promise<LabelerTaskItems | null> => {
     setItemNavLoading(true)
     try {
       const data = await apiGet<LabelerTaskItems>(`/tasks/${taskId}/labeler/items`)
       setItemNav(data)
+      return data
     } catch (error) {
       setItemNav(null)
       Toast.error(error instanceof Error ? error.message : '加载题目导航失败,已切换为仅领取模式')
+      return null
     } finally {
       setItemNavLoading(false)
     }
@@ -351,13 +353,36 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [])
 
-  // 进入某任务作答页:记录活动任务、加载题目导航、领取下一题开始作答。
+  // 进入某任务作答页。领取粒度取决于分发策略:
+  //  - quota(配额抢单):按题领取,领下一道可用题并打开。
+  //  - first_come / assigned(独占):整体领取大任务 → 所有题一次性解锁,再打开第一道可做的题。
   const enterTask = useCallback((task: Task) => {
     setActiveTask(task)
     setView('answer')
-    void loadItemNav(task.id)
-    void claim(task.id)
-  }, [claim, loadItemNav])
+    if (task.distribution === 'quota') {
+      void loadItemNav(task.id)
+      void claim(task.id)
+      return
+    }
+    void (async () => {
+      try {
+        await claimTask(task.id)
+      } catch (error) {
+        // 领取失败(如已被他人独占)→ 退回任务广场并提示。
+        Toast.error(error instanceof Error ? error.message : '领取任务失败')
+        setView('plaza')
+        setActiveTask(null)
+        void loadMyTasks()
+        return
+      }
+      const nav = await loadItemNav(task.id)
+      const workable = nav?.items?.find((item) => item.status === 'claimed' || item.status === 'draft' || item.status === 'revising') ?? nav?.items?.[0]
+      if (workable) {
+        void openByItem(task.id, workable.itemId)
+      }
+      void loadMyTasks()
+    })()
+  }, [claim, loadItemNav, loadMyTasks, openByItem])
 
   // 选中导航里的一题:我的题(mine 或有 submissionId)→ 直接打开;available/他人 → 领取下一题。
   const selectNavItem = useCallback((item: LabelerTaskItem) => {

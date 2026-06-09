@@ -55,6 +55,9 @@ const task = {
   status: 'published',
   totalItems: 1,
   finishedItems: 0,
+  // 多数用例验证「逐题领取」作答流程 → 用 quota 任务(enterTask 走逐题 claim);
+  // first_come 整体领取由专门的用例覆盖。
+  distribution: 'quota',
 }
 
 const item = {
@@ -766,6 +769,66 @@ describe('LabelerPlaza claimed-tasks (已领取的任务) + 大任务切换', ()
     expect(await screen.findByLabelText('一句话总评')).toBeInTheDocument()
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/tasks/1/items/11'))
     expect(claimCalls).toBe(0)
+  })
+
+  it('first_come 任务「领取任务」整体领取:claim-task 锁全部题并打开第一题,不走逐题 claim', async () => {
+    const user = userEvent.setup()
+    const fcTask = { ...task, id: 3, title: 'FC 偏好对比', distribution: 'first_come' }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/labeler/tasks') {
+        return [fcTask]
+      }
+      if (path === '/me/submissions') {
+        return []
+      }
+      if (path === '/me/tasks') {
+        return { tasks: [] }
+      }
+      if (path === '/tasks/3/labeler/items') {
+        return {
+          taskId: 3,
+          total: 2,
+          items: [
+            { itemId: 301, externalId: 'P0001', status: 'claimed', mine: true, submissionId: null },
+            { itemId: 302, externalId: 'P0002', status: 'claimed', mine: true, submissionId: null },
+          ],
+          counts: { claimed: 2 },
+        }
+      }
+      if (path === '/tasks/3/items/301') {
+        return {
+          task: fcTask,
+          item: { id: 301, taskId: 3, externalId: 'P0001', payload: JSON.stringify({ prompt: 'x' }), status: 'claimed' },
+          template: { id: 101, schemaJson: JSON.stringify(schema) },
+          submission: null,
+          revision: null,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    let claimTaskCalls = 0
+    let claimItemCalls = 0
+    mockApiPost.mockImplementation(async (path) => {
+      if (path === '/tasks/3/claim-task') {
+        claimTaskCalls += 1
+        return { task: fcTask }
+      }
+      if (path === '/tasks/3/claim') {
+        claimItemCalls += 1
+        return {}
+      }
+      throw new Error(`unexpected POST ${path}`)
+    })
+
+    render(<LabelerPlaza />)
+    await user.click(await screen.findByRole('button', { name: '查看任务详情 FC 偏好对比' }))
+    await user.click(await screen.findByRole('button', { name: '符合要求 领取任务 FC 偏好对比' }))
+
+    // 整体领取 → 打开第一道可做的题(渲染表单);走 claim-task 而非逐题 claim。
+    expect(await screen.findByLabelText('一句话总评')).toBeInTheDocument()
+    await waitFor(() => expect(claimTaskCalls).toBe(1))
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/tasks/3/items/301'))
+    expect(claimItemCalls).toBe(0)
   })
 
   it('工作台 shows a 大任务 switcher and switches between my claimed tasks', async () => {
