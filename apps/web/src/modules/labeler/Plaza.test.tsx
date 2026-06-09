@@ -17,6 +17,8 @@ vi.mock('../../shared/api/client', () => {
       const data = await apiGet('/me/tasks')
       return data?.tasks ?? []
     },
+    // claimTask 走同一个 mock 的 apiPost,测试只需 mock '/tasks/{id}/claim-task' 的返回即可。
+    claimTask: async (taskId: number) => apiPost(`/tasks/${taskId}/claim-task`, {}),
   }
 })
 
