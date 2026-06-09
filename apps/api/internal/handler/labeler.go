@@ -28,6 +28,7 @@ func NewLabelerHandler(db *gorm.DB) LabelerHandler {
 func (h LabelerHandler) Register(api gin.IRouter) {
 	api.GET("/labeler/tasks", middleware.RequireRoles("labeler"), h.ListPublishedTasks)
 	api.POST("/tasks/:taskId/claim", middleware.RequireRoles("labeler"), h.ClaimItem)
+	api.POST("/tasks/:taskId/claim-task", middleware.RequireRoles("labeler"), h.ClaimTask)
 	api.GET("/tasks/:taskId/items/:itemId", middleware.RequireRoles("labeler", "reviewer", "admin"), h.GetItem)
 	api.POST("/tasks/:taskId/items/:itemId/draft", middleware.RequireRoles("labeler"), h.SaveDraft)
 	api.POST("/tasks/:taskId/items/:itemId/submit", middleware.RequireRoles("labeler"), h.SubmitItem)
@@ -161,6 +162,36 @@ func (h LabelerHandler) ClaimItem(c *gin.Context) {
 	}
 }
 
+// ClaimTask 整体领取一个大任务(first_come / assigned 独占):该任务所有题一次性锁给当前 labeler。
+func (h LabelerHandler) ClaimTask(c *gin.Context) {
+	taskID, ok := parseIDParam(c, "taskId")
+	if !ok {
+		return
+	}
+	claims, _ := middleware.Claims(c)
+
+	result, err := submission.ClaimTask(h.db, submission.ClaimInput{
+		TaskID:    taskID,
+		LabelerID: claims.UserID,
+	})
+	switch {
+	case err == nil:
+		httpx.OK(c, gin.H{"task": result.Task})
+	case errors.Is(err, submission.ErrTaskNotFound):
+		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "task not found")
+	case errors.Is(err, submission.ErrTaskNotPublished):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "task is not accepting new claims")
+	case errors.Is(err, submission.ErrWrongClaimMode):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "该任务按题领取，请逐题领取")
+	case errors.Is(err, submission.ErrTaskTaken):
+		httpx.Error(c, http.StatusConflict, "CONFLICT", "任务已被他人领取")
+	case errors.Is(err, submission.ErrNotAssigned):
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "你未被指派到该任务")
+	default:
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to claim task")
+	}
+}
+
 func (h LabelerHandler) GetItem(c *gin.Context) {
 	task, ok := loadTask(h.db, c)
 	if !ok {
@@ -242,34 +273,63 @@ func (h LabelerHandler) MyTasks(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list submissions")
 		return
 	}
-	if len(subs) == 0 {
+	// 我认领的题(整体领取 first_come/assigned 后会一次性认领多题,可能尚未作答 → 没有 submission)。
+	var claimedItems []model.TaskItem
+	if err := h.db.Where("claimed_by = ?", claims.UserID).Order("priority DESC, id ASC").Find(&claimedItems).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list claimed items")
+		return
+	}
+	if len(subs) == 0 && len(claimedItems) == 0 {
 		httpx.OK(c, myTasksResponse{Tasks: []myTaskView{}})
 		return
 	}
 
 	type taskAgg struct {
-		counts       map[string]int
-		total        int
-		inProgress   int
-		resumeItemID *uint64
+		counts        map[string]int
+		total         int
+		inProgress    int
+		resumeItemID  *uint64
+		subItemIDs    map[uint64]bool
+		claimedResume *uint64
 	}
 	order := make([]uint64, 0)
 	byTask := make(map[uint64]*taskAgg)
-	for _, s := range subs {
-		agg, ok := byTask[s.TaskID]
+	get := func(taskID uint64) *taskAgg {
+		agg, ok := byTask[taskID]
 		if !ok {
-			agg = &taskAgg{counts: map[string]int{}}
-			byTask[s.TaskID] = agg
-			order = append(order, s.TaskID) // subs 已按 updated_at DESC,首次出现即最近活跃
+			agg = &taskAgg{counts: map[string]int{}, subItemIDs: map[uint64]bool{}}
+			byTask[taskID] = agg
+			order = append(order, taskID)
 		}
+		return agg
+	}
+	for _, s := range subs {
+		agg := get(s.TaskID) // subs 已按 updated_at DESC,首次出现即最近活跃
 		agg.total++
 		agg.counts[s.Status]++
+		agg.subItemIDs[s.ItemID] = true
 		if s.Status == statemachine.StateDraft || s.Status == statemachine.StateRevising {
 			agg.inProgress++
 			if agg.resumeItemID == nil {
 				id := s.ItemID
 				agg.resumeItemID = &id // 首个进行中(最近)作为恢复目标
 			}
+		}
+	}
+	for _, it := range claimedItems {
+		agg := get(it.TaskID)
+		if !agg.subItemIDs[it.ID] {
+			// 认领但还没作答的题 → 计入进行中(待做),并作为兜底恢复目标。
+			agg.inProgress++
+			if agg.claimedResume == nil {
+				id := it.ID
+				agg.claimedResume = &id
+			}
+		}
+	}
+	for _, agg := range byTask {
+		if agg.resumeItemID == nil {
+			agg.resumeItemID = agg.claimedResume
 		}
 	}
 

@@ -82,6 +82,8 @@ func TestMyTasksGroupsByBigTaskWithMyProgress(t *testing.T) {
 			AddRow(42, 2, 31, me, "draft").
 			AddRow(10, 1, 11, me, "submitted").
 			AddRow(11, 1, 12, me, "approved"))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by"}))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "status", "total_items", "finished_items"}).
 			AddRow(1, "Task One", "published", 30, 7).
@@ -143,6 +145,71 @@ func TestMyTasksGroupsByBigTaskWithMyProgress(t *testing.T) {
 	}
 }
 
+// ClaimTask 整体领取:first_come 任务无人占用 → 200,返回 task。
+func TestClaimTask_FirstComeReturnsTask(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "distribution", "lease_timeout_minutes"}).
+			AddRow(1, "published", "first_come", 0))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 12))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim-task", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	task, _ := data["task"].(map[string]any)
+	if task["id"].(float64) != 1 {
+		t.Fatalf("task id = %v, want 1", task["id"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// ClaimTask 独占:被他人领取 → 409。
+func TestClaimTask_RejectsWhenTaken(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "distribution", "lease_timeout_minutes"}).
+			AddRow(1, "published", "first_come", 0))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectRollback()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/claim-task", nil))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // 没有任何提交时,MyTasks 返回空列表且不查 tasks。
 func TestMyTasksEmptyWhenNoSubmissions(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
@@ -150,6 +217,8 @@ func TestMyTasksEmptyWhenNoSubmissions(t *testing.T) {
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by"}))
 
 	r := newGinWithClaims(&auth.Claims{UserID: 9, Username: "labeler1", Roles: []string{"labeler"}})
 	registerAllHandlers(r, db)
@@ -163,6 +232,56 @@ func TestMyTasksEmptyWhenNoSubmissions(t *testing.T) {
 	data := responseData(t, rec)
 	if tasks, _ := data["tasks"].([]any); len(tasks) != 0 {
 		t.Fatalf("expected 0 tasks, got %d", len(tasks))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// MyTasks 把「整体领取后认领但还没作答」的任务也算进来:进行中 = 认领待做题数,resume 指向第一道待做题。
+func TestMyTasksIncludesClaimedButUnansweredTask(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	const me = 5
+	// 无任何提交,但在任务5 里认领了 3 道题(整体领取后尚未作答)。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by"}).
+			AddRow(71, 5, me).
+			AddRow(72, 5, me).
+			AddRow(73, 5, me))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "status", "total_items", "finished_items"}).
+			AddRow(5, "Claimed Task", "published", 3, 0))
+
+	r := newGinWithClaims(&auth.Claims{UserID: me, Username: "labeler1", Roles: []string{"labeler"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodGet, "/me/tasks", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	tasks, _ := data["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d (body=%s)", len(tasks), rec.Body.String())
+	}
+	tv := tasks[0].(map[string]any)
+	if tv["task"].(map[string]any)["id"].(float64) != 5 {
+		t.Fatalf("task id = %v, want 5", tv["task"].(map[string]any)["id"])
+	}
+	if tv["myInProgress"].(float64) != 3 {
+		t.Fatalf("myInProgress = %v, want 3 (claimed-unanswered)", tv["myInProgress"])
+	}
+	if tv["myTotal"].(float64) != 0 {
+		t.Fatalf("myTotal = %v, want 0 (no submissions yet)", tv["myTotal"])
+	}
+	if tv["resumeItemId"].(float64) != 71 {
+		t.Fatalf("resumeItemId = %v, want 71 (first claimed)", tv["resumeItemId"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
