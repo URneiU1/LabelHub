@@ -5,7 +5,6 @@ import StatusBadge from '../../shared/components/StatusBadge'
 import EmptyState from '../../shared/components/EmptyState'
 import TaskForm from './TaskForm'
 import ImportPanel from './ImportPanel'
-import AssigneePanel from './AssigneePanel'
 import ReviewerPanel from './ReviewerPanel'
 import {
   availableTransitions,
@@ -27,7 +26,7 @@ interface TaskManagePanelProps {
   onTasksChanged: () => void
 }
 
-type DrawerTab = 'info' | 'dataset' | 'distribution' | 'reviewers'
+type DrawerTab = 'info' | 'dataset' | 'reviewers'
 
 export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved, onTasksChanged }: TaskManagePanelProps) {
   // drawerMode: 'create' 新建草稿 / 'edit' 编辑选中任务 / null 关闭。
@@ -245,7 +244,6 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                 {([
                   ['info', '基础信息'],
                   ['dataset', '数据集'],
-                  ['distribution', '分发策略'],
                   ['reviewers', '审核员'],
                 ] as Array<[DrawerTab, string]>).map(([key, label]) => (
                   <button
@@ -269,18 +267,6 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
                 <>
                   {drawerTab === 'info' ? <TaskForm task={drawerTask} onSaved={handleSaved} /> : null}
                   {drawerTab === 'dataset' ? <ImportPanel taskId={drawerTask.id} onImported={onTasksChanged} /> : null}
-                  {drawerTab === 'distribution' ? (
-                    drawerTask.distribution === 'assigned' ? (
-                      <AssigneePanel taskId={drawerTask.id} />
-                    ) : (
-                      <div className="lh-muted lh-text-13">
-                        当前分发策略为「{distributionLabel(drawerTask.distribution ?? 'first_come')}」。
-                        {drawerTask.distribution === 'quota'
-                          ? `每人配额:${drawerTask.quotaPerUser || 0} 题(在「基础信息」里修改)。`
-                          : '在「基础信息」标签页把分发策略改为「指派」并保存后,回到此处即可管理指派的标注员。'}
-                      </div>
-                    )
-                  ) : null}
                   {drawerTab === 'reviewers' ? <ReviewerPanel taskId={drawerTask.id} /> : null}
                 </>
               ) : null}
