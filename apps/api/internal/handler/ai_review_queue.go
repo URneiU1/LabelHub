@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"labelhub-api/internal/httpx"
+	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
 )
 
@@ -59,13 +60,26 @@ func (h ReviewerHandler) AIReviewQueue(c *gin.Context) {
 		}
 	}
 
-	query := h.db.Model(&model.AIReview{}).Order("id DESC").Limit(limit)
+	// Scope AI reviews to the caller's authorized tasks (admin sees all). Join through
+	// submissions so the shared task_reviewers scope (keyed on submissions.task_id) applies —
+	// otherwise any reviewer could enumerate every task's AI reviews and prompt config.
+	claims, _ := middleware.Claims(c)
+	query := h.db.Model(&model.AIReview{}).
+		Joins("JOIN submissions ON submissions.id = ai_reviews.submission_id").
+		Select("ai_reviews.*").
+		Order("ai_reviews.id DESC").Limit(limit)
+	var scoped bool
+	query, scoped = applyReviewQueueScope(query, claims)
+	if !scoped {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "review queue access denied")
+		return
+	}
 	if status := c.Query("status"); status != "" {
-		query = query.Where("status = ?", status)
+		query = query.Where("ai_reviews.status = ?", status)
 	}
 	if before := c.Query("before"); before != "" {
 		if n, err := strconv.ParseUint(before, 10, 64); err == nil {
-			query = query.Where("id < ?", n)
+			query = query.Where("ai_reviews.id < ?", n)
 		}
 	}
 

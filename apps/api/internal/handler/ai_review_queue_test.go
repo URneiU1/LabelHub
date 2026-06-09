@@ -15,7 +15,9 @@ func TestAIReviewQueueListsWithContext(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
 
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.+ORDER BY id DESC`).
+	// Query must join submissions + task_reviewers so a reviewer only sees AI reviews for their
+	// assigned tasks (guards against the IDOR where any reviewer could enumerate all tasks).
+	mock.ExpectQuery(`(?is)^SELECT ai_reviews\..+FROM .ai_reviews.+JOIN submissions.+task_reviewers.+ORDER BY ai_reviews\.id DESC`).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "submission_id", "prompt_config_id", "idempotency_key", "prompt_version",
 			"verdict", "overall_score", "dimensions", "status", "retry_count",
