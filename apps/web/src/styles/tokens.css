@@ -172,18 +172,6 @@ select:focus-visible,
   }
 }
 
-@keyframes lh-top-progress {
-  0% {
-    transform: translateX(-65%) scaleX(0.35);
-  }
-  55% {
-    transform: translateX(15%) scaleX(0.55);
-  }
-  100% {
-    transform: translateX(115%) scaleX(0.35);
-  }
-}
-
 .lh-skeleton-line {
   height: 10px;
   border-radius: var(--radius-sm);
@@ -191,38 +179,10 @@ select:focus-visible,
   animation: lh-skeleton-pulse 1.2s var(--ease-out) infinite;
 }
 
-.lh-top-progress {
-  position: fixed;
-  z-index: 1000;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  overflow: hidden;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
-}
-
-.lh-top-progress[data-active='true'] {
-  opacity: 1;
-}
-
-.lh-top-progress::before {
-  content: '';
-  display: block;
-  width: 65%;
-  height: 100%;
-  transform-origin: left center;
-  background: var(--color-accent);
-  animation: lh-top-progress 1.25s var(--ease-out) infinite;
-}
-
 /* 尊重系统「减少动态效果」:停掉无限循环动画(skeleton 脉冲 / 顶部进度条),
    并把其余装饰性动画/过渡降到近乎瞬时,避免前庭不适。 */
 @media (prefers-reduced-motion: reduce) {
-  .lh-skeleton-line,
-  .lh-top-progress::before {
+  .lh-skeleton-line {
     animation: none;
   }
 

@@ -1,4 +1,4 @@
-package aiprompt
+package llmreview_test
 
 import (
 	"context"
