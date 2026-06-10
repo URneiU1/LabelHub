@@ -4,6 +4,76 @@
 > - **5 分钟版**(评委本机跑)— 跳过粗体 *【10 min only】* 段落
 > - **10 分钟版**(录制视频/现场 demo)— 全程跑
 
+---
+
+## ⭐ 从零录制完整流程(线上 demo · 推荐主路径)
+
+> 线上环境 `http://43.155.210.70` 已被多轮测试用过,数据是"住过人"的脏状态(labeler1 有 draft、preference_compare 已被认领、存在空的测试任务、AI 预审尚未在真实提交上验证过)。**直接照口播大纲录会卡镜头**。本节给出一条从干净状态起步、可一次成片的完整路径。三段:**重置 → 录前 smoke → 正式录**。
+
+### Phase 0 · 重置 prod 到干净状态(不上镜,约 3 分钟)
+
+幂等 `seed` 只"补建不存在的",**清不掉已有的 draft / 认领 / 测试任务**。真正干净要清空数据卷。用 `up -d`(复用现有镜像、**不加 `--build`**),避免重新编译失败导致线上下机。
+
+```bash
+ssh -i ~/Downloads/labelhub.pem ubuntu@43.155.210.70
+cd /home/ubuntu/labelhub
+DC="docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml"
+
+# (可选)先备份当前库
+$DC exec -T mysql sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' > ~/labelhub-backup-before-demo.sql
+
+$DC down -v          # 清空 mysql/redis/exports 数据卷
+$DC up -d            # 复用现有镜像重起;api 启动自动迁移建表
+sleep 60 && $DC ps   # 等 7 个服务 running/healthy 再继续
+
+$DC exec -e SEED_ALLOW_IN_PROD=true api seed   # 写入 2 个官方任务 + 9 个账号
+curl -s http://localhost/health                # → ok
+```
+
+**重置后的干净基线**:`qa_quality` 30 题全可领 / `preference_compare` 12 题全可领 / 无空任务 / 所有账号无 draft 无认领 / 审核队列为空。
+
+### Phase 1 · 录前 smoke 验 AI 预审(不上镜,约 3 分钟)
+
+**这一步决定 reviewer 场能不能录** —— 必须确认提交后 AI Worker 真的产出 verdict。用 `labeler2` + `preference_compare` 跑,**不碰** `labeler1` 和 `qa_quality`(留给正式录制做全新流程)。
+
+1. 登 `labeler2 / 123456` → 任务广场领 `preference_compare` → 答第一题 → 提交。
+2. 等 5-10 秒,登 `reviewer1 / 123456` → 审核队列 / AI 预审队列。
+3. **判定**:
+   - ✅ 队列里出现刚才那条、带 AI verdict(pass/reject/uncertain)+ 维度评分 → AI 管线 OK,可以正式录。
+   - ❌ 一直不出现 verdict → AI 没 fire。排查:`$DC logs worker | tail -50` 看是否 provider/key 报错;prod `deploy/.env` 的 `LLM_PROVIDER` 若是真豆包,确认 `LLM_API_KEY` 有效;**兜底**把 `LLM_PROVIDER=mock` 重起 worker(`$DC up -d worker`)→ deterministic mock 一定出 verdict,适合稳定录制。
+
+> smoke 会在 preference_compare 上留一条提交。正式录用的是 qa_quality(另一个任务),互不影响;若想连 preference_compare 也干净,smoke 后再跑一次 Phase 0 重置即可。
+
+### Phase 2 · 正式录制(上镜)· 用 `qa_quality` + 全新 `labeler1`
+
+按下方《录制时口播大纲》Scene 0→4 走,落到具体数据:
+
+| Scene | 账号 | 任务 | 是否改数据 |
+|---|---|---|---|
+| 0 开场 | — | — | 否 |
+| 1 Owner 展示 | `owner1` | `qa_quality` | 否(Designer/AI Prompt/Golden Sample/Stats 都是只读展示) |
+| 2 Labeler | `labeler1` | `qa_quality` | 领题+提交(全新,first_come 整体领) |
+| 3 Reviewer | `reviewer1` | 刚提交那条 | 通过(或录 **打回→修订→复审** 闭环展示状态机) |
+| 4 Export | `owner1` | `qa_quality` | 异步导出+下载 |
+
+- **可选加分点(30-60s)**:Scene 1 里展示 Owner「新建任务」入口 + Designer 拖一个物料,体现"从零搭建数据生产"的能力,不必建完整任务。
+- **强烈建议**:Scene 3 录一遍 **AI reject 或人工打回 → labeler 修订重提 → reviewer 复审通过** 的闭环 —— 这是最能体现「长链路工作流状态机」考察点的镜头(`submitted→ai_reviewing→…→revising→submitted→…→approved`)。
+
+### Phase 3 · 录后
+
+按本文末尾《录制后》清单走;若录制中任一界面与现有截图不一致,顺手刷新 `assets/screenshots/` 4 个关键截图。
+
+### 一次性失败兜底
+
+| 现象 | 处理 |
+|---|---|
+| labeler1 进作答页自动恢复了旧 draft | 没重置干净 —— 回 Phase 0 重跑 `down -v` |
+| reviewer 队列里 AI verdict 不出现 | 回 Phase 1 排查;真豆包不稳就切 `LLM_PROVIDER=mock` 重起 worker 再录 |
+| 任务广场冒出空的「商品标题清洗」 | 没重置干净(那是测试残留),`down -v` 后只剩 2 个官方任务 |
+| 录到一半数据乱了 | 不要现场修库;停录 → Phase 0 重置 → 重录 |
+
+---
+
 ## 录制总流程
 
 ### 1. 先定录制线路
@@ -217,4 +287,4 @@ make web
 | 前端白屏 | F12 → Network tab,通常是 :8080 被占,改 API_PORT |
 | Designer 拖拽失灵 | 切到 1920 视口(响应式 ≤1599 时拖拽手柄藏起来) |
 | 刚提交的题没进 Reviewer 队列 | 先刷新队列;仍没有就切已有 demo submission,录完后用 smoke 脚本补查 AI worker |
-| 线上任务被误下线/数据污染 | 重跑 seed 或切本地 mock 线路,视频里不要现场修库 |
+| 线上任务被误下线/数据污染 | 走本文「Phase 0 · 重置」的 `down -v` 重置(幂等 seed 清不掉已有 draft/认领);视频里不要现场修库 |
