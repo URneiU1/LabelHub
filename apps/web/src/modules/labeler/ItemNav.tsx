@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LabelerTaskItem, LabelerTaskItems, MyTask } from '../../shared/api/client'
 import { normalizeStatus } from '../../shared/components/status'
 
@@ -27,6 +28,32 @@ function isDoneItem(item: LabelerTaskItem) {
   return DONE_STATUSES.includes(normalizeStatus(item.status))
 }
 
+// 单行行高:.wb-side__item 固定 38px + margin-bottom 2px(见 workbench.css)。虚拟滚动按此定高切片。
+export const ITEM_ROW_HEIGHT = 40
+const OVERSCAN = 8
+
+// visibleRange 计算定高列表在当前滚动位置下应渲染的 [start, end)(含 overscan 缓冲)。
+// viewportHeight<=0(未测量 / 测试 / SSR)时返回整段,优雅回退为「渲染全部」,保证题目始终可达。
+export function visibleRange(
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  total: number,
+  overscan = OVERSCAN,
+): { start: number, end: number } {
+  if (total <= 0) {
+    return { start: 0, end: 0 }
+  }
+  if (viewportHeight <= 0 || rowHeight <= 0) {
+    return { start: 0, end: total }
+  }
+  const first = Math.floor(scrollTop / rowHeight)
+  const visibleCount = Math.ceil(viewportHeight / rowHeight)
+  const start = Math.max(0, first - overscan)
+  const end = Math.min(total, first + visibleCount + overscan)
+  return { start, end }
+}
+
 type ItemNavProps = {
   nav: LabelerTaskItems | null
   loading: boolean
@@ -45,6 +72,41 @@ export default function ItemNav({ nav, loading, activeItemId, onSelect, onBack, 
   const percent = total > 0 ? Math.round((done / total) * 100) : 0
   // 仅当我领取了多个大任务、且当前任务在其中时,才显示大任务切换器(避免受控 select 值不在选项内告警)。
   const canSwitchTask = !!onSwitchTask && myTasks.length > 1 && myTasks.some((myTask) => myTask.task.id === activeTaskId)
+
+  // 定高虚拟滚动:只渲染视口内的题目按钮,5000 题时把 DOM 从 ~5000 节点压到常数级。
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    setViewportHeight(el.clientHeight)
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => setViewportHeight(el.clientHeight))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // 切到新题时把当前题滚入视口(虚拟化后当前题可能不在渲染窗口,必须主动定位)。
+  useEffect(() => {
+    const el = listRef.current
+    if (!el || activeItemId === undefined || viewportHeight <= 0) return
+    const index = items.findIndex((item) => item.itemId === activeItemId)
+    if (index < 0) return
+    const itemTop = index * ITEM_ROW_HEIGHT
+    const itemBottom = itemTop + ITEM_ROW_HEIGHT
+    if (itemTop < el.scrollTop) {
+      el.scrollTop = itemTop
+    } else if (itemBottom > el.scrollTop + viewportHeight) {
+      el.scrollTop = itemBottom - viewportHeight
+    }
+  }, [activeItemId, items, viewportHeight])
+
+  const { start, end } = visibleRange(scrollTop, viewportHeight, ITEM_ROW_HEIGHT, items.length)
+  const topPad = start * ITEM_ROW_HEIGHT
+  const bottomPad = Math.max(0, (items.length - end) * ITEM_ROW_HEIGHT)
+  const visible = items.slice(start, end)
 
   return (
     <aside className="wb-side">
@@ -78,29 +140,34 @@ export default function ItemNav({ nav, loading, activeItemId, onSelect, onBack, 
         <div className="wb-side__more">加载题目中...</div>
       ) : null}
 
-      {items.map((item, index) => {
-        const view = statusView(item.status)
-        const active = item.itemId === activeItemId
-        const label = item.externalId || `题目 ${item.itemId}`
-        // 只能打开自己的题(已领/有提交);待标/他人的题不可点 —— 题目按顺序领取,无法从导航定向领某一题,
-        // 领新题走页脚「下一题 / 跳过」。这样点导航只在自己的题间跳转,不会误触发领取。
-        const openable = item.mine || item.submissionId != null
-        return (
-          <button
-            key={item.itemId}
-            type="button"
-            disabled={!openable}
-            title={openable ? undefined : '该题尚未领取,无法直接打开;用下方「下一题 / 跳过」领取下一题'}
-            aria-label={`第 ${index + 1} 题 ${label} ${view.label}`}
-            className={'wb-side__item' + (active ? ' wb-side__item--active' : '')}
-            onClick={() => onSelect(item)}
-          >
-            <span className="wb-side__no">#{index + 1}</span>
-            <span className="wb-side__name">{label}</span>
-            <span className={`wb-side__status wb-side__status--${view.dot}`}>{view.label}</span>
-          </button>
-        )
-      })}
+      <div className="wb-side__list" ref={listRef} onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
+        {topPad > 0 ? <div style={{ height: topPad }} aria-hidden="true" /> : null}
+        {visible.map((item, offset) => {
+          const index = start + offset
+          const view = statusView(item.status)
+          const active = item.itemId === activeItemId
+          const label = item.externalId || `题目 ${item.itemId}`
+          // 只能打开自己的题(已领/有提交);待标/他人的题不可点 —— 题目按顺序领取,无法从导航定向领某一题,
+          // 领新题走页脚「下一题 / 跳过」。这样点导航只在自己的题间跳转,不会误触发领取。
+          const openable = item.mine || item.submissionId != null
+          return (
+            <button
+              key={item.itemId}
+              type="button"
+              disabled={!openable}
+              title={openable ? undefined : '该题尚未领取,无法直接打开;用下方「下一题 / 跳过」领取下一题'}
+              aria-label={`第 ${index + 1} 题 ${label} ${view.label}`}
+              className={'wb-side__item' + (active ? ' wb-side__item--active' : '')}
+              onClick={() => onSelect(item)}
+            >
+              <span className="wb-side__no">#{index + 1}</span>
+              <span className="wb-side__name">{label}</span>
+              <span className={`wb-side__status wb-side__status--${view.dot}`}>{view.label}</span>
+            </button>
+          )
+        })}
+        {bottomPad > 0 ? <div style={{ height: bottomPad }} aria-hidden="true" /> : null}
+      </div>
 
       {!loading && items.length === 0 ? (
         <div className="wb-side__more">暂无题目</div>

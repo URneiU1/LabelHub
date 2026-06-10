@@ -8,7 +8,18 @@
   background: #fff;
   border-right: 1px solid var(--lh-border);
   padding: 20px 12px;
+  /* 头部(返回/切换/进度)常驻,题目列表在 .wb-side__list 内独立虚拟滚动 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 虚拟滚动容器:固定题目行高(见 ITEM_ROW_HEIGHT),只渲染视口内行 */
+.wb-side__list {
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
+  margin-top: 8px;
 }
 
 .wb-side__title {
@@ -45,6 +56,10 @@
   color: var(--lh-text-1);
   cursor: pointer;
   margin-bottom: 2px;
+  /* 固定行高 = 虚拟滚动按 ITEM_ROW_HEIGHT(38 + 2 margin = 40)切片的前提 */
+  height: 38px;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .wb-side__item:hover {
