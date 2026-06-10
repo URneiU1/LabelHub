@@ -33,22 +33,36 @@ $DC up -d --wait --wait-timeout 150   # 复用现有镜像重起并等健康;api
 #        $DC cp tools/seed api:/tools/seed
 $DC exec -e SEED_ALLOW_IN_PROD=true -T api seed   # 写入 2 个官方任务 + 9 个账号
 curl -s http://localhost/health                   # → ok
-$DC exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -e "SELECT id,title,status FROM tasks;"'  # 应有 2 行
+
+# 📌 本次 demo 用单任务设计:seed 会建 qa_quality(id=1) + preference_compare(id=2),
+#    但正式录里要「现场新建第 2 个任务」演示创建,所以先删掉 seed 的 preference_compare,
+#    让列表初始只剩 qa_quality(任务没有删除接口,只能 SQL 删;无外键约束,删依赖行即可):
+$DC exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -e "
+DELETE FROM acceptance_batches WHERE task_id=2; DELETE FROM ai_dry_runs WHERE task_id=2;
+DELETE FROM ai_prompt_configs WHERE task_id=2; DELETE FROM exports WHERE task_id=2;
+DELETE FROM golden_samples WHERE task_id=2; DELETE FROM submissions WHERE task_id=2;
+DELETE FROM task_assignees WHERE task_id=2; DELETE FROM task_items WHERE task_id=2;
+DELETE FROM task_reviewers WHERE task_id=2; DELETE FROM task_templates WHERE task_id=2;
+DELETE FROM uploaded_files WHERE task_id=2; DELETE FROM tasks WHERE id=2;
+SELECT id,title,status FROM tasks;"'   # 应只剩 1 行 qa_quality
 ```
 
 > 🐞 **已知部署坑(根因 + 已修复)**:历史 `apps/api/Dockerfile` 只 COPY 了 binary + migration,**没 COPY `tools/seed/` 数据集**,所以容器内 `seed` 找不到 baseline/template 文件 → `down -v` 重置后账号能 seed 但 2 个官方任务 seed 失败。
 > **2026-06-10 已永久修复并部署**:Dockerfile 最终 stage 加了 `COPY tools/seed /tools/seed`,prod 的 api 镜像已重 build,`/tools/seed` 进镜像。现在 `down -v` 重置后**直接 `seed` 即可**,无需任何 cp 绕过。上面注释里的 `mkdir /tools`+`docker cp` 只对**未重 build 的旧镜像**才需要。
 
-**重置后的干净基线**:`qa_quality` 30 题全可领 / `preference_compare` 12 题全可领 / 无空任务 / 所有账号无 draft 无认领 / 审核队列为空。
+**重置 + 删 preference_compare 后的干净基线(单任务 demo)**:列表只剩 `qa_quality`(30 题全可领) / 无空任务 / 所有账号无 draft 无认领 / 审核队列为空 / AI 真豆包可用。正式录里在镜头上现场新建第 2 个任务。
 
 ### Phase 1 · 录前 smoke 验 AI 预审(不上镜,约 3 分钟)
 
-**这一步决定 reviewer 场能不能录** —— 必须确认提交后 AI Worker 真的产出 verdict。用 `labeler2` + `preference_compare` 跑,**不碰** `labeler1` 和 `qa_quality`(留给正式录制做全新流程)。
+**这一步决定 reviewer 场能不能录** —— 必须确认提交后 AI Worker 真的产出 verdict。
 
-1. 登 `labeler2 / 123456` → 任务广场领 `preference_compare` → 答第一题 → 提交。
-2. 等 5-10 秒,登 `reviewer1 / 123456` → 审核队列 / AI 预审队列。
-3. **判定**:
-   - ✅ 队列里出现刚才那条、带 AI verdict(pass/reject/uncertain)+ 维度评分 → AI 管线 OK,可以正式录。
+> 📌 **本次 demo 用单任务设计**:线上只保留 `qa_quality`(富任务,跑全链路),`preference_compare` 已删(见 Phase 0 注),正式录里在镜头上**现场新建第 2 个任务**演示「创建→发布」。因为 `qa_quality` 是 `first_come`(整体独占领取),**没有第二个任务给 smoke 用**——所以:
+>
+> - **AI 预审已于 2026-06-10 实测可用**(真豆包,sub 提交后 ~3s 出 `pass`/维度分)。正常情况**可跳过单独 smoke,直接录**:Scene 2 里 labeler1 提交的第一条就是 live 验证,Scene 3 reviewer 就能看到 verdict。
+> - 想录前再保险一次:用 `labeler1` 在 `qa_quality` 上真跑一遍(领题→提交→reviewer 看 verdict),**然后 Phase 0 重置 + 重删 preference_compare** 回到全新态再正式录(因 first_come 独占,smoke 会占掉 qa_quality)。
+
+判定 AI 是否 fire(任何时候提交完一条后):
+   - ✅ reviewer 审核队列/AI 预审队列里出现刚才那条、带 AI verdict(pass/reject/uncertain)+ 维度评分 → AI 管线 OK。
    - ❌ 一直不出现 verdict → AI 没 fire。排查:`$DC logs --tail=80 worker` 看报错。`llm provider returned HTTP 401` = key 认证失败;`404` = `LLM_MODEL`/endpoint 不存在。
      - **最常见的坑(真实踩过)**:401 不一定是 key 本身坏。改完 `deploy/.env` 后**必须用 `--force-recreate` 重启 worker**,否则 worker 还在用旧内存里的旧 key 跑、永远 401:
        ```bash
@@ -58,22 +72,23 @@ $DC exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"
      - 真豆包修不好,**兜底切 mock**:`sed -i 's/^LLM_PROVIDER=.*/LLM_PROVIDER=mock/' deploy/.env` → `$DC up -d --force-recreate worker` → deterministic mock 必出 verdict,适合稳定录制。
 
 > ⚠️ **改任何 `deploy/.env` 后重启 worker 一律加 `--force-recreate`** —— compose 不重建容器就不会重载 env,这是本项目最坑的一处。
->
-> smoke 会在 preference_compare 上留一条提交。正式录用的是 qa_quality(另一个任务),互不影响;若想连 preference_compare 也干净,smoke 后再跑一次 Phase 0 重置即可。
 
 ### Phase 2 · 正式录制(上镜)· 用 `qa_quality` + 全新 `labeler1`
 
-按下方《录制时口播大纲》Scene 0→4 走,落到具体数据:
+按下方《录制时口播大纲》Scene 0→4 走,落到具体数据(线上只有 `qa_quality` 一个富任务):
 
 | Scene | 账号 | 任务 | 是否改数据 |
 |---|---|---|---|
 | 0 开场 | — | — | 否 |
-| 1 Owner 展示 | `owner1` | `qa_quality` | 否(Designer/AI Prompt/Golden Sample/Stats 都是只读展示) |
+| 1a Owner 展示 | `owner1` | `qa_quality` | 否(Designer Tabs/Group + AI Prompt/Golden Sample/Stats 只读展示「深度」) |
+| **1b Owner 创建任务** | `owner1` | **现场新建第 2 个** | **新建→Designer 拖物料→发布**(演示「创建→发布」生命周期 + 数据生产能力) |
 | 2 Labeler | `labeler1` | `qa_quality` | 领题+提交(全新,first_come 整体领) |
 | 3 Reviewer | `reviewer1` | 刚提交那条 | 通过(或录 **打回→修订→复审** 闭环展示状态机) |
 | 4 Export | `owner1` | `qa_quality` | 异步导出+下载 |
 
-- **可选加分点(30-60s)**:Scene 1 里展示 Owner「新建任务」入口 + Designer 拖一个物料,体现"从零搭建数据生产"的能力,不必建完整任务。
+- **Scene 1b「创建→发布」具体步骤**(~2-3 min,必录):
+  `owner1` → 新建任务 → 填**标题 + baseline 说明**(都必填)→ 保存(生成 `draft`)→ 打开该任务进 **Designer** → 拖 2-3 个物料(如 Radio/Tags)→ 保存模板(**发布前必须有绑定模板**)→ 点【发布】→ `draft → published` ✓。**发布不要求有题**,所以不用导入数据,轻量演示生命周期即可。
+  > 分工:`qa_quality`(现成富任务)展示 Designer 高级物料 + AI 配置 + 全链路;**新建的轻量任务**展示「从零创建→发布」。两者互补、不冗余。
 - **强烈建议**:Scene 3 录一遍 **AI reject 或人工打回 → labeler 修订重提 → reviewer 复审通过** 的闭环 —— 这是最能体现「长链路工作流状态机」考察点的镜头(`submitted→ai_reviewing→…→revising→submitted→…→approved`)。
 
 ### Phase 3 · 录后
