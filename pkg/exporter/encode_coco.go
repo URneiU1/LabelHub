@@ -57,6 +57,12 @@ func EncodeCOCO(w io.Writer, cols []Column, rows []Row) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		if len(itemID) == 0 || string(itemID) == "null" {
+			// No usable item_id → skip the row entirely: never emit a ghost image/annotation
+			// keyed on a null id. Unreachable on the product export path (the rows JOIN
+			// guarantees item_id); this is library-level robustness for any caller.
+			continue
+		}
 		if _, seen := seenItems[string(itemID)]; !seen {
 			seenItems[string(itemID)] = struct{}{}
 			payload, err := marshalValue(pick(row, "payload"))

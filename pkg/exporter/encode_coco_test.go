@@ -7,6 +7,47 @@ import (
 	"testing"
 )
 
+func TestEncodeCOCO_SkipsRowsWithoutItemID(t *testing.T) {
+	var buf bytes.Buffer
+	cols := []Column{{Source: "answer", Export: "答案"}}
+	rows := []Row{
+		{
+			{Key: "submission_id", Value: uint64(201)},
+			{Key: "item_id", Value: uint64(7)},
+			{Key: "external_id", Value: "Q7"},
+			{Key: "payload", Value: map[string]any{"text": "ok"}},
+			{Key: "answer", Value: map[string]any{"label": "猫"}},
+		},
+		{
+			// 缺 item_id → 必须整行跳过,绝不能产出 {"id":null} 的幽灵 image/annotation。
+			{Key: "submission_id", Value: uint64(202)},
+			{Key: "payload", Value: map[string]any{"text": "orphan"}},
+			{Key: "answer", Value: map[string]any{"label": "狗"}},
+		},
+	}
+	if _, err := EncodeCOCO(&buf, cols, rows); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	doc := decodeCOCO(t, buf.Bytes())
+
+	images := doc["images"].([]any)
+	if len(images) != 1 {
+		t.Fatalf("expected 1 image (item_id-less row skipped), got %d", len(images))
+	}
+	if images[0].(map[string]any)["id"] != float64(7) {
+		t.Fatalf("image id = %v", images[0].(map[string]any)["id"])
+	}
+	for _, img := range images {
+		if img.(map[string]any)["id"] == nil {
+			t.Fatal("ghost image with id:null leaked into COCO output")
+		}
+	}
+	annotations := doc["annotations"].([]any)
+	if len(annotations) != 1 {
+		t.Fatalf("expected 1 annotation (orphan row skipped), got %d", len(annotations))
+	}
+}
+
 // cocoRows 模拟 LoadApprovedRows 的标准行:item 1 有两条 approved 提交(overlap),item 2 一条。
 func cocoRows() []Row {
 	return []Row{
