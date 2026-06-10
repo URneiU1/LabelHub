@@ -510,6 +510,9 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       const resumable = subs.find((submission) => isResumable(submission.status))
       if (resumable) {
         openFromMyData(resumable)
+      } else {
+        // 没有进行中的任务:明确提示去领取,而不是默默回落到任务广场让用户困惑。
+        Toast.info('还没有进行中的任务,请先在任务广场领取任务')
       }
     })
   }, [initialView, loadMySubmissions, openFromMyData])
