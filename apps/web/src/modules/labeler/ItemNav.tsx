@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LabelerTaskItem, LabelerTaskItems, MyTask } from '../../shared/api/client'
 import { normalizeStatus } from '../../shared/components/status'
+import { ITEM_ROW_HEIGHT, visibleRange } from './itemNavGeometry'
 
 // 题目导航里每种状态对应的中文标签 + 颜色 dot 类(复用 workbench.css 的 .wb-side__status--*)。
 // available=待标(idle) / claimed=进行中(active) / draft=草稿 / submitted+审核中=已提交 / approved=通过 / rejected=打回 / revising=待修改 / taken=他人。
@@ -26,32 +27,6 @@ const DONE_STATUSES = ['submitted', 'ai_reviewing', 'human_reviewing', 'approved
 
 function isDoneItem(item: LabelerTaskItem) {
   return DONE_STATUSES.includes(normalizeStatus(item.status))
-}
-
-// 单行行高:.wb-side__item 固定 38px + margin-bottom 2px(见 workbench.css)。虚拟滚动按此定高切片。
-export const ITEM_ROW_HEIGHT = 40
-const OVERSCAN = 8
-
-// visibleRange 计算定高列表在当前滚动位置下应渲染的 [start, end)(含 overscan 缓冲)。
-// viewportHeight<=0(未测量 / 测试 / SSR)时返回整段,优雅回退为「渲染全部」,保证题目始终可达。
-export function visibleRange(
-  scrollTop: number,
-  viewportHeight: number,
-  rowHeight: number,
-  total: number,
-  overscan = OVERSCAN,
-): { start: number, end: number } {
-  if (total <= 0) {
-    return { start: 0, end: 0 }
-  }
-  if (viewportHeight <= 0 || rowHeight <= 0) {
-    return { start: 0, end: total }
-  }
-  const first = Math.floor(scrollTop / rowHeight)
-  const visibleCount = Math.ceil(viewportHeight / rowHeight)
-  const start = Math.max(0, first - overscan)
-  const end = Math.min(total, first + visibleCount + overscan)
-  return { start, end }
 }
 
 type ItemNavProps = {

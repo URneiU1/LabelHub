@@ -65,7 +65,7 @@ export function buildLargeSchema(leafCount = 300): RawSchema {
     label: '分页',
     tabs: [
       { label: 'A', fields: tabA },
-      { label: 'B', fields: tabB.length > 0 ? tabB : [leafField(index++)] },
+      { label: 'B', fields: tabB.length > 0 ? tabB : [leafField(index)] },
     ],
   })
 

@@ -42,6 +42,7 @@ export default function AIReviewQueue() {
 
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 拉取队列前先置 loading=true
     setLoading(true)
     void listAIReviews({ status: status || undefined, limit: 100 })
       .then((data) => {

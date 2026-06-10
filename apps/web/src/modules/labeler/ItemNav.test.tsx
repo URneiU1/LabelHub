@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { visibleRange, ITEM_ROW_HEIGHT } from './ItemNav'
+import { visibleRange, ITEM_ROW_HEIGHT } from './itemNavGeometry'
 
 // 虚拟滚动核心是定高切片的纯函数 visibleRange;DOM 渲染交给浏览器手验,这里锁住区间逻辑。
 describe('visibleRange', () => {
