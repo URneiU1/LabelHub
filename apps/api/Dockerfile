@@ -38,6 +38,9 @@ COPY --from=build /out/api /usr/local/bin/api
 COPY --from=build /out/worker /usr/local/bin/worker
 COPY --from=build /out/seed /usr/local/bin/seed
 COPY --from=build /src/apps/api/internal/migration ./internal/migration
+# seed 在容器内(WORKDIR /app)按 ../../tools/seed/... 读 baseline/template/dataset 文件,
+# 即 /tools/seed/...。打进镜像,否则 down -v 重置后 reseed 找不到数据集、官方任务 seed 失败。
+COPY tools/seed /tools/seed
 
 RUN mkdir -p /var/lib/labelhub/exports /var/lib/labelhub/uploads \
 	&& chown -R labelhub:labelhub /var/lib/labelhub

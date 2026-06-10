@@ -13,7 +13,7 @@ import (
 )
 
 func TestParseAIReviewPayloadRequiresAnchors(t *testing.T) {
-	validKey := aiReviewIdempotencyKey(1, 2, 3, 1)
+	validKey := llmreview.AIReviewIdempotencyKey(1, 2, 3, 1)
 	_, err := parseAIReviewPayload([]byte(`{"submission_id":1,"revision_id":2,"prompt_config_id":3,"prompt_version":1,"idempotency_key":"` + validKey + `"}`))
 	if err != nil {
 		t.Fatalf("valid payload rejected: %v", err)
@@ -37,8 +37,10 @@ func TestHandleAIReviewRejectsMismatchedIdempotencyWithoutDBClaim(t *testing.T) 
 
 	handler := workerHandlers{db: db, logger: zap.NewNop(), evaluator: failingEvaluator{}}
 	rawPayload := []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"mismatch"}`)
-	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); err != nil {
-		t.Fatalf("handleAIReview returned error: %v", err)
+	// A corrupt/tampered payload is rejected at parse time (no DB claim) and surfaced as a
+	// non-retryable failure so it is visible in the asynq dead queue, not silently dropped.
+	if err := handler.handleAIReview(context.Background(), newAsynqTask(rawPayload)); !errors.Is(err, asynq.SkipRetry) {
+		t.Fatalf("expected SkipRetry for mismatched idempotency key, got: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected DB call for invalid payload: %v", err)
@@ -230,7 +232,7 @@ func TestCompleteMovesUncertainSubmissionToManualReview(t *testing.T) {
 		WithArgs("manual_review", "uncertain", 75.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-		WithArgs(payload.SubmissionID, "manual_review", "ai_uncertain", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(payload.SubmissionID, "manual_review", nil, "ai_uncertain", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -277,7 +279,7 @@ func TestCompleteRejectBouncesSubmissionToRevising(t *testing.T) {
 		WithArgs("revising", "reject", 30.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-		WithArgs(payload.SubmissionID, "revising", "ai_reject", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(payload.SubmissionID, "revising", nil, "ai_reject", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -332,7 +334,7 @@ func TestHandleAIReviewVerdictStateMapping(t *testing.T) {
 				WithArgs(tt.wantToState, tt.verdict, tt.score, payload.SubmissionID, payload.RevisionID).
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-				WithArgs(payload.SubmissionID, tt.wantToState, tt.wantEvent, sqlmock.AnyArg(), sqlmock.AnyArg()).
+				WithArgs(payload.SubmissionID, tt.wantToState, nil, tt.wantEvent, sqlmock.AnyArg(), sqlmock.AnyArg()).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 			mock.ExpectCommit()
 
@@ -734,5 +736,5 @@ func newAIDryRunTask(payload []byte) *asynq.Task {
 }
 
 func validAIReviewPayloadJSON() []byte {
-	return []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"` + aiReviewIdempotencyKey(42, 901, 7, 2) + `"}`)
+	return []byte(`{"submission_id":42,"revision_id":901,"prompt_config_id":7,"prompt_version":2,"idempotency_key":"` + llmreview.AIReviewIdempotencyKey(42, 901, 7, 2) + `"}`)
 }

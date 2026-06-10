@@ -48,6 +48,82 @@ func TestClaim_FirstComeServesNextAvailableItem(t *testing.T) {
 	}
 }
 
+// TestClaimTask_FirstComeLocksAllAvailableItems 验证整体领取:first_come 任务无人占用时,
+// 把所有 available 题一次性锁给该 labeler(不预建草稿)。
+func TestClaimTask_FirstComeLocksAllAvailableItems(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "distribution", "lease_timeout_minutes"}).
+			AddRow(1, "published", "first_come", 0))
+	// 独占校验:无他人已领的题、无他人提交。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	// 把所有 available 题锁给我(影响 12 行)。
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 12))
+	mock.ExpectCommit()
+
+	result, err := ClaimTask(db, ClaimInput{TaskID: 1, LabelerID: 5})
+	if err != nil {
+		t.Fatalf("claim-task errored: %v", err)
+	}
+	if result.Task.ID != 1 {
+		t.Fatalf("task id = %d, want 1", result.Task.ID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+// TestClaimTask_RejectsWhenAnotherLabelerHoldsItems 验证独占:有他人已领的题时拒绝。
+func TestClaimTask_RejectsWhenAnotherLabelerHoldsItems(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "distribution", "lease_timeout_minutes"}).
+			AddRow(1, "published", "first_come", 0))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_items.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3)) // 他人已领 3 题
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectRollback()
+
+	_, err := ClaimTask(db, ClaimInput{TaskID: 1, LabelerID: 5})
+	if !errors.Is(err, ErrTaskTaken) {
+		t.Fatalf("expected ErrTaskTaken, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+// TestClaimTask_RejectsQuotaDistribution 验证 quota 任务不走整体领取(应按题抢单)。
+func TestClaimTask_RejectsQuotaDistribution(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "distribution", "lease_timeout_minutes"}).
+			AddRow(1, "published", "quota", 0))
+	mock.ExpectRollback()
+
+	_, err := ClaimTask(db, ClaimInput{TaskID: 1, LabelerID: 5})
+	if !errors.Is(err, ErrWrongClaimMode) {
+		t.Fatalf("expected ErrWrongClaimMode, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 // TestClaim_RaceLostWhenItemTakenConcurrently 验证并发安全:当乐观 UPDATE 影响 0 行
 // (item 已被另一并发 labeler 抢走)时返回 ErrClaimRaceLost,绝不重复发同一题。
 func TestClaim_RaceLostWhenItemTakenConcurrently(t *testing.T) {

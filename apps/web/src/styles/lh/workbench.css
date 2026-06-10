@@ -8,7 +8,18 @@
   background: #fff;
   border-right: 1px solid var(--lh-border);
   padding: 20px 12px;
+  /* 头部(返回/切换/进度)常驻,题目列表在 .wb-side__list 内独立虚拟滚动 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 虚拟滚动容器:固定题目行高(见 ITEM_ROW_HEIGHT),只渲染视口内行 */
+.wb-side__list {
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
+  margin-top: 8px;
 }
 
 .wb-side__title {
@@ -45,14 +56,59 @@
   color: var(--lh-text-1);
   cursor: pointer;
   margin-bottom: 2px;
+  /* 固定行高 = 虚拟滚动按 ITEM_ROW_HEIGHT(38 + 2 margin = 40)切片的前提 */
+  height: 38px;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .wb-side__item:hover {
   background: var(--lh-bg-elev);
 }
 
+/* 待标 / 他人的题不可直接打开(导航只在自己的题间跳转,领新题走页脚「下一题 / 跳过」),禁用并弱化 */
+.wb-side__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--lh-bg-elev);
+}
+
+.wb-side__item:disabled:hover {
+  background: var(--lh-bg-elev);
+}
+
 .wb-side__item--active {
   background: var(--lh-primary-soft);
+  border-color: var(--lh-primary);
+}
+
+/* 大任务切换器:作答页侧栏在多个已领取任务间切换 */
+.wb-side__task {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.wb-side__task-label {
+  display: block;
+  font-size: 11px;
+  color: var(--lh-text-3);
+  margin-bottom: 4px;
+}
+
+.wb-side__task-select {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 8px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  background: #fff;
+  color: var(--lh-text-1);
+  cursor: pointer;
+}
+
+.wb-side__task-select:focus {
+  outline: none;
   border-color: var(--lh-primary);
 }
 

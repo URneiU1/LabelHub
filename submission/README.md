@@ -1,7 +1,7 @@
 # LabelHub · 评委交付包
 
 > 字节 AI 全栈挑战赛 · 数据标注平台 LabelHub
-> 提交人:Zhang Youchen(URneiU1) · 提交日期:2026-07-XX
+> 提交人:Zhang Youchen(URneiU1) · 提交日期:2026-06-10
 
 本目录是评委评估的入口。所有交付物都在这里,**评委无需阅读 `docs/` 下的开发文档**(那是 8 周开发流水)。
 
@@ -15,12 +15,13 @@
 | 2 | 评委 README + 5 分钟评估路径 | 本文件 + [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | 产品体验 15% |
 | 3 | 演示视频脚本(5-10 分钟) | [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md);视频二进制由最终提交平台上传,不纳入 Git | 产品体验 15% |
 | 4 | 架构图 + 关键技术点 | [`ARCHITECTURE.md`](ARCHITECTURE.md)(含 Mermaid topology / 状态机 / outbox sequence) | 工程质量 25% |
-| 5 | Demo 截图 | [`assets/screenshots/`](assets/screenshots/) — 6 张主流程截图 + 1 张修复前问题证据已入库 | 产品体验 15% |
+| 5 | Demo 截图 | [`assets/screenshots/`](assets/screenshots/) — 10 张主流程截图 + 1 张修复前问题证据已入库 | 产品体验 15% |
 | 6 | AI Coding 过程记录(8-15 页 PDF) | [`assets/AI-Coding-Process.pdf`](assets/AI-Coding-Process.pdf) + [`assets/AI-Coding-Process.md`](assets/AI-Coding-Process.md) | 工程质量 25%(附加) |
 | 7 | 部署说明 | [`DEPLOY.md`](DEPLOY.md) | 工程质量 25% |
 | 8 | API 文档 | [`api/openapi.yaml`](api/openapi.yaml) + [`api/postman_collection.json`](api/postman_collection.json) | 工程质量 25% |
 | 9 | 交付前 Code Review | [`CODE-REVIEW-FINAL.md`](CODE-REVIEW-FINAL.md) | 工程质量 25%(附加) |
-| 10 | License | [`LICENSE`](LICENSE) — MIT | — |
+| 10 | 课题要求完成度与超额项对照 | [`BEYOND-REQUIREMENTS.md`](BEYOND-REQUIREMENTS.md) — 逐条要求 vs 交付 + 答辩取舍说明 | 功能完备性 60%(答辩材料) |
+| 11 | License | [`LICENSE`](LICENSE) — MIT | — |
 
 > 大体积视频文件不放入 Git 仓库;最终提交时按 [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) 录制并上传到比赛平台或外部附件。
 

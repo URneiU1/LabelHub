@@ -93,13 +93,16 @@ func TestMainFlowWithRealMySQLRedis(t *testing.T) {
 	}
 
 	simulateAIResult(t, ctx, sqlDB, second.ID, *second.CurrentRevisionID, "pass", 92)
-	// 多级人工审核:approve 需 RequiredHumanReviewLevels(=3)次才定稿(per current revision)。
-	// 前两次(初审/复审)只 advance stage,submission 停留 human_reviewing;第三次(终审)推到 approved。
+	// 多级人工审核:approve 需 RequiredHumanReviewLevels(=2)次才定稿(per current revision)。
+	// 每级必须由不同 reviewer 独立复核 —— 同一 reviewer 在同一 revision 上重复 approve 会被
+	// ErrDuplicateReviewerApproval 拦截。前 RequiredHumanReviewLevels-1 次(初审)只 advance stage,
+	// submission 停留 human_reviewing;最后一次(终审)推到 approved。
+	// level 1 → reviewer 3,level 2 → reviewer 4(均已在 seedMainFlow 分配到 task_reviewers)。
 	for level := 1; level <= reviewsvc.RequiredHumanReviewLevels; level++ {
 		if _, err := reviewsvc.Apply(db, reviewsvc.ApplyInput{
 			SubmissionID: second.ID,
 			Verdict:      "approve",
-			ReviewerID:   3,
+			ReviewerID:   uint64(2 + level),
 			Roles:        []string{"reviewer"},
 		}); err != nil {
 			t.Fatalf("approve review level %d: %v", level, err)
@@ -366,8 +369,9 @@ func seedMainFlow(t *testing.T, ctx context.Context, db *sql.DB) {
 		`INSERT INTO users (id, username, password_hash, display_name, status) VALUES
 			(1, 'owner1', 'x', 'Owner', 'active'),
 			(2, 'labeler1', 'x', 'Labeler', 'active'),
-			(3, 'reviewer1', 'x', 'Reviewer', 'active')`,
-		`INSERT INTO user_roles (user_id, role) VALUES (1, 'owner'), (2, 'labeler'), (3, 'reviewer')`,
+			(3, 'reviewer1', 'x', 'Reviewer', 'active'),
+			(4, 'reviewer2', 'x', 'Reviewer Two', 'active')`,
+		`INSERT INTO user_roles (user_id, role) VALUES (1, 'owner'), (2, 'labeler'), (3, 'reviewer'), (4, 'reviewer')`,
 		`INSERT INTO tasks (id, owner_id, title, baseline_description, status, ai_review_enabled, human_review_enabled, total_items)
 			VALUES (1, 1, 'Integration Task', 'baseline', 'published', 1, 1, 1)`,
 		`INSERT INTO task_templates (id, task_id, version, schema_json, created_by)
@@ -376,7 +380,7 @@ func seedMainFlow(t *testing.T, ctx context.Context, db *sql.DB) {
 		`INSERT INTO ai_prompt_configs (id, task_id, version, prompt_template, dimensions, pass_threshold, uncertain_min, model, created_by)
 			VALUES (33, 1, 1, 'review {{answer.label}}', '[{"name":"相关性"}]', 80, 60, 'mock-model', 1)`,
 		`UPDATE tasks SET ai_prompt_id = 33 WHERE id = 1`,
-		`INSERT INTO task_reviewers (task_id, user_id, assigned_by) VALUES (1, 3, 1)`,
+		`INSERT INTO task_reviewers (task_id, user_id, assigned_by) VALUES (1, 3, 1), (1, 4, 1)`,
 		`INSERT INTO task_items (id, task_id, external_id, payload, status, claimed_by, claimed_at)
 			VALUES (11, 1, 'item-1', '{"question":"q"}', 'claimed', 2, NOW())`,
 	}

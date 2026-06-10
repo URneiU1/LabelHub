@@ -100,6 +100,44 @@
   margin-top: 0;
 }
 
+/* 已领取的任务区块:任务广场顶部「继续标注」入口 */
+.lz-claimed {
+  margin-bottom: 22px;
+}
+
+.lz-claimed__title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--lh-text-2);
+  margin-bottom: 10px;
+}
+
+.lz-card--claimed {
+  border-color: var(--lh-primary);
+}
+
+.lz-chip {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--lh-divider);
+  color: var(--lh-text-2);
+}
+
+.lz-chip--active {
+  background: var(--lh-primary-soft);
+  color: var(--lh-primary);
+  font-weight: 600;
+}
+
+.lz-card__cta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lh-primary);
+}
+
 /* 题目导航:返回按钮 + 进度条 */
 .wb-side__back {
   width: 100%;

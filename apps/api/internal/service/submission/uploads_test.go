@@ -14,17 +14,18 @@ import (
 	"labelhub-api/internal/model"
 )
 
-// H-03:附件归属扫描必须递归进入 Group / Tabs,收集所有 FileUpload 叶子字段名,
-// 并跳过非 FileUpload 字段。
+// H-03:附件归属扫描必须递归进入 Group / Tabs,收集所有上传叶子字段名,
+// 并跳过非上传字段。
 func TestCollectFileUploadFieldNamesRecursesGroupsAndTabs(t *testing.T) {
 	schema := fileUploadTemplateSchema{
 		Fields: []fileUploadTemplateField{
 			{Name: "topFile", Widget: "FileUpload"},
+			{Name: "heroImage", Widget: "ImageUpload"},
 			{Name: "note", Widget: "TextInput"},
 			{Name: "g", Widget: "Group", Fields: []fileUploadTemplateField{
 				{Name: "groupFile", Widget: "FileUpload"},
 				{Name: "deep", Widget: "Group", Fields: []fileUploadTemplateField{
-					{Name: "deepFile", Widget: "FileUpload"},
+					{Name: "deepImage", Widget: "ImageUpload"},
 				}},
 			}},
 			{Name: "t", Widget: "Tabs", Tabs: []fileUploadTemplateTab{
@@ -36,7 +37,7 @@ func TestCollectFileUploadFieldNamesRecursesGroupsAndTabs(t *testing.T) {
 		},
 	}
 	got := collectFileUploadFieldNames(schema.Fields)
-	want := []string{"topFile", "groupFile", "deepFile", "tabFile"}
+	want := []string{"topFile", "heroImage", "groupFile", "deepImage", "tabFile"}
 	if len(got) != len(want) {
 		t.Fatalf("collected %v, want %v", got, want)
 	}
@@ -80,6 +81,74 @@ func TestAttachUploadedFilesBindsNestedGroupFileUpload(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("attachUploadedFiles for nested FileUpload returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestAttachUploadedFilesBindsImageUploadWhenMIMEIsImage(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	restoreNow := NowUTC
+	NowUTC = func() time.Time { return time.Date(2026, 6, 9, 9, 0, 0, 0, time.UTC) }
+	defer func() { NowUTC = restoreNow }()
+
+	key := strings.Repeat("f", 64)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 2, `{"fields":[{"name":"hero","widget":"ImageUpload"}]}`))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+task_id.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by", "mime_type"}).
+			AddRow(301, 1, key, "temp", 7, "image/png"))
+	mock.ExpectExec(`(?is)^UPDATE .uploaded_files. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return attachUploadedFiles(tx,
+			model.Task{ID: 1},
+			model.Submission{ID: 42, TaskID: 1, TemplateVersion: 2},
+			model.SubmissionRevision{ID: 901, SubmissionID: 42},
+			[]byte(`{"hero":["`+key+`"]}`),
+			7,
+		)
+	})
+	if err != nil {
+		t.Fatalf("attachUploadedFiles for ImageUpload returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestAttachUploadedFilesRejectsNonImageMIMEForImageUpload(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	key := strings.Repeat("9", 64)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 2, `{"fields":[{"name":"hero","widget":"ImageUpload"}]}`))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .uploaded_files.+storage_key.+task_id.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "storage_key", "status", "created_by", "mime_type"}).
+			AddRow(301, 1, key, "temp", 7, "application/pdf"))
+	mock.ExpectRollback()
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return attachUploadedFiles(tx,
+			model.Task{ID: 1},
+			model.Submission{ID: 42, TaskID: 1, TemplateVersion: 2},
+			model.SubmissionRevision{ID: 901, SubmissionID: 42},
+			[]byte(`{"hero":["`+key+`"]}`),
+			7,
+		)
+	})
+	if !errors.Is(err, ErrInvalidUploadedFile) {
+		t.Fatalf("expected ErrInvalidUploadedFile, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

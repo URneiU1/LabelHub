@@ -1,4 +1,4 @@
-import type { RawPayload } from './ShowItem'
+export type RawPayload = Record<string, unknown>
 
 export function parsePayload(raw?: string): RawPayload {
   if (!raw) {

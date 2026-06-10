@@ -986,6 +986,7 @@ export interface components {
             template: components["schemas"]["TaskTemplate"];
             submission?: components["schemas"]["Submission"];
             revision?: components["schemas"]["SubmissionRevision"];
+            revisionHistory?: components["schemas"]["SubmissionRevision"][];
         };
         Submission: {
             id: number;

@@ -9,11 +9,14 @@ type MyDataProps = {
   onOpen: (submission: Submission) => void
 }
 
-type Bucket = '已提交' | '通过' | '打回' | '待修改'
+type Bucket = '进行中' | '已提交' | '通过' | '打回' | '待修改'
 
-// 提交状态 → 我的数据聚合桶。submitted/审核中→已提交,approved→通过,rejected→打回,revising→待修改。
+// 提交状态 → 我的数据聚合桶。draft(已领未提交)→进行中,submitted/审核中→已提交,
+// approved→通过,rejected→打回,revising→待修改。
 function bucketOf(status: string): Bucket | null {
   switch (normalizeStatus(status)) {
+    case 'draft':
+      return '进行中'
     case 'submitted':
     case 'ai_reviewing':
     case 'human_reviewing':
@@ -32,7 +35,7 @@ function bucketOf(status: string): Bucket | null {
 // 我的数据:跨任务汇总当前 labeler 的提交统计 + 可点击列表(点击打开对应题目)。
 export default function MyData({ submissions, onOpen }: MyDataProps) {
   const counts = useMemo(() => {
-    const acc: Record<Bucket, number> = { 已提交: 0, 通过: 0, 打回: 0, 待修改: 0 }
+    const acc: Record<Bucket, number> = { 进行中: 0, 已提交: 0, 通过: 0, 打回: 0, 待修改: 0 }
     for (const submission of submissions) {
       const bucket = bucketOf(submission.status)
       if (bucket) {
@@ -43,6 +46,7 @@ export default function MyData({ submissions, onOpen }: MyDataProps) {
   }, [submissions])
 
   const stats: Array<{ label: Bucket, tone?: string }> = [
+    { label: '进行中' },
     { label: '已提交', tone: 'primary' },
     { label: '通过', tone: 'success' },
     { label: '打回', tone: 'warning' },

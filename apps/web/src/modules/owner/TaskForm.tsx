@@ -16,6 +16,7 @@ import {
   richDescriptionPayload,
   rewardConfigPayload,
 } from './taskManageHelpers'
+import AssigneePanel from './AssigneePanel'
 
 interface TaskFormProps {
   // 编辑模式传入既有任务;新建模式传 null。
@@ -182,6 +183,16 @@ export default function TaskForm({ task, onSaved }: TaskFormProps) {
             ))}
           </div>
         </div>
+        {isEdit && task && task.distribution === 'assigned' ? (
+          <div className="taskform__field">
+            <label className="taskform__label">指派标注员</label>
+            <AssigneePanel taskId={task.id} />
+          </div>
+        ) : distribution === 'assigned' ? (
+          <div className="lh-muted lh-text-13" style={{ marginTop: 8, marginBottom: 8 }}>
+            {isEdit ? '保存后即可在此指派标注员。' : '创建并保存任务后,可在此指派标注员。'}
+          </div>
+        ) : null}
         <div className="taskform__row">
           <NumberField id="task-quota" label="每人配额" ariaLabel="task_quota_per_user" value={quotaPerUser} onChange={setQuotaPerUser} placeholder="0 表示不限" min={0} />
           <NumberField id="task-daily-limit" label="每日提交上限" ariaLabel="task_daily_submission_limit" value={dailySubmissionLimit} onChange={setDailySubmissionLimit} placeholder="0 表示不限" min={0} />

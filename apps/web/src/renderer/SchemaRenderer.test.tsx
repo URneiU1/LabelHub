@@ -124,6 +124,35 @@ describe('SchemaRenderer', () => {
     })
   })
 
+  it('renders multi-select and image upload widgets', async () => {
+    const user = userEvent.setup()
+    function MediaRenderer() {
+      const [answer, setAnswer] = useState<AnswerValue>({})
+      const schema: TemplateSchema = {
+        title: 'media_review',
+        layout: 'single_page',
+        fields: [
+          { name: 'choices', widget: 'MultiSelect', label: '多选', options: ['A', 'B'] },
+          { name: 'image_evidence', widget: 'ImageUpload', label: '图片证据', maxFiles: 2 },
+        ],
+      }
+      return (
+        <>
+          <SchemaRenderer schema={schema} value={answer} runtime={{ taskId: 1 }} onChange={setAnswer} />
+          <output aria-label="media-answer-json">{JSON.stringify(answer)}</output>
+        </>
+      )
+    }
+
+    render(<MediaRenderer />)
+
+    await user.click(screen.getByLabelText('A'))
+    expect(screen.getByLabelText('图片证据')).toHaveAttribute('accept', 'image/*')
+    expect(JSON.parse(screen.getByLabelText('media-answer-json').textContent || '{}')).toMatchObject({
+      choices: ['A'],
+    })
+  })
+
   it('updates rich text and JSON editor widgets', async () => {
     const user = userEvent.setup()
     render(<ControlledRenderer />)

@@ -115,15 +115,31 @@ describe('parseTemplateSchema', () => {
     }
   })
 
-  it('requires non-empty options for radio and tags', () => {
+  it('requires non-empty options for choice widgets', () => {
     const result = parseTemplateSchema({
       title: 'bad',
-      fields: [{ name: 'issue_tags', widget: 'Tags' }],
+      fields: [{ name: 'issue_tags', widget: 'MultiSelect' }],
     })
 
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.field).toBe('fields[0].options')
+    }
+  })
+
+  it('parses multi-select and image-upload widgets', () => {
+    const result = parseTemplateSchema({
+      title: 'media_review',
+      fields: [
+        { name: 'choices', widget: 'MultiSelect', label: '多选', options: ['a', 'b'] },
+        { name: 'image_evidence', widget: 'ImageUpload', label: '图片证据', maxFiles: 2 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields[0]).toMatchObject({ widget: 'MultiSelect', options: ['a', 'b'] })
+      expect(result.value.fields[1]).toMatchObject({ widget: 'ImageUpload', maxFiles: 2 })
     }
   })
 
@@ -136,6 +152,21 @@ describe('parseTemplateSchema', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.field).toBe('fields[0].maxFiles')
+    }
+  })
+
+  it('accepts MultiSelect and ImageUpload schemas', () => {
+    const result = parseTemplateSchema({
+      title: 'media',
+      fields: [
+        { name: 'choices', widget: 'MultiSelect', options: ['a', 'b'] },
+        { name: 'image', widget: 'ImageUpload', maxFiles: 2 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields.map((field) => field.widget)).toEqual(['MultiSelect', 'ImageUpload'])
     }
   })
 

@@ -5,10 +5,12 @@ export const widgetTypes = [
   'Input',
   'TextArea',
   'Radio',
+  'MultiSelect',
   'Tags',
   'RichText',
   'JSONEditor',
   'FileUpload',
+  'ImageUpload',
   'LLMTrigger',
 ] as const
 

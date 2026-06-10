@@ -3,6 +3,7 @@ import { Button, Toast } from '@douyinfe/semi-ui'
 import { listReviewResults, type ReviewResult } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import StatusBadge from '../../shared/components/StatusBadge'
+import { formatScore, formatTime } from './format'
 
 // 审核结果列表:消费 GET /reviewer/results(已定稿 approved/rejected),
 // 支持游标分页「加载更多」,点击某行回调打开只读详情。
@@ -68,7 +69,7 @@ export default function ReviewResults({ onOpenResult }: ReviewResultsProps) {
             <span style={resultMetaStyle}>
               <span>Task #{result.taskId} · Item #{result.itemId}</span>
               <span className="lh-muted">
-                决定 {formatVerdict(result.finalVerdict)} · AI {formatScore(result.aiScore)} · {formatTime(result.updatedAt)}
+                决定 {formatVerdict(result.finalVerdict)} · AI {formatScore(result.aiScore)} · {formatTime(result.updatedAt, 'date-time')}
               </span>
             </span>
           </button>
@@ -106,17 +107,3 @@ function formatVerdict(verdict: string | null | undefined) {
   return verdict ?? '-'
 }
 
-function formatScore(score: number | null | undefined) {
-  return typeof score === 'number' && Number.isFinite(score) ? String(score) : '-'
-}
-
-function formatTime(raw: string | undefined) {
-  if (!raw) {
-    return '--'
-  }
-  const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) {
-    return raw
-  }
-  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-}

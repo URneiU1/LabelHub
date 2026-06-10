@@ -27,6 +27,8 @@ const ITEMS_PAGE_SIZE = 50
 
 export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
   const [uploading, setUploading] = useState(false)
+  // 常驻显示最近一次导入结果(成功/失败),不随 Toast 消失,方便演示与确认。
+  const [lastResult, setLastResult] = useState<{ ok: boolean, text: string } | null>(null)
   const [jsonText, setJsonText] = useState('')
   const [importingJson, setImportingJson] = useState(false)
   const [preview, setPreview] = useState<PreviewItem | null>(null)
@@ -42,6 +44,7 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 切任务时重置本地导入草稿
     setJsonText('')
+    setLastResult(null)
     setPreview(null)
     setEditableItems([])
     setItemsCursor('')
@@ -53,10 +56,13 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
     setUploading(true)
     try {
       const result = await importItemsFile(taskId, file)
+      setLastResult({ ok: true, text: `已导入 ${result.imported} 条(${result.format})` })
       Toast.success(`已导入 ${result.imported} 条(${result.format})`)
       onImported()
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : '文件导入失败')
+      const message = error instanceof Error ? error.message : '文件导入失败'
+      setLastResult({ ok: false, text: `导入失败:${message}` })
+      Toast.error(message)
     } finally {
       setUploading(false)
       if (fileInputRef.current) {
@@ -82,11 +88,14 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
     setImportingJson(true)
     try {
       const result = await importItems(taskId, items as Array<Record<string, unknown>>)
+      setLastResult({ ok: true, text: `已导入 ${result.imported} 条(JSON)` })
       Toast.success(`已导入 ${result.imported} 条`)
       setJsonText('')
       onImported()
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : 'JSON 导入失败')
+      const message = error instanceof Error ? error.message : 'JSON 导入失败'
+      setLastResult({ ok: false, text: `导入失败:${message}` })
+      Toast.error(message)
     } finally {
       setImportingJson(false)
     }
@@ -188,6 +197,25 @@ export default function ImportPanel({ taskId, onImported }: ImportPanelProps) {
         />
         {uploading ? <span className="lh-muted lh-text-12">上传解析中…</span> : null}
       </div>
+
+      {lastResult ? (
+        <div
+          aria-label="import_result"
+          role="status"
+          style={{
+            padding: '10px 14px',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            border: '1px solid',
+            borderColor: lastResult.ok ? '#bbf7d0' : '#fecaca',
+            background: lastResult.ok ? '#f0fdf4' : '#fef2f2',
+            color: lastResult.ok ? '#15803d' : '#b91c1c',
+          }}
+        >
+          {lastResult.ok ? '✓ ' : '✕ '}{lastResult.text}
+        </div>
+      ) : null}
 
       <div className="taskform__field">
         <label className="taskform__label">JSON 粘贴导入</label>

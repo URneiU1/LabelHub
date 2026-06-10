@@ -182,6 +182,75 @@ export type Task = {
   publishedAt?: string | null
 }
 
+// 当前 labeler 已领取(有提交)的一个大任务 + 我在其中的进度:
+// myCounts 各状态计数、myTotal 我的提交总数、myInProgress 进行中(draft/revising)数量、
+// resumeItemId 最近一条进行中提交的题目 id(用于「继续标注」直接恢复),无进行中则为 null。
+export type MyTask = {
+  task: Task
+  myCounts: Record<string, number>
+  myTotal: number
+  myInProgress: number
+  resumeItemId: number | null
+}
+
+// 拉取「已领取的任务」(大任务粒度),按最近活跃排序。供任务广场「已领取的任务」区块与
+// 标注工作台的大任务切换器使用。
+export async function listMyTasks(): Promise<MyTask[]> {
+  const data = await apiGet<{ tasks: MyTask[] }>('/me/tasks')
+  return data?.tasks ?? []
+}
+
+// 整体领取一个大任务(first_come / assigned 独占):该任务所有题一次性锁给当前 labeler,全部解锁可做。
+// quota 任务不走这里(按题抢单,用逐题领取接口)。
+export async function claimTask(taskId: number): Promise<{ task: Task }> {
+  return apiPost<{ task: Task }>(`/tasks/${taskId}/claim-task`, {})
+}
+
+// 「AI 审核队列」只读视图里的一条 AI 预审 + 其提交/任务/Prompt 上下文。
+export type AIReviewRow = {
+  id: number
+  status: string
+  verdict: string | null
+  overallScore: number | null
+  dimensions: Array<{ name: string, score: number, reason?: string }> | null
+  reason: string | null
+  promptVersion: number
+  model: string
+  promptTemplate: string
+  passThreshold: number
+  uncertainMin: number
+  tokensInput: number
+  tokensOutput: number
+  latencyMs: number
+  retryCount: number
+  idempotencyKey: string
+  errorMsg: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  submissionId: number
+  taskId: number
+  taskTitle: string
+  itemId: number
+}
+
+// 拉取 AI 预审队列(最新在前,可按 status 过滤、id 游标分页)。供审核员「AI 审核队列」只读视图。
+export async function listAIReviews(params?: { status?: string, limit?: number, before?: number }): Promise<{ items: AIReviewRow[], nextBefore: number | null }> {
+  const query = new URLSearchParams()
+  if (params?.status) {
+    query.set('status', params.status)
+  }
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  if (params?.before) {
+    query.set('before', String(params.before))
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  const data = await apiGet<{ items: AIReviewRow[], nextBefore: number | null }>(`/reviewer/ai-reviews${suffix}`)
+  return { items: data?.items ?? [], nextBefore: data?.nextBefore ?? null }
+}
+
 // 任务基础信息 create/update 的输入。后端会把 JSON 字段(richDescription/tags/rewardConfig)
 // 原样存进 json 列,所以这里用结构化值,提交前序列化成 JSON。
 export type TaskInfoInput = {
@@ -434,53 +503,12 @@ export type TaskTemplate = {
 
 export type SubmissionRevision = {
   id: number
+  submissionId?: number
+  revisionNo?: number
   answer: string
   draft: boolean
-}
-
-// 「AI 审核队列」只读视图里的一条 AI 预审 + 其提交/任务/Prompt 上下文。
-export type AIReviewRow = {
-  id: number
-  status: string
-  verdict: string | null
-  overallScore: number | null
-  dimensions: Array<{ name: string, score: number, reason?: string }> | null
-  reason: string | null
-  promptVersion: number
-  model: string
-  promptTemplate: string
-  passThreshold: number
-  uncertainMin: number
-  tokensInput: number
-  tokensOutput: number
-  latencyMs: number
-  retryCount: number
-  idempotencyKey: string
-  errorMsg: string | null
-  createdAt: string
-  startedAt: string | null
-  finishedAt: string | null
-  submissionId: number
-  taskId: number
-  taskTitle: string
-  itemId: number
-}
-
-// 拉取 AI 预审队列(最新在前,可按 status 过滤、id 游标分页)。供审核员「AI 审核队列」只读视图。
-export async function listAIReviews(params?: { status?: string, limit?: number, before?: number }): Promise<{ items: AIReviewRow[], nextBefore: number | null }> {
-  const query = new URLSearchParams()
-  if (params?.status) {
-    query.set('status', params.status)
-  }
-  if (params?.limit) {
-    query.set('limit', String(params.limit))
-  }
-  if (params?.before) {
-    query.set('before', String(params.before))
-  }
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  const data = await apiGet<{ items: AIReviewRow[], nextBefore: number | null }>(`/reviewer/ai-reviews${suffix}`)
-  return { items: data?.items ?? [], nextBefore: data?.nextBefore ?? null }
+  createdBy?: number
+  createdAt?: string
 }
 
 export type AIPromptSummary = {
@@ -540,6 +568,7 @@ export type TaskBundle = {
   template?: TaskTemplate
   submission?: Submission
   revision?: SubmissionRevision | null
+  revisionHistory?: SubmissionRevision[]
   aiReview?: AIReviewDetail | null
   latestHumanReview?: HumanReviewSummary | null
   auditLogs?: AuditLog[]

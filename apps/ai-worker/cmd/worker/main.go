@@ -42,7 +42,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("configure llm provider", zap.Error(err))
 	}
-	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator, circuit: newAIWorkerCircuitFromEnv()}
+	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator, circuit: newAIWorkerCircuitFromEnv(), aiActorID: lookupAIActorID(database, logger)}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("ai:review", handlers.handleAIReview)
 	mux.HandleFunc("ai:dry-run", handlers.handleAIDryRun)
@@ -55,6 +55,7 @@ func main() {
 	}
 }
 
+// newLogger 与 api server 的同名工厂保持一致(两者是独立 module,internal 无法跨 module 共享)。
 func newLogger() (*zap.Logger, error) {
 	if os.Getenv("GIN_MODE") == "debug" {
 		return zap.NewDevelopment()
@@ -67,6 +68,9 @@ type workerHandlers struct {
 	db        *sql.DB
 	evaluator aiEvaluator
 	circuit   *aiWorkerCircuit
+	// aiActorID 是 seed 的 system_ai 账号 id;AI 评审写 audit_logs 时作为 actor_id,
+	// 让时间线以独立 AI Agent 账户视角可追溯。nil(未 seed)时落 NULL,不阻塞评审。
+	aiActorID *uint64
 }
 
 func (h workerHandlers) handleNoop(_ context.Context, t *asynq.Task) error {
@@ -124,6 +128,7 @@ func redisAddr() string {
 
 // mustAbsExportDir 校验 EXPORT_DIR 为绝对路径。worker 与 api 从不同工作目录启动,
 // 相对路径会各自解析到不同目录,导致 worker 写入的文件 api 下载时找不到/校验失败。
+// 与 api server 的同名函数保持一致(独立 module,不能跨 module 复用)。
 func mustAbsExportDir() string {
 	dir := os.Getenv("EXPORT_DIR")
 	if dir == "" {
@@ -135,6 +140,19 @@ func mustAbsExportDir() string {
 	return dir
 }
 
+// lookupAIActorID 解析 seed 的 system_ai 账号 id,作为 AI 评审审计的 actor_id。
+// 账号不存在(未 seed / 精简部署)只告警不阻塞,audit_logs.actor_id 落 NULL。
+func lookupAIActorID(database *sql.DB, logger *zap.Logger) *uint64 {
+	var id uint64
+	err := database.QueryRow(`SELECT id FROM users WHERE username = 'system_ai' LIMIT 1`).Scan(&id)
+	if err != nil {
+		logger.Warn("system_ai account not found; ai audit entries will have no actor_id", zap.Error(err))
+		return nil
+	}
+	return &id
+}
+
+// envOrDefault 与 api 的 internal/envutil.Default 行为一致(internal 包不能跨 module 复用,故各留一份)。
 func envOrDefault(key string, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

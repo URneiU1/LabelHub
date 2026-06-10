@@ -2,14 +2,15 @@ package middleware
 
 import (
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"labelhub-api/internal/envutil"
 )
 
 func CORS() gin.HandlerFunc {
-	allowedOrigins := strings.Split(envOrDefault("API_CORS_ORIGINS", "http://localhost:5173"), ",")
+	allowedOrigins := strings.Split(envutil.Default("API_CORS_ORIGINS", "http://localhost:5173"), ",")
 
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
@@ -37,11 +38,4 @@ func originAllowed(origin string, allowed []string) bool {
 		}
 	}
 	return false
-}
-
-func envOrDefault(key string, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
 }

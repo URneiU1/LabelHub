@@ -230,7 +230,7 @@ describe('TemplateDesigner', () => {
         return templateDetail(13, {
           ...baseSchema,
           fields: [
-            { name: 'tags_1', widget: 'Tags', label: '标签多选', required: false, options: ['pass', 'reject', 'uncertain'] },
+            { name: 'tags_1', widget: 'Tags', label: '标签选择', required: false, options: ['pass', 'reject', 'uncertain'] },
             baseSchema.fields[0],
             { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
           ],
@@ -273,7 +273,7 @@ describe('TemplateDesigner', () => {
     const [, body] = mockApiPost.mock.calls[0]
     expect(body).toMatchObject({
       fields: [
-        { name: 'tags_1', widget: 'Tags', label: '标签多选', required: false, options: ['pass', 'reject', 'uncertain'] },
+        { name: 'tags_1', widget: 'Tags', label: '标签选择', required: false, options: ['pass', 'reject', 'uncertain'] },
         { name: 'summary', widget: 'Input', label: 'Summary', required: true },
         { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
       ],

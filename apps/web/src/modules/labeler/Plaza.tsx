@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Toast } from '@douyinfe/semi-ui'
-import { SchemaRenderer, parseAnswer, parseTemplateSchema } from '../../renderer'
+import { SchemaRenderer, parseAnswer, parseBundleSchema } from '../../renderer'
 import type { AnswerValue, TemplateSchema, ValidationError } from '../../renderer/types'
 import { validateAnswer } from '../../renderer/validator'
-import { apiGet, apiPost, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
+import { ApiError, apiGet, apiPost, claimTask, listMyTasks, type AuditLog, type LabelerTaskItem, type LabelerTaskItems, type MyTask, type Submission, type Task, type TaskBundle } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import { parsePayload } from '../../shared/components/payload'
+import { setLabelerSection } from '../../shared/state/labelerSection'
+import { normalizeStatus } from '../../shared/components/status'
 import StatusBadge from '../../shared/components/StatusBadge'
 import ItemNav from './ItemNav'
 import MyData from './MyData'
@@ -14,10 +16,6 @@ import { buildDraftKey, discardLocalDraft, isLocalDraftNewer, loadLocalDraft, ma
 import '../../styles/lh/workbench.css'
 import '../../styles/lh/tasks.css'
 import './plaza.css'
-
-type ParsedSchema =
-  | { ok: true, schema: TemplateSchema }
-  | { ok: false, message: string }
 
 type View = 'plaza' | 'answer'
 type PlazaTab = 'tasks' | 'mydata'
@@ -32,6 +30,8 @@ interface LabelerPlazaProps {
 export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 'tasks' }: LabelerPlazaProps = {}) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [mySubmissions, setMySubmissions] = useState<Submission[]>([])
+  // 已领取的任务(大任务粒度 + 我的进度):任务广场「已领取的任务」区块 + 工作台大任务切换器共用。
+  const [myTasks, setMyTasks] = useState<MyTask[]>([])
   const [bundle, setBundle] = useState<TaskBundle | null>(null)
   const [answer, setAnswer] = useState<AnswerValue>({})
   const [errors, setErrors] = useState<ValidationError[]>([])
@@ -39,6 +39,8 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
   const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
   const lastSavedDraftKey = useRef('')
   const autoSaveSeq = useRef(0)
+  // 标注工作台直达时只尝试一次「自动恢复进行中任务」,避免随依赖变化或重复加载反复触发。
+  const didAutoResumeRef = useRef(false)
 
   // P3 离线草稿:localDraftSaved 表示自动保存网络失败但本地草稿已留底(非阻塞提示);
   // recoverableDraft 是「本地有比服务端更新的未同步草稿」时供用户恢复/丢弃的待恢复答案。
@@ -67,33 +69,58 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [])
 
-  const loadMySubmissions = useCallback(async () => {
+  const loadMySubmissions = useCallback(async (): Promise<Submission[]> => {
     try {
       const data = await apiGet<Submission[]>('/me/submissions')
       setMySubmissions(data)
+      return data
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载我的提交失败')
+      return []
+    }
+  }, [])
+
+  const loadMyTasks = useCallback(async () => {
+    try {
+      setMyTasks(await listMyTasks())
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '加载已领取的任务失败')
     }
   }, [])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks()
-    void loadMySubmissions()
-  }, [loadMySubmissions, loadTasks])
+    // 「已领取的任务」两个视图都要用(广场区块 + 工作台切换器),无条件加载。
+    void loadMyTasks()
+    // 标注工作台(answer)由下方「自动恢复进行中任务」effect 自行拉取我的提交,避免重复请求。
+    if (initialView !== 'answer') {
+      void loadMySubmissions()
+    }
+  }, [initialView, loadMyTasks, loadMySubmissions, loadTasks])
 
-  const schema = useMemo(() => parseBundleSchema(bundle), [bundle])
+  // 把当前「实际显示」的分节同步给左栏高亮:作答页(有激活任务/题目)→ 标注工作台;
+  // 否则按 plazaTab → 任务广场 / 我的贡献。这样「继续标注 / 返回任务广场」只切内部 view 时,
+  // 侧栏也跟着对(不依赖 URL 变化)。setLabelerSection 是外部 store,非 React setState。
+  useEffect(() => {
+    const showingWorkbench = view === 'answer' && (activeTask !== null || bundle !== null || loading)
+    setLabelerSection(showingWorkbench ? 'workbench' : (plazaTab === 'mydata' ? 'mine' : 'tasks'))
+  }, [view, activeTask, bundle, loading, plazaTab])
+
+  const schema = useMemo(() => parseBundleSchema(bundle, '当前任务未配置标注模板'), [bundle])
   const payload = useMemo(() => parsePayload(bundle?.item?.payload), [bundle?.item?.payload])
 
   // 题目导航数据(新端点)。失败时降级:返回 null,作答页仍可用领取兜底导航。
-  const loadItemNav = useCallback(async (taskId: number) => {
+  const loadItemNav = useCallback(async (taskId: number): Promise<LabelerTaskItems | null> => {
     setItemNavLoading(true)
     try {
       const data = await apiGet<LabelerTaskItems>(`/tasks/${taskId}/labeler/items`)
       setItemNav(data)
+      return data
     } catch (error) {
       setItemNav(null)
       Toast.error(error instanceof Error ? error.message : '加载题目导航失败,已切换为仅领取模式')
+      return null
     } finally {
       setItemNavLoading(false)
     }
@@ -331,13 +358,36 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [])
 
-  // 进入某任务作答页:记录活动任务、加载题目导航、领取下一题开始作答。
+  // 进入某任务作答页。领取粒度取决于分发策略:
+  //  - quota(配额抢单):按题领取,领下一道可用题并打开。
+  //  - first_come / assigned(独占):整体领取大任务 → 所有题一次性解锁,再打开第一道可做的题。
   const enterTask = useCallback((task: Task) => {
     setActiveTask(task)
     setView('answer')
-    void loadItemNav(task.id)
-    void claim(task.id)
-  }, [claim, loadItemNav])
+    if (task.distribution === 'quota') {
+      void loadItemNav(task.id)
+      void claim(task.id)
+      return
+    }
+    void (async () => {
+      try {
+        await claimTask(task.id)
+      } catch (error) {
+        // 领取失败(如已被他人独占)→ 退回任务广场并提示。
+        Toast.error(error instanceof Error ? error.message : '领取任务失败')
+        setView('plaza')
+        setActiveTask(null)
+        void loadMyTasks()
+        return
+      }
+      const nav = await loadItemNav(task.id)
+      const workable = nav?.items?.find((item) => item.status === 'claimed' || item.status === 'draft' || item.status === 'revising') ?? nav?.items?.[0]
+      if (workable) {
+        void openByItem(task.id, workable.itemId)
+      }
+      void loadMyTasks()
+    })()
+  }, [claim, loadItemNav, loadMyTasks, openByItem])
 
   // 选中导航里的一题:我的题(mine 或有 submissionId)→ 直接打开;available/他人 → 领取下一题。
   const selectNavItem = useCallback((item: LabelerTaskItem) => {
@@ -353,9 +403,17 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
 
   // 上一题/下一题:在题目导航列表里相对当前题移动;我的题直接打开,否则领取下一题。
   const stepItem = useCallback((delta: number) => {
+    if (!activeTask) {
+      return
+    }
     const items = itemNav?.items ?? []
-    if (!activeTask || items.length === 0) {
-      void claim(activeTask?.id ?? 0)
+    if (items.length === 0) {
+      // Nav not ready yet (races with claim on first entry) or genuinely empty. Only quota tasks
+      // pull a fresh item here; for first_come/assigned the whole task is already claimed and
+      // re-claiming would wrongly re-trigger "已领取题目". Don't claim while nav is still loading.
+      if (!itemNavLoading && activeTask.distribution === 'quota') {
+        void claim(activeTask.id)
+      }
       return
     }
     const currentIndex = items.findIndex((item) => item.itemId === bundle?.item?.id)
@@ -364,14 +422,30 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       return
     }
     selectNavItem(items[nextIndex])
-  }, [activeTask, bundle?.item?.id, claim, itemNav, selectNavItem])
+  }, [activeTask, bundle?.item?.id, claim, itemNav, itemNavLoading, selectNavItem])
 
-  // 跳过 / 领取下一题:走既有 claim 拿下一个 available。
+  // 跳过:跳到当前题之后第一道「我的、还没提交」的题(claimed/draft/revising),纯导航不重新领取
+  // (整体领取后所有题已是我的,没有"下一道待领题",再 claim 只会跳回第一题并误弹「已领取题目」)。
+  // 仅当配额任务、且确有 available 题时,跳过才真去领下一道。
   const skipItem = useCallback(() => {
-    if (activeTask) {
-      void claim(activeTask.id)
+    if (!activeTask) {
+      return
     }
-  }, [activeTask, claim])
+    const items = itemNav?.items ?? []
+    const isWorkableMine = (item: LabelerTaskItem) =>
+      (item.mine || item.submissionId != null) && (item.status === 'claimed' || item.status === 'draft' || item.status === 'revising')
+    const currentIndex = items.findIndex((item) => item.itemId === bundle?.item?.id)
+    const next = items.slice(currentIndex + 1).find(isWorkableMine) ?? items.find(isWorkableMine)
+    if (next && next.itemId !== bundle?.item?.id) {
+      void openByItem(activeTask.id, next.itemId)
+      return
+    }
+    if (activeTask.distribution === 'quota' && items.some((item) => item.status === 'available')) {
+      void claim(activeTask.id)
+      return
+    }
+    Toast.info('没有更多可做的题了')
+  }, [activeTask, bundle?.item?.id, claim, itemNav, openByItem])
 
   // 从"我的数据"打开一条提交:进入作答页,记录活动任务并加载题目导航,再复用既有 openSubmission。
   const openFromMyData = useCallback((submission: Submission) => {
@@ -381,6 +455,64 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     void loadItemNav(submission.taskId)
     void openSubmission(submission)
   }, [loadItemNav, openSubmission, tasks])
+
+  // 进入某个「已领取的任务」继续标注:记录活动任务、加载题目导航;有进行中题(resumeItemId)直接恢复,
+  // 否则领下一题。任务广场「继续标注」与工作台大任务切换器共用。
+  // first_come / assigned 任务进入时幂等地整体领取一次,确保该任务所有题都解锁(不止恢复的那道)。
+  const openTask = useCallback((myTask: MyTask) => {
+    const task = myTask.task
+    setActiveTask(task)
+    setView('answer')
+    void (async () => {
+      if (task.distribution !== 'quota') {
+        try {
+          await claimTask(task.id)
+        } catch (error) {
+          // 已拥有 / 被他人独占(CONFLICT)→ 忽略,按 resume 继续。
+          // 其它错误(任务不存在 / 未被指派 / 网络 / 5xx)是真失败,不能静默吞:提示并退回广场。
+          if (!(error instanceof ApiError && error.code === 'CONFLICT')) {
+            Toast.error(error instanceof Error ? error.message : '加载任务失败')
+            setView('plaza')
+            setActiveTask(null)
+            void loadMyTasks()
+            return
+          }
+        }
+      }
+      void loadItemNav(task.id)
+      if (myTask.resumeItemId != null) {
+        void openByItem(task.id, myTask.resumeItemId)
+      } else {
+        void claim(task.id)
+      }
+      void loadMyTasks()
+    })()
+  }, [claim, loadItemNav, loadMyTasks, openByItem])
+
+  // 工作台大任务切换器:切到我领取的另一个大任务(走 openTask 恢复/领题)。
+  const switchToTask = useCallback((taskId: number) => {
+    const target = myTasks.find((myTask) => myTask.task.id === taskId)
+    if (target) {
+      openTask(target)
+    }
+  }, [myTasks, openTask])
+
+  // 标注工作台直达(侧栏「标注工作台」,initialView='answer')时,自动恢复该 labeler 最近一条
+  // 「进行中」(draft 已领未提交 / revising 被打回待重做)的提交。没有这一步,领题后从侧栏进入工作台
+  // 会因重挂载丢失内存里的活动任务而看不到题目,导致反复重领同一题。无可恢复项时不做事,
+  // 由 isEmptyWorkbench 兜底回落到任务广场。仅在挂载后跑一次(didAutoResumeRef 守卫)。
+  useEffect(() => {
+    if (initialView !== 'answer' || didAutoResumeRef.current) {
+      return
+    }
+    didAutoResumeRef.current = true
+    void loadMySubmissions().then((subs) => {
+      const resumable = subs.find((submission) => isResumable(submission.status))
+      if (resumable) {
+        openFromMyData(resumable)
+      }
+    })
+  }, [initialView, loadMySubmissions, openFromMyData])
 
   const backToPlaza = useCallback(() => {
     setView('plaza')
@@ -399,7 +531,8 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setAssistError('')
     void loadTasks()
     void loadMySubmissions()
-  }, [loadMySubmissions, loadTasks])
+    void loadMyTasks()
+  }, [loadMyTasks, loadMySubmissions, loadTasks])
 
   // P3:把本地草稿恢复为当前答案。沿用 onChange 的同步推进:推进 autoSaveSeq、置 idle 触发后续自动保存。
   function restoreLocalDraft() {
@@ -434,13 +567,15 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     setAssistError('')
   }, [bundle?.item?.id])
 
-  // 提交/保存后刷新导航状态,保持左侧进度与状态点同步。仅在 bundle.submission?.status 变化时拉取。
+  // 提交/保存后刷新导航状态 + 我的任务进度,保持左侧进度、状态点与大任务切换器同步。
+  // 仅在 bundle.submission?.status 变化时拉取(领题/提交后状态变,切换器也能纳入刚领取的任务)。
   useEffect(() => {
     if (view === 'answer' && activeTask) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadItemNav(activeTask.id)
+      void loadMyTasks()
     }
-  }, [activeTask, bundle?.submission?.status, loadItemNav, view])
+  }, [activeTask, bundle?.submission?.status, loadItemNav, loadMyTasks, view])
 
   // 标注工作台(initialView='answer')在没有激活任务时,不停在"准备开始标注"的空作答页,
   // 直接回落到任务广场,让用户先领题(避免侧栏直达工作台时进入死胡同)。
@@ -456,7 +591,7 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
         </div>
 
         {plazaTab === 'tasks' ? (
-          <TaskPlaza tasks={tasks} loading={loading} onEnter={enterTask} />
+          <TaskPlaza tasks={tasks} myTasks={myTasks} loading={loading} onEnter={enterTask} onContinue={openTask} />
         ) : (
           <MyData submissions={mySubmissions} onOpen={openFromMyData} />
         )}
@@ -470,6 +605,9 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
         nav={itemNav}
         loading={itemNavLoading}
         activeItemId={bundle?.item?.id}
+        myTasks={myTasks}
+        activeTaskId={activeTask?.id}
+        onSwitchTask={switchToTask}
         onSelect={selectNavItem}
         onBack={backToPlaza}
       />
@@ -641,19 +779,15 @@ function taskStatCells(counts: Record<string, number>) {
   return cells
 }
 
-function parseBundleSchema(bundle: TaskBundle | null): ParsedSchema {
-  if (!bundle?.template?.schemaJson) {
-    return { ok: false, message: '当前任务未配置标注模板' }
-  }
-  const result = parseTemplateSchema(bundle.template.schemaJson)
-  if (!result.ok) {
-    return { ok: false, message: `${result.error.field}: ${result.error.message}` }
-  }
-  return { ok: true, schema: result.value }
-}
-
 function answerDraftKey(answer: AnswerValue) {
   return JSON.stringify(answer)
+}
+
+// 「进行中」的提交 = labeler 仍需亲自动手的状态:draft(已领未提交)与 revising(被打回待重做)。
+// 工作台直达时优先恢复这些,审核中 / 终态的提交不算「进行中」。
+function isResumable(status: string): boolean {
+  const normalized = normalizeStatus(status)
+  return normalized === 'draft' || normalized === 'revising'
 }
 
 // 由 bundle 推导本地草稿坐标键(taskId:itemId:submissionId:revisionNo)。

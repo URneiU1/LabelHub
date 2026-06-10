@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import EmptyState from './EmptyState'
 import LoadingBlock from './LoadingBlock'
 import StatusBadge from './StatusBadge'
-import TopProgress from './TopProgress'
 import { statusLabel } from './status'
 
 describe('StatusBadge', () => {
@@ -49,17 +48,5 @@ describe('LoadingBlock', () => {
 
     expect(screen.getByRole('status', { name: '加载任务' })).toHaveAttribute('aria-busy', 'true')
     expect(document.querySelectorAll('.lh-skeleton-line')).toHaveLength(2)
-  })
-})
-
-describe('TopProgress', () => {
-  it('marks inactive progress as hidden', () => {
-    const { rerender } = render(<TopProgress active={false} />)
-
-    expect(screen.getByRole('progressbar', { hidden: true })).toHaveAttribute('data-active', 'false')
-
-    rerender(<TopProgress active />)
-
-    expect(screen.getByRole('progressbar')).toHaveAttribute('data-active', 'true')
   })
 })

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +16,12 @@ import (
 func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error {
 	payload, err := parseAIReviewPayload(t.Payload())
 	if err != nil {
+		// Payload is produced by our own enqueue side, so a parse failure is a coding bug,
+		// not a transient error. Surface it as a non-retryable asynq failure (visible in the
+		// dead queue) instead of returning nil, which would mark the job succeeded and hide it.
+		// The submission is still rescued by the sweeper after the stall timeout.
 		h.logger.Warn("invalid ai review payload", zap.Error(err), zap.ByteString("payload", t.Payload()))
-		return nil
+		return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
 	}
 	claimed, err := h.markRunning(ctx, payload)
 	if err != nil {
@@ -167,7 +169,7 @@ func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
 	if payload.SubmissionID == 0 || payload.RevisionID == 0 || payload.PromptConfigID == 0 || payload.PromptVersion <= 0 || payload.IdempotencyKey == "" {
 		return aiReviewPayload{}, errors.New("missing required ai review payload fields")
 	}
-	if payload.IdempotencyKey != aiReviewIdempotencyKey(payload.SubmissionID, payload.RevisionID, payload.PromptConfigID, payload.PromptVersion) {
+	if payload.IdempotencyKey != llmreview.AIReviewIdempotencyKey(payload.SubmissionID, payload.RevisionID, payload.PromptConfigID, payload.PromptVersion) {
 		return aiReviewPayload{}, errors.New("ai review idempotency key does not match payload anchors")
 	}
 	return payload, nil
@@ -309,8 +311,8 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "score": result.Score})
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', ?, 'system', ?, ?, ?)`,
-		payload.SubmissionID, toState, event, string(auditPayload), now,
+		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, actor_id, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', ?, 'ai_worker', ?, ?, ?, ?)`,
+		payload.SubmissionID, toState, h.aiActorID, event, string(auditPayload), now,
 	); err != nil {
 		return err
 	}
@@ -361,8 +363,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "error": llmreview.SafeErrorMessage(cause)})
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', 'human_reviewing', 'system', 'ai_fail_max', ?, ?)`,
-		payload.SubmissionID, string(auditPayload), now,
+		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, actor_id, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', 'human_reviewing', 'ai_worker', ?, 'ai_fail_max', ?, ?)`,
+		payload.SubmissionID, h.aiActorID, string(auditPayload), now,
 	); err != nil {
 		return err
 	}
@@ -413,9 +415,4 @@ func shouldFailover(ctx context.Context) bool {
 		return true
 	}
 	return retryCount >= maxRetry
-}
-
-func aiReviewIdempotencyKey(submissionID uint64, revisionID uint64, promptID uint64, promptVersion int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d", submissionID, revisionID, promptID, promptVersion)))
-	return hex.EncodeToString(sum[:])
 }
