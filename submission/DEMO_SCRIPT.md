@@ -81,14 +81,27 @@ SELECT id,title,status FROM tasks;"'   # 应只剩 1 行 qa_quality
 |---|---|---|---|
 | 0 开场 | — | — | 否 |
 | 1a Owner 展示 | `owner1` | `qa_quality` | 否(Designer Tabs/Group + AI Prompt/Golden Sample/Stats 只读展示「深度」) |
-| **1b Owner 创建任务** | `owner1` | **现场新建第 2 个** | **新建→Designer 拖物料→发布**(演示「创建→发布」生命周期 + 数据生产能力) |
+| **1b Owner 创建任务** | `owner1` | **现场新建第 2 个** | **新建草稿→Designer 建模板→导入官方数据集→发布**(演示完整数据生产生命周期;详细分步见表下) |
 | 2 Labeler | `labeler1` | `qa_quality` | 领题+提交(全新,first_come 整体领) |
 | 3 Reviewer | `reviewer1` | 刚提交那条 | 通过(或录 **打回→修订→复审** 闭环展示状态机) |
 | 4 Export | `owner1` | `qa_quality` | 异步导出+下载 |
 
-- **Scene 1b「创建→发布」具体步骤**(~2-3 min,必录):
-  `owner1` → 新建任务 → 填**标题 + baseline 说明**(都必填)→ 保存(生成 `draft`)→ 打开该任务进 **Designer** → 拖 2-3 个物料(如 Radio/Tags)→ 保存模板(**发布前必须有绑定模板**)→ 点【发布】→ `draft → published` ✓。**发布不要求有题**,所以不用导入数据,轻量演示生命周期即可。
-  > 分工:`qa_quality`(现成富任务)展示 Designer 高级物料 + AI 配置 + 全链路;**新建的轻量任务**展示「从零创建→发布」。两者互补、不冗余。
+- **Scene 1b「创建 → 建模板 → 导入官方数据 → 发布」逐步操作(~3-4 min,必录,点哪个按钮都标了)**
+
+  > ⚠️ **顺序是死的**:导入只能在**草稿**任务上做(发布后禁导入);发布又**必须先有绑定模板**。所以固定走:创建草稿 → 建模板 → 导入(仍草稿)→ 发布。顺序反了会被拦。
+
+  以 `owner1` 登录,owner 左栏分节切换来配置任务:
+
+  1. **创建任务**(左栏「任务管理」):点右上角 **`+ 新建任务`** → 抽屉里填「**任务标题**」(必填,如 `demo·商品标题清洗`)+「任务简介」(可选)→「分发策略」选 **`先到先得`** → 点底部 **`创建草稿`** → Toast「任务已创建为草稿」(任务自动选中)。
+  2. **建模板**(左栏切「**模板搭建**」,发布前必须):点 **`打开 Designer`** → 模板列表页点 **`+ 新建模板`** → 进 Designer(显示「新建模板」)→ 从左侧物料面板**拖** 2-3 个物料(如 Radio / Tags / Input)到中间画布,右侧属性面板改 label / name → 点 **`保存并发布版本 r1`**(画布至少 1 个物料才能点)。
+  3. **导入官方数据**(左栏切「**数据集**」,仍是草稿):在「文件导入(.json / .jsonl / .xlsx)」处点文件选择框 → 选 `~/Desktop/LabelHub/tools/seed/datasets/qa_quality/excel/qa_quality.xlsx`(**选中文件即自动上传**,无需额外按钮)→ Toast「**已导入 N 条(xlsx)**」→ 可点 **`随机预览`** 展示一条导入题目的 payload。
+  4. **发布**(左栏切回「任务管理」):点列表里这个任务的行选中它 → 下方动作栏点 **`发布`** 按钮 → 状态徽章 `草稿 → 发布中` ✓。(没建模板就点发布会报「未绑定模板」——所以第 2 步必须先做。)
+
+  > 口播:"Owner 是数据生产者。我现场建一个任务——填基本信息、用可视化 Designer 拖出标注表单、**导入官方数据集**、一键发布。草稿→发布中 整个生命周期由状态机驱动。"
+  >
+  > 分工:`qa_quality`(现成富任务)→ 展示 Designer 高级物料 + AI 配置 + labeler/reviewer/导出 全链路;**这个新建任务** → 展示「从零创建 → 建模板 → 导入 → 发布」。互补不冗余。
+  >
+  > 导入格式备选:`excel/qa_quality.xlsx`(最直观)/ `json/qa_quality.json`(与现成 qa_quality 题目完全一致)/ `jsonl/qa_quality.jsonl`,都在 `tools/seed/datasets/qa_quality/`,按扩展名自动识别、无需手动列映射。
 - **强烈建议**:Scene 3 录一遍 **AI reject 或人工打回 → labeler 修订重提 → reviewer 复审通过** 的闭环 —— 这是最能体现「长链路工作流状态机」考察点的镜头(`submitted→ai_reviewing→…→revising→submitted→…→approved`)。
 
 ### Phase 3 · 录后
