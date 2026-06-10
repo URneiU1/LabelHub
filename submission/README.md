@@ -20,7 +20,8 @@
 | 7 | 部署说明 | [`DEPLOY.md`](DEPLOY.md) | 工程质量 25% |
 | 8 | API 文档 | [`api/openapi.yaml`](api/openapi.yaml) + [`api/postman_collection.json`](api/postman_collection.json) | 工程质量 25% |
 | 9 | 交付前 Code Review | [`CODE-REVIEW-FINAL.md`](CODE-REVIEW-FINAL.md) | 工程质量 25%(附加) |
-| 10 | License | [`LICENSE`](LICENSE) — MIT | — |
+| 10 | 课题要求完成度与超额项对照 | [`BEYOND-REQUIREMENTS.md`](BEYOND-REQUIREMENTS.md) — 逐条要求 vs 交付 + 答辩取舍说明 | 功能完备性 60%(答辩材料) |
+| 11 | License | [`LICENSE`](LICENSE) — MIT | — |
 
 > 大体积视频文件不放入 Git 仓库;最终提交时按 [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) 录制并上传到比赛平台或外部附件。
 
