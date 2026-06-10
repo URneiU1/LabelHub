@@ -85,6 +85,8 @@ describe('AcceptancePanel', () => {
     render(<AcceptancePanel taskId={1} />)
 
     expect(await screen.findByText('提交 #7')).toBeInTheDocument()
+    // 答案默认折叠,点「查看答案」才展开,避免列表过长。
+    await userEvent.click(screen.getByRole('button', { name: '查看答案' }))
     expect(screen.getByText(/相关性/)).toBeInTheDocument()
 
     // 列表行的「合格」就地抽检,带上该提交 ID,不必手输。

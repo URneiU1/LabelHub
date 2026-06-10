@@ -247,15 +247,28 @@ function ApprovedList({ status, onSpot, busy }: {
   onSpot: (submissionId: number, result: 'ok' | 'flag') => void
   busy: boolean
 }) {
+  const [openIds, setOpenIds] = useState<Set<number>>(new Set())
   const subs = status?.approvedSubmissions ?? []
   const checks = status?.spotChecks ?? []
   if (subs.length === 0) {
     return <p style={{ ...mutedStyle, marginTop: 'var(--space-sm)' }}>当前没有「已通过」数据可抽检。</p>
   }
+  function toggle(id: number) {
+    setOpenIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
   return (
     <div style={{ display: 'grid', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
       {subs.map((sub) => {
         const check = checks.find((c) => c.submissionId === sub.id)
+        const open = openIds.has(sub.id)
         return (
           <div key={sub.id} style={approvedRowStyle}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
@@ -263,8 +276,9 @@ function ApprovedList({ status, onSpot, busy }: {
               <span style={{ ...mutedStyle, fontSize: 12 }}>题 #{sub.itemId} · 标注员 #{sub.labelerId}</span>
               {sub.aiVerdict ? <span style={{ ...mutedStyle, fontSize: 12 }}>AI {sub.aiVerdict}{sub.aiScore != null ? ` · ${sub.aiScore}` : ''}</span> : null}
               {check ? <StatusBadge status={check.result === 'flag' ? 'rejected' : 'approved'} label={check.result === 'flag' ? '抽检不合格' : '抽检合格'} /> : null}
+              <button type="button" className="lh-btn lh-btn--sm" onClick={() => toggle(sub.id)} style={{ marginLeft: 'auto' }}>{open ? '收起' : '查看答案'}</button>
             </div>
-            <AnswerSummary answer={sub.answer} />
+            {open ? <AnswerSummary answer={sub.answer} /> : null}
             <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
               <button type="button" className="lh-btn lh-btn--sm" disabled={busy} onClick={() => onSpot(sub.id, 'ok')}>合格</button>
               <button type="button" className="lh-btn lh-btn--sm lh-btn--danger" disabled={busy} onClick={() => onSpot(sub.id, 'flag')}>不合格</button>
