@@ -276,8 +276,9 @@ describe('ReviewerQueue schema runtime flow', () => {
 
     await user.click(screen.getByRole('tab', { name: '审计时间线' }))
     expect(await screen.findByText('审计时间线（SUB-501）')).toBeInTheDocument()
-    expect(screen.getAllByText('AI 预审通过').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/AI Agent · AI 预审中 → 人工审核中/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/AI 预审通过/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('AI Agent').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/AI 预审中 → 人工审核中/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0)
     expect(screen.queryByText('ai_done')).not.toBeInTheDocument()
     expect(screen.queryByText('ai_reviewing → human_reviewing')).not.toBeInTheDocument()
@@ -454,9 +455,9 @@ describe('ReviewerQueue schema runtime flow', () => {
     await user.click(await screen.findByText('Submission #501'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('fields[0].options')
-    expect(screen.getByRole('button', { name: /打回/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /通过/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /返回标注员修改/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /终止本条提交/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /推进一级/ })).toBeDisabled()
   })
 
   it('disables review actions while a review request is pending', async () => {
@@ -491,12 +492,12 @@ describe('ReviewerQueue schema runtime flow', () => {
     render(<ReviewerQueue />)
 
     await user.click(await screen.findByText('Submission #501'))
-    await user.click(screen.getByRole('button', { name: /通过/ }))
+    await user.click(screen.getByRole('button', { name: /推进一级/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /打回/ })).toBeDisabled()
-      expect(screen.getByRole('button', { name: /拒绝/ })).toBeDisabled()
-      expect(screen.getByRole('button', { name: /通过/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /返回标注员修改/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /终止本条提交/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /推进一级/ })).toBeDisabled()
     })
 
     await act(async () => {

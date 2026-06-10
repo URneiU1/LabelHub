@@ -292,7 +292,6 @@ describe('LabelerPlaza schema runtime flow', () => {
   })
 
   it('aggregates my submission counts by bucket in 我的数据', async () => {
-    const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/labeler/tasks') {
         return []
