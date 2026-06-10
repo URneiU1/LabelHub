@@ -1158,16 +1158,7 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
               <LengthControls field={field} disabled={disabled} onChange={onChange} />
             ) : null}
             {isOptionWidget(field.widget) ? (
-              <label style={fieldStyle}>
-                options
-                <textarea
-                  aria-label="field_options"
-                  disabled={disabled}
-                  value={(field.options ?? []).join('\n')}
-                  onChange={(event) => onChange({ options: parseOptionsInput(event.target.value) })}
-                  style={textareaStyle}
-                />
-              </label>
+              <OptionsEditor key={field._draftId} field={field} disabled={disabled} onChange={onChange} />
             ) : null}
             {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
             {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
@@ -1979,6 +1970,34 @@ function positiveNumberInput(value: string, fallback: number) {
 
 function parseOptionsInput(value: string): FieldOption[] {
   return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
+}
+
+// options 编辑器:用本地字符串态承接输入。之前 textarea 的受控值由「过滤后的 options 数组」
+// 反推(options.join('\n')),逐字打到换行/逗号时,产生的空白会被 parseOptionsInput 的
+// filter(Boolean) 即时过滤掉、分隔符被「吃」回去,导致无法输入第二个选项。本地态让用户自由
+// 输入(含尾随换行/逗号),仅在 onChange 时把过滤后的结果写回 schema。
+// 由 <OptionsEditor key={field._draftId}> 保证切换字段时重挂载、本地态用新字段的值刷新。
+function OptionsEditor({ field, disabled, onChange }: {
+  field: DraftField
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  const [text, setText] = useState(() => (field.options ?? []).join('\n'))
+  return (
+    <label style={fieldStyle}>
+      options
+      <textarea
+        aria-label="field_options"
+        disabled={disabled}
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value)
+          onChange({ options: parseOptionsInput(event.target.value) })
+        }}
+        style={textareaStyle}
+      />
+    </label>
+  )
 }
 
 const fallbackPreviewPayload: RenderPayload = {
