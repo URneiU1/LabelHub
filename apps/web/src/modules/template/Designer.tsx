@@ -593,6 +593,25 @@ export default function TemplateDesigner() {
           </div>
         </div>
         <div style={toolbarActionsStyle}>
+          <Link
+            to="/owner/template"
+            aria-label="返回模板搭建"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--color-border-light)',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            ← 返回模板搭建
+          </Link>
           {!isLatest && latestTemplateId ? (
             <Link to={`/owner/tasks/${numericTaskId}/templates/${latestTemplateId}`} style={latestTemplateLinkStyle}>查看最新版本</Link>
           ) : null}
