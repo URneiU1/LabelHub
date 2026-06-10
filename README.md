@@ -13,8 +13,7 @@
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构图与决策表
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — 单机部署 SOP
 - [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/LabelHub.postman_collection.json`](docs/LabelHub.postman_collection.json) — API 契约与请求集
-- [`docs/CODE-REVIEW-FINAL.md`](docs/CODE-REVIEW-FINAL.md) — 交付前 4 路并行 code review 汇总
-- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — 8 周开发流水(Sprint 0 → Sprint 7)
+- [`submission/CODE-REVIEW-FINAL.md`](submission/CODE-REVIEW-FINAL.md) — 交付前 4 路并行 code review 汇总
 
 ## 快速启动
 
@@ -43,8 +42,7 @@ make web       # 终端 C — http://localhost:5173
 |---|---|---|
 | `owner1` | Owner | 任务/模板/AI Prompt/Golden Sample 配置 |
 | `labeler1` | Labeler | 任务广场领题、作答、提交 |
-| `reviewer1` | Reviewer | 审核队列、verdict、规则查看 |
-| `admin1` | Admin | 全局管理 |
+| `reviewer1` · `reviewer2` | Reviewer | 审核队列、AI verdict、两级独立复核(初审 + 终审需不同审核员) |
 | `system_ai` | System | AI 预审 Agent(后台,不需登录) |
 
 ### 5 分钟评委路径
@@ -55,7 +53,7 @@ make web       # 终端 C — http://localhost:5173
 4. 退出登 `reviewer1/123456` → **审核队列** → 看 AI verdict + 维度评分 → 通过/打回
 5. 回 `owner1` → **导出**(JSON/JSONL/CSV/XLSX 任选)→ 下载
 
-完整 walkthrough 见 [`submission/DEMO_SCRIPT.md`](submission/DEMO_SCRIPT.md)。
+完整 walkthrough 见 [`submission/`](submission/) 交付包。
 
 ## 架构
 
@@ -134,7 +132,3 @@ docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.example 
 ## License
 
 [MIT](LICENSE)
-
----
-
-> 开发日志(Sprint 0 → Sprint 7 逐次改动、技术决策、验证记录)请见 [`docs/CHANGELOG.md`](docs/CHANGELOG.md)。
