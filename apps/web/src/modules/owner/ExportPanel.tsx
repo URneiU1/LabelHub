@@ -133,6 +133,17 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
 
       <div style={{ display: 'grid', gap: 4, margin: 'var(--space-md) 0' }}>
         <span style={hintStyle}>字段映射(不勾选则导出全部默认列)</span>
+        <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontWeight: 600 }}>
+          <input
+            type="checkbox"
+            checked={availableColumns.length > 0 && availableColumns.every((src) => selectedCols[src])}
+            onChange={(e) =>
+              setSelectedCols(e.target.checked ? Object.fromEntries(availableColumns.map((src) => [src, true])) : {})
+            }
+            aria-label="全选字段"
+          />
+          全选
+        </label>
         {availableColumns.map((src) => (
           <div key={src} style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
             <label style={{ display: 'flex', gap: 4, minWidth: 200 }}>

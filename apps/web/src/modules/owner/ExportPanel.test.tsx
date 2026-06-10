@@ -59,6 +59,22 @@ describe('ExportPanel', () => {
     expect(body).toContain('"include_reviews":true')
   })
 
+  it('selects every available column when 全选 is checked', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockResolvedValue({ exports: [] })
+    mockApiPostRawJSON.mockResolvedValue({ id: 11, status: 'queued' })
+    render(<ExportPanel taskId={1} />)
+
+    await user.click(screen.getByLabelText('全选字段'))
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => expect(mockApiPostRawJSON).toHaveBeenCalledTimes(1))
+    const body = JSON.parse(mockApiPostRawJSON.mock.calls[0][1] as string)
+    expect(body.field_map.columns.map((c: { source: string }) => c.source)).toEqual([
+      'submission_id', 'item_id', 'external_id', 'payload', 'answer',
+    ])
+  })
+
   it('opens the signed url on download', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path: string) => {
