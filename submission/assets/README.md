@@ -23,8 +23,6 @@
 | [`screenshots/05-export-config-1920.png`](screenshots/05-export-config-1920.png) | Owner 多格式导出配置（json/jsonl/csv/xlsx/md + 字段映射）· 1920×1080 |
 | [`screenshots/05-export-config-1280.png`](screenshots/05-export-config-1280.png) | Owner 多格式导出配置（json/jsonl/csv/xlsx/md + 字段映射）· 1280×800 |
 
-`screenshots/04-reviewer-detail-CRASH.png` 保留为早期某次崩溃修复前的问题证据,不作为主展示截图(可在最终提交前移除)。
-
 ## 视频交付
 
 演示视频按 [`../DEMO_SCRIPT.md`](../DEMO_SCRIPT.md) 录制:

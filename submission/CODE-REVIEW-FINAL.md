@@ -2,7 +2,7 @@
 
 **初次 Review**：2026-05-28（4 路并行 — go-reviewer / typescript-reviewer / security-reviewer / 交付物 readiness）
 **第二轮 Review + 最终核验**：2026-06-10
-**仓库 / 分支**：`~/Desktop/LabelHub` · `feat/ui-reskin-s7-and-followups`
+**仓库 / 分支**：`github.com/URneiU1/LabelHub` · `main`
 **比赛 deadline**：2026-07-08 ~ 2026-07-15
 **审查范围**：~31k LOC（15.5k Go + 14k TS/TSX）+ 部署配置 + 交付物
 

@@ -94,7 +94,7 @@ SELECT id,title,status FROM tasks;"'   # 应只剩 1 行 qa_quality
 
   1. **创建任务**(左栏「任务管理」):点右上角 **`+ 新建任务`** → 抽屉里填「**任务标题**」(必填,如 `demo·商品标题清洗`)+「任务简介」(可选)→「分发策略」选 **`先到先得`** → 点底部 **`创建草稿`** → Toast「任务已创建为草稿」(任务自动选中)。
   2. **建模板**(左栏切「**模板搭建**」,发布前必须):点 **`打开 Designer`** → 模板列表页点 **`+ 新建模板`** → 进 Designer(显示「新建模板」)→ 从左侧物料面板**拖** 2-3 个物料(如 Radio / Tags / Input)到中间画布,右侧属性面板改 label / name → 点 **`保存并发布版本 r1`**(画布至少 1 个物料才能点)。
-  3. **导入官方数据**(左栏切「**数据集**」,仍是草稿):在「文件导入(.json / .jsonl / .xlsx)」处点文件选择框 → 选 `~/Desktop/LabelHub/tools/seed/datasets/qa_quality/excel/qa_quality.xlsx`(**选中文件即自动上传**,无需额外按钮)→ Toast「**已导入 N 条(xlsx)**」→ 可点 **`随机预览`** 展示一条导入题目的 payload。
+  3. **导入官方数据**(左栏切「**数据集**」,仍是草稿):在「文件导入(.json / .jsonl / .xlsx)」处点文件选择框 → 选 `tools/seed/datasets/qa_quality/excel/qa_quality.xlsx`(仓库根相对路径;**选中文件即自动上传**,无需额外按钮)→ Toast「**已导入 N 条(xlsx)**」→ 可点 **`随机预览`** 展示一条导入题目的 payload。
   4. **发布**(左栏切回「任务管理」):点列表里这个任务的行选中它 → 下方动作栏点 **`发布`** 按钮 → 状态徽章 `草稿 → 发布中` ✓。(没建模板就点发布会报「未绑定模板」——所以第 2 步必须先做。)
 
   > 口播:"Owner 是数据生产者。我现场建一个任务——填基本信息、用可视化 Designer 拖出标注表单、**导入官方数据集**、一键发布。草稿→发布中 整个生命周期由状态机驱动。"
@@ -153,7 +153,7 @@ SELECT id,title,status FROM tasks;"'   # 应只剩 1 行 qa_quality
 线上录制不需要跑本地服务。若选择本地线路,按下面顺序启动:
 
 ```bash
-cd ~/Desktop/LabelHub
+cd LabelHub   # git clone 后的仓库根目录
 cp .env.example .env
 make up
 make seed
