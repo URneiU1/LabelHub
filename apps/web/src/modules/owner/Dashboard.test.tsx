@@ -56,8 +56,11 @@ describe('OwnerDashboard AI prompt flow', () => {
     mockApiDelete.mockReset()
     mockModalConfirm.mockReset()
     window.history.pushState({}, '', '/')
-    // 分节是模块级 store,重置回默认 'ai' 避免跨用例泄漏。
+    // 分节是模块级 store:先 reset 清掉跨用例泄漏,再显式进入 'ai' 分节。
+    // owner 默认落地页已改为「任务管理」(tasks),而这批用例测的是 AI 预审分节,
+    // 不显式 setOwnerSection('ai') 就渲染不出 prompt/baseline/dry-run 等表单。
     resetOwnerSection()
+    setOwnerSection('ai')
     // owner 选中任务现持久化到 localStorage,用例间清掉避免上次选中污染默认任务。
     localStorage.clear()
     mockApiGet.mockImplementation(async (path) => {
