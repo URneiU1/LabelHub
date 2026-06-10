@@ -15,7 +15,15 @@
 - [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/LabelHub.postman_collection.json`](docs/LabelHub.postman_collection.json) — API 契约与请求集
 - [`submission/CODE-REVIEW-FINAL.md`](submission/CODE-REVIEW-FINAL.md) — 交付前 4 路并行 code review 汇总
 
-## 快速启动
+## 在线体验(在线 demo)
+
+已部署在线 demo,**无需本地搭建,打开即用**:
+
+> **http://43.155.210.70** — 用下方[演示账号](#演示账号)登录(如 `owner1` / `123456`)
+
+想本地完整跑(改代码、看 AI worker、换真实豆包 key)见下方「快速启动」。
+
+## 快速启动(本地搭建)
 
 ```bash
 # 前置: Docker Desktop / Colima、Go 1.22+、Node 24+、pnpm 10+
@@ -47,10 +55,10 @@ make web       # 终端 C — http://localhost:5173
 
 ### 5 分钟评委路径
 
-1. 浏览器打开 http://localhost:5173 → 登 `owner1/123456`
+1. 浏览器打开 demo(在线 **http://43.155.210.70** 或本地 http://localhost:5173)→ 登 `owner1/123456`
 2. 进 **Owner Dashboard** → 选官方 `qa_quality` 任务 → 看模板/AI Prompt/Golden Sample/Stats Board(官方任务 seed 后已启用 AI review)
 3. 退出登 `labeler1/123456` → **任务广场** → 领取一题 → 作答并提交,触发 AI 预审
-4. 退出登 `reviewer1/123456` → **审核队列** → 看 AI verdict + 维度评分 → 通过/打回
+4. 退出登 `reviewer1/123456` → **审核队列** → 看 AI verdict + 维度评分 → 初审通过;再登 `reviewer2` 做终审(两级独立,需不同审核员)→ 定稿
 5. 回 `owner1` → **导出**(JSON/JSONL/CSV/XLSX 任选)→ 下载
 
 完整 walkthrough 见 [`submission/`](submission/) 交付包。
