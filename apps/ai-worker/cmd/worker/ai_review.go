@@ -311,8 +311,8 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "score": result.Score})
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', ?, 'system', ?, ?, ?)`,
-		payload.SubmissionID, toState, event, string(auditPayload), now,
+		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, actor_id, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', ?, 'ai_worker', ?, ?, ?, ?)`,
+		payload.SubmissionID, toState, h.aiActorID, event, string(auditPayload), now,
 	); err != nil {
 		return err
 	}
@@ -363,8 +363,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "error": llmreview.SafeErrorMessage(cause)})
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', 'human_reviewing', 'system', 'ai_fail_max', ?, ?)`,
-		payload.SubmissionID, string(auditPayload), now,
+		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, actor_id, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', 'human_reviewing', 'ai_worker', ?, 'ai_fail_max', ?, ?)`,
+		payload.SubmissionID, h.aiActorID, string(auditPayload), now,
 	); err != nil {
 		return err
 	}

@@ -42,7 +42,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("configure llm provider", zap.Error(err))
 	}
-	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator, circuit: newAIWorkerCircuitFromEnv()}
+	handlers := workerHandlers{logger: logger, db: database, evaluator: evaluator, circuit: newAIWorkerCircuitFromEnv(), aiActorID: lookupAIActorID(database, logger)}
 	mux := asynq.NewServeMux()
 	mux.HandleFunc("ai:review", handlers.handleAIReview)
 	mux.HandleFunc("ai:dry-run", handlers.handleAIDryRun)
@@ -68,6 +68,9 @@ type workerHandlers struct {
 	db        *sql.DB
 	evaluator aiEvaluator
 	circuit   *aiWorkerCircuit
+	// aiActorID 是 seed 的 system_ai 账号 id;AI 评审写 audit_logs 时作为 actor_id,
+	// 让时间线以独立 AI Agent 账户视角可追溯。nil(未 seed)时落 NULL,不阻塞评审。
+	aiActorID *uint64
 }
 
 func (h workerHandlers) handleNoop(_ context.Context, t *asynq.Task) error {
@@ -135,6 +138,18 @@ func mustAbsExportDir() string {
 		log.Fatalf("EXPORT_DIR must be an absolute path (api and worker run from different working dirs), got %q", dir)
 	}
 	return dir
+}
+
+// lookupAIActorID 解析 seed 的 system_ai 账号 id,作为 AI 评审审计的 actor_id。
+// 账号不存在(未 seed / 精简部署)只告警不阻塞,audit_logs.actor_id 落 NULL。
+func lookupAIActorID(database *sql.DB, logger *zap.Logger) *uint64 {
+	var id uint64
+	err := database.QueryRow(`SELECT id FROM users WHERE username = 'system_ai' LIMIT 1`).Scan(&id)
+	if err != nil {
+		logger.Warn("system_ai account not found; ai audit entries will have no actor_id", zap.Error(err))
+		return nil
+	}
+	return &id
 }
 
 // envOrDefault 与 api 的 internal/envutil.Default 行为一致(internal 包不能跨 module 复用,故各留一份)。

@@ -232,7 +232,7 @@ func TestCompleteMovesUncertainSubmissionToManualReview(t *testing.T) {
 		WithArgs("manual_review", "uncertain", 75.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-		WithArgs(payload.SubmissionID, "manual_review", "ai_uncertain", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(payload.SubmissionID, "manual_review", nil, "ai_uncertain", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -279,7 +279,7 @@ func TestCompleteRejectBouncesSubmissionToRevising(t *testing.T) {
 		WithArgs("revising", "reject", 30.0, payload.SubmissionID, payload.RevisionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-		WithArgs(payload.SubmissionID, "revising", "ai_reject", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(payload.SubmissionID, "revising", nil, "ai_reject", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -334,7 +334,7 @@ func TestHandleAIReviewVerdictStateMapping(t *testing.T) {
 				WithArgs(tt.wantToState, tt.verdict, tt.score, payload.SubmissionID, payload.RevisionID).
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec(`(?is)^INSERT INTO audit_logs`).
-				WithArgs(payload.SubmissionID, tt.wantToState, tt.wantEvent, sqlmock.AnyArg(), sqlmock.AnyArg()).
+				WithArgs(payload.SubmissionID, tt.wantToState, nil, tt.wantEvent, sqlmock.AnyArg(), sqlmock.AnyArg()).
 				WillReturnResult(sqlmock.NewResult(1, 1))
 			mock.ExpectCommit()
 
