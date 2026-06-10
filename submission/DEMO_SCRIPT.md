@@ -25,20 +25,19 @@ $DC exec -T mysql sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATAB
 $DC down -v                       # 清空 mysql/redis/exports 数据卷
 $DC up -d --wait --wait-timeout 150   # 复用现有镜像重起并等健康;api 启动自动迁移建表
 
-# ⚠️ seed 前必做:api 镜像没 COPY tools/seed/(Dockerfile 缺),seed 在容器内读
-#    /tools/seed/datasets|templates/ 会 "no such file or directory"。先把 host 的
-#    数据集拷进容器(host /home/ubuntu/labelhub/tools/seed/ 是全的):
-$DC exec -u root -T api mkdir -p /tools
-$DC cp tools/seed api:/tools/seed
-
+# 注:2026-06-10 起 prod 的 api 镜像已自带 tools/seed 数据集(Dockerfile 已加
+#    COPY tools/seed /tools/seed),下面这行 seed 直接成功。
+#    ——若你跑的是更早的旧镜像(seed 报 "标注要求.md: no such file or directory"),
+#      先补这两行把 host 数据集拷进容器再 seed:
+#        $DC exec -u root -T api mkdir -p /tools
+#        $DC cp tools/seed api:/tools/seed
 $DC exec -e SEED_ALLOW_IN_PROD=true -T api seed   # 写入 2 个官方任务 + 9 个账号
 curl -s http://localhost/health                   # → ok
 $DC exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -e "SELECT id,title,status FROM tasks;"'  # 应有 2 行
 ```
 
-> 🐞 **已知部署坑(根因)**:历史 `apps/api/Dockerfile` 只 COPY 了 binary + migration,**没 COPY `tools/seed/` 数据集**,所以容器内 `seed` 找不到 baseline/template 文件。
-> **永久修法已落地**:Dockerfile 最终 stage 现已加 `COPY tools/seed /tools/seed`(commit 见 git log)——**下次重新 build + 部署镜像后**,`seed` 自带数据集,本坑消失,`down -v` 重置后直接 `seed` 即可,不再需要 cp。
-> **但在重新 build 部署之前**:线上跑的还是旧镜像(无数据集),上面的 `mkdir /tools` + `docker cp` 临时绕过仍然必需,且 `/tools/seed` 是 ephemeral——**每次 `down -v` 重置后都要重做这两行 cp**。
+> 🐞 **已知部署坑(根因 + 已修复)**:历史 `apps/api/Dockerfile` 只 COPY 了 binary + migration,**没 COPY `tools/seed/` 数据集**,所以容器内 `seed` 找不到 baseline/template 文件 → `down -v` 重置后账号能 seed 但 2 个官方任务 seed 失败。
+> **2026-06-10 已永久修复并部署**:Dockerfile 最终 stage 加了 `COPY tools/seed /tools/seed`,prod 的 api 镜像已重 build,`/tools/seed` 进镜像。现在 `down -v` 重置后**直接 `seed` 即可**,无需任何 cp 绕过。上面注释里的 `mkdir /tools`+`docker cp` 只对**未重 build 的旧镜像**才需要。
 
 **重置后的干净基线**:`qa_quality` 30 题全可领 / `preference_compare` 12 题全可领 / 无空任务 / 所有账号无 draft 无认领 / 审核队列为空。
 
