@@ -34,6 +34,7 @@ export default function TemplateBindPanel({ task, onTaskSaved }: TemplateBindPan
   }, [task.id])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadTemplates 首行同步置 loading=true 是预期加载态
     void loadTemplates()
   }, [loadTemplates])
 
