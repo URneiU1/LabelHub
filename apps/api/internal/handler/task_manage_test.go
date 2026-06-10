@@ -222,6 +222,90 @@ func TestUpdateTaskForbidsNonOwner(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskBindsTemplateVersion(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "draft")
+	// templateId 归属校验:先查 task_templates 确认该版本属于本任务。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).
+			AddRow(12, 1, 2))
+	mock.ExpectBegin()
+	// 切模板属冻结策略字段,UPDATE 必须带 status 乐观锁守卫。
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status = .+`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "template_id"}).
+			AddRow(1, 7, "Task", "draft", 12))
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPut, "/tasks/1", map[string]any{
+		"templateId": 12,
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	data := responseData(t, rec)
+	task := data["task"].(map[string]any)
+	if task["templateId"] != float64(12) {
+		t.Fatalf("templateId = %v", task["templateId"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestUpdateTaskRejectsTemplateSwitchAfterPublish(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "published")
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPut, "/tasks/1", map[string]any{
+		"templateId": 12,
+	}))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestUpdateTaskRejectsForeignTemplate(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	expectOwnedTask(mock, "draft")
+	// 模板存在但属于别的任务(task_id=2) → 拒绝绑定。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).
+			AddRow(12, 2, 1))
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPut, "/tasks/1", map[string]any{
+		"templateId": 12,
+	}))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
 // ---------- Lifecycle ----------
 
 func TestPublishTaskSucceedsWithTemplate(t *testing.T) {

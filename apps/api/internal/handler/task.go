@@ -100,6 +100,8 @@ type updateTaskRequest struct {
 	DailySubmissionLimitPerLabeler *int             `json:"dailySubmissionLimitPerLabeler"`
 	HumanReviewEnabled             *bool            `json:"humanReviewEnabled"`
 	Deadline                       *model.NullTime  `json:"deadline"`
+	// TemplateID:把任务绑定切换到本任务已有的某个模板版本(发布后冻结,同 CreateTemplate)。
+	TemplateID *uint64 `json:"templateId"`
 }
 
 type importItemsRequest struct {
@@ -292,6 +294,22 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 	if req.HumanReviewEnabled != nil {
 		updates["human_review_enabled"] = *req.HumanReviewEnabled
 	}
+	if req.TemplateID != nil {
+		var tpl model.TaskTemplate
+		if err := h.db.First(&tpl, *req.TemplateID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "templateId does not reference an existing template")
+				return
+			}
+			httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load template")
+			return
+		}
+		if tpl.TaskID != task.ID {
+			httpx.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "templateId must reference a template version of this task")
+			return
+		}
+		updates["template_id"] = *req.TemplateID
+	}
 	if req.Tags != nil {
 		tags, valid := validateOptionalJSON(c, req.Tags, "tags")
 		if !valid {
@@ -345,7 +363,8 @@ func hasFrozenTaskPolicyUpdate(req updateTaskRequest) bool {
 		req.QuotaPerUser != nil ||
 		req.OverlapCount != nil ||
 		req.OverlapCoveragePct != nil ||
-		req.ReviewSamplingPct != nil
+		req.ReviewSamplingPct != nil ||
+		req.TemplateID != nil
 }
 
 func validateTaskPolicyFields(c *gin.Context, overlapCount, overlapCoveragePct, leaseTimeoutMinutes, reviewSamplingPct, dailySubmissionLimit *int) bool {

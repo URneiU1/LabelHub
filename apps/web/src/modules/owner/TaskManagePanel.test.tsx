@@ -136,6 +136,19 @@ describe('TaskManagePanel', () => {
     })
   })
 
+  it('shows the template tab in the edit drawer', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <TaskManagePanel tasks={[draftTask]} selected={draftTask} onSelect={vi.fn()} onTaskSaved={vi.fn()} onTasksChanged={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '编辑任务' }))
+
+    // 编辑抽屉提供「模板」标签页(TemplateBindPanel),Owner 可显式查看/切换绑定的模板版本。
+    expect(screen.getByRole('button', { name: '抽屉标签 模板' })).toBeInTheDocument()
+  })
+
   it('uploads a dataset file via the import-file endpoint from the edit drawer', async () => {
     const user = userEvent.setup()
     mockImportItemsFile.mockResolvedValue({ imported: 5, format: 'json' })

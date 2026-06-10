@@ -7,6 +7,7 @@ import TaskForm from './TaskForm'
 import ImportPanel from './ImportPanel'
 import AssigneePanel from './AssigneePanel'
 import ReviewerPanel from './ReviewerPanel'
+import TemplateBindPanel from './TemplateBindPanel'
 import {
   availableTransitions,
   computeTaskStats,
@@ -27,7 +28,7 @@ interface TaskManagePanelProps {
   onTasksChanged: () => void
 }
 
-type DrawerTab = 'info' | 'dataset' | 'distribution' | 'reviewers'
+type DrawerTab = 'info' | 'template' | 'dataset' | 'distribution' | 'reviewers'
 
 export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved, onTasksChanged }: TaskManagePanelProps) {
   // drawerMode: 'create' 新建草稿 / 'edit' 编辑选中任务 / null 关闭。
@@ -244,6 +245,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
               <div className="tasks-drawer__tabs">
                 {([
                   ['info', '基础信息'],
+                  ['template', '模板'],
                   ['dataset', '数据集'],
                   ['distribution', '分发策略'],
                   ['reviewers', '审核员'],
@@ -268,6 +270,7 @@ export default function TaskManagePanel({ tasks, selected, onSelect, onTaskSaved
               ) : drawerTask ? (
                 <>
                   {drawerTab === 'info' ? <TaskForm task={drawerTask} onSaved={handleSaved} /> : null}
+                  {drawerTab === 'template' ? <TemplateBindPanel task={drawerTask} onTaskSaved={handleSaved} /> : null}
                   {drawerTab === 'dataset' ? <ImportPanel taskId={drawerTask.id} onImported={onTasksChanged} /> : null}
                   {drawerTab === 'distribution' ? (
                     drawerTask.distribution === 'assigned' ? (

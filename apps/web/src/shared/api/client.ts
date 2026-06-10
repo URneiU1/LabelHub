@@ -199,6 +199,8 @@ export type TaskInfoInput = {
   dailySubmissionLimitPerLabeler?: number
   humanReviewEnabled?: boolean
   deadline?: string | null
+  // 切换任务绑定的模板版本(仅 draft 任务,发布后后端冻结)。
+  templateId?: number
 }
 
 export type TaskAssigneeView = {
@@ -251,6 +253,7 @@ function buildTaskInfoBody(input: TaskInfoInput): Record<string, unknown> {
   if (input.dailySubmissionLimitPerLabeler !== undefined) body.dailySubmissionLimitPerLabeler = input.dailySubmissionLimitPerLabeler
   if (input.humanReviewEnabled !== undefined) body.humanReviewEnabled = input.humanReviewEnabled
   if (input.deadline !== undefined) body.deadline = input.deadline
+  if (input.templateId !== undefined) body.templateId = input.templateId
   return body
 }
 
