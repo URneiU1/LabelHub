@@ -66,10 +66,12 @@ const widgetLabels: Record<WidgetType, string> = {
   Input: '单行输入',
   TextArea: '多行文本',
   Radio: '单选',
-  Tags: '标签多选',
+  MultiSelect: '多选',
+  Tags: '标签选择',
   RichText: '富文本',
   JSONEditor: 'JSON',
   FileUpload: '文件上传',
+  ImageUpload: '图片上传',
   LLMTrigger: 'LLM 触发',
 }
 
@@ -80,10 +82,12 @@ const widgetPrefixes: Record<WidgetType, string> = {
   Input: 'input',
   TextArea: 'text_area',
   Radio: 'radio',
+  MultiSelect: 'multi_select',
   Tags: 'tags',
   RichText: 'rich_text',
   JSONEditor: 'json_editor',
   FileUpload: 'file_upload',
+  ImageUpload: 'image_upload',
   LLMTrigger: 'llm_trigger',
 }
 
@@ -94,10 +98,12 @@ const widgetIcons: Record<WidgetType, string> = {
   Input: 'Aa',
   TextArea: '¶',
   Radio: '◉',
+  MultiSelect: '☑',
   Tags: '#',
   RichText: 'R',
   JSONEditor: '{}',
   FileUpload: '↑',
+  ImageUpload: '▧',
   LLMTrigger: '✦',
 }
 
@@ -108,8 +114,18 @@ const paletteGroups: Array<{ label: string, widgets: WidgetType[] }> = [
 
 const nestedWidgetTypes = widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs')
 
+const optionWidgets: WidgetType[] = ['Radio', 'MultiSelect', 'Tags']
+const uploadWidgets: WidgetType[] = ['FileUpload', 'ImageUpload']
 // Widgets that hold an answer value: visibleWhen / customRule are only meaningful on these.
-const advancedConfigWidgets: WidgetType[] = ['Input', 'TextArea', 'Radio', 'Tags', 'RichText', 'JSONEditor', 'FileUpload']
+const advancedConfigWidgets: WidgetType[] = ['Input', 'TextArea', ...optionWidgets, 'RichText', 'JSONEditor', ...uploadWidgets]
+
+function isOptionWidget(widget: WidgetType) {
+  return optionWidgets.includes(widget)
+}
+
+function isUploadWidget(widget: WidgetType) {
+  return uploadWidgets.includes(widget)
+}
 
 // @dnd-kit drag sources. A palette drag INSERTS a new widget; a canvas drag REORDERS.
 // active.data.current.source distinguishes them in onDragEnd.
@@ -910,7 +926,7 @@ function CanvasField({
           </div>)}
         </div>
       ) : null}
-      {(field.widget === 'Radio' || field.widget === 'Tags') && field.options?.length ? (
+      {isOptionWidget(field.widget) && field.options?.length ? (
         <div className="canvas-options template-designer-option-row">
           {field.options.map((option) => <span key={option} className="canvas-option">{option}</span>)}
         </div>
@@ -932,7 +948,7 @@ function CanvasField({
             <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8, marginTop: 8 }}>
               <Widget
                 field={field}
-                value={field.widget === 'Tags' ? [] : ''}
+                value={field.widget === 'Tags' || field.widget === 'MultiSelect' ? [] : ''}
                 answer={{}}
                 payload={previewPayload}
                 readOnly
@@ -973,12 +989,13 @@ const NESTED_INPUT_HINT: Record<string, string> = {
   Textarea: '多行文本…',
   RichText: '富文本编辑…',
   JSON: '{ } JSON 编辑器',
-  FileUpload: '↑ 文件 / 图片',
+  FileUpload: '↑ 文件',
+  ImageUpload: '▧ 图片',
 }
 
 // 嵌套子字段的控件预览:把真实控件/选项铺出来,对齐 demo 的「饱满卡」观感
 function NestedFieldPreview({ child }: { child: FieldSchema }) {
-  if ((child.widget === 'Radio' || child.widget === 'Tags') && child.options?.length) {
+  if (isOptionWidget(child.widget) && child.options?.length) {
     return (
       <div className="canvas-options template-designer-option-row">
         {child.options.map((option) => <span key={option} className="canvas-option">{option}</span>)}
@@ -1121,7 +1138,7 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
             {(field.widget === 'Input' || field.widget === 'TextArea') ? (
               <LengthControls field={field} disabled={disabled} onChange={onChange} />
             ) : null}
-            {(field.widget === 'Radio' || field.widget === 'Tags') ? (
+            {isOptionWidget(field.widget) ? (
               <label style={fieldStyle}>
                 options
                 <textarea
@@ -1136,7 +1153,7 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
             {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
             {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
             {field.widget === 'Tabs' ? <TabsControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
-            {field.widget === 'FileUpload' ? (
+            {isUploadWidget(field.widget) ? (
               <label style={fieldStyle}>
                 maxFiles
                 <input
@@ -1552,7 +1569,7 @@ function NestedFieldsEditor({ label, fields, allFields, parentName, disabled, on
             />
             required
           </label>
-          {(child.widget === 'Radio' || child.widget === 'Tags') ? (
+          {isOptionWidget(child.widget) ? (
             <label style={fieldStyle}>
               child_options
               <textarea
@@ -1614,9 +1631,9 @@ function createDefaultField(widget: WidgetType, current: DraftField[]): DraftFie
       { label: 'Tab 1', fields: [createNestedDefaultField(`${name}_tab1_input`, 'Input')] },
       { label: 'Tab 2', fields: [createNestedDefaultField(`${name}_tab2_text`, 'TextArea')] },
     ] } : {}),
-    ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
+    ...(isOptionWidget(widget) ? { options: ['pass', 'reject', 'uncertain'] } : {}),
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
-    ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
+    ...(isUploadWidget(widget) ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
   }, createDraftId())
 }
@@ -1631,9 +1648,9 @@ function createNestedFieldForWidget(name: string, widget: WidgetType, label: str
     widget,
     label,
     required: false,
-    ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
+    ...(isOptionWidget(widget) ? { options: ['pass', 'reject', 'uncertain'] } : {}),
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
-    ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
+    ...(isUploadWidget(widget) ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
   }, draftId)
 }
@@ -1716,7 +1733,7 @@ function attachDraftIdsToTab(tab: TabSchema): TabSchema {
 function normalizeFieldSchema(field: FieldSchema): FieldSchema {
   const next = { ...field }
   next.name = next.name.trim()
-  if (next.widget !== 'Radio' && next.widget !== 'Tags') {
+  if (!isOptionWidget(next.widget)) {
     delete next.options
   }
   if (next.widget !== 'Input' && next.widget !== 'TextArea') {
@@ -1733,7 +1750,7 @@ function normalizeFieldSchema(field: FieldSchema): FieldSchema {
   if (next.widget !== 'Tabs') {
     delete next.tabs
   }
-  if (next.widget !== 'FileUpload') {
+  if (!isUploadWidget(next.widget)) {
     delete next.maxFiles
   }
   if (next.widget !== 'LLMTrigger') {
@@ -1868,7 +1885,7 @@ function visitFieldsForValidation(fields: FieldSchema[], pathPrefix: string, nam
     } else {
       names.add(name)
     }
-    if ((field.widget === 'Radio' || field.widget === 'Tags') && (!field.options || field.options.length === 0)) {
+    if (isOptionWidget(field.widget) && (!field.options || field.options.length === 0)) {
       errors.push({ draftId, field: `${path}.options`, message: 'options must be non-empty' })
     }
     if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {

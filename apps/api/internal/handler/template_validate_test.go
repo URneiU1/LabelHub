@@ -114,6 +114,14 @@ func TestValidateTemplateSchema(t *testing.T) {
 			wantValid: false, wantField: "fields[0].maxFiles", wantMsg: "> 0",
 		},
 		{
+			name: "multi select and image upload are valid core widgets",
+			raw: `{"title":"t","layout":"single_page","fields":[
+				{"name":"choices","widget":"MultiSelect","options":["a","b"]},
+				{"name":"image","widget":"ImageUpload","maxFiles":3}
+			]}`,
+			wantValid: true,
+		},
+		{
 			name: "llm trigger target must exist",
 			raw: `{"title":"t","layout":"single_page","fields":[
 				{"name":"ai","widget":"LLMTrigger","target_field":"missing"}

@@ -11,8 +11,8 @@ import (
 
 // allowedWidgets: S2 v1 锁定的核心物料,与前端 renderer/types.ts 保持一致。
 var allowedWidgets = map[string]struct{}{
-	"ShowItem": {}, "Group": {}, "Tabs": {}, "Input": {}, "TextArea": {}, "Radio": {}, "Tags": {},
-	"RichText": {}, "JSONEditor": {}, "FileUpload": {}, "LLMTrigger": {},
+	"ShowItem": {}, "Group": {}, "Tabs": {}, "Input": {}, "TextArea": {}, "Radio": {}, "MultiSelect": {}, "Tags": {},
+	"RichText": {}, "JSONEditor": {}, "FileUpload": {}, "ImageUpload": {}, "LLMTrigger": {},
 }
 
 var reservedTemplateFieldNames = map[string]struct{}{
@@ -318,10 +318,10 @@ func validateTemplateFieldLimits(path string, f map[string]any, widget string) [
 		} else {
 			errs = append(errs, validateOptions(path, options)...)
 		}
-	} else if widget == "Radio" || widget == "Tags" {
+	} else if widget == "Radio" || widget == "MultiSelect" || widget == "Tags" {
 		errs = append(errs, ValidationError{Field: path + ".options", Message: "options must be non-empty"})
 	}
-	if widget == "FileUpload" {
+	if widget == "FileUpload" || widget == "ImageUpload" {
 		maxFiles, hasMaxFiles, ok := numericField(f, "maxFiles")
 		if hasMaxFiles && (!ok || maxFiles <= 0) {
 			errs = append(errs, ValidationError{Field: path + ".maxFiles", Message: "maxFiles must be > 0"})

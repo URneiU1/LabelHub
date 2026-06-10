@@ -152,7 +152,7 @@ function parseField(rawField: Record<string, unknown>, path: string, names: Set<
       return optionsResult
     }
     field.options = optionsResult.value
-  } else if (widget === 'Radio' || widget === 'Tags') {
+  } else if (widget === 'Radio' || widget === 'MultiSelect' || widget === 'Tags') {
     return parseError(`${path}.options`, 'options must be non-empty')
   }
   const minLength = numberProp(rawField.minLength)
