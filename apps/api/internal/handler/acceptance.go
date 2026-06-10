@@ -44,7 +44,30 @@ type decideRequest struct {
 	Note    string `json:"note"`
 }
 
-// Status 返回该任务最近一个验收批次 + 其抽检记录 + 当前已通过数(供 Owner 验收看板)。
+// approvedSubmissionView 是验收看板里一条「已通过」提交的精简视图,带当前答案供 Owner 内联抽检。
+type approvedSubmissionView struct {
+	ID        uint64   `json:"id"`
+	ItemID    uint64   `json:"itemId"`
+	LabelerID uint64   `json:"labelerId"`
+	AIVerdict *string  `json:"aiVerdict"`
+	AIScore   *float64 `json:"aiScore"`
+	Answer    string   `json:"answer"`
+}
+
+// loadApprovedSubmissions 列出该任务所有「已通过」提交及其当前答案,让 Owner 在验收面板内直接
+// 查看内容并就地标记合格 / 不合格,而不必切到 Reviewer 视图或手输提交 ID。
+func (h AcceptanceHandler) loadApprovedSubmissions(taskID uint64) ([]approvedSubmissionView, error) {
+	rows := []approvedSubmissionView{}
+	err := h.db.Table("submissions AS s").
+		Select("s.id, s.item_id, s.labeler_id, s.ai_verdict, s.ai_score, r.answer").
+		Joins("JOIN submission_revisions r ON r.id = s.current_revision_id").
+		Where("s.task_id = ? AND s.status = ?", taskID, statemachine.StateApproved).
+		Order("s.id ASC").
+		Scan(&rows).Error
+	return rows, err
+}
+
+// Status 返回该任务最近一个验收批次 + 其抽检记录 + 当前已通过数 + 已通过提交列表(供 Owner 验收看板)。
 func (h AcceptanceHandler) Status(c *gin.Context) {
 	task, ok := loadOwnedTask(h.db, c)
 	if !ok {
@@ -57,10 +80,15 @@ func (h AcceptanceHandler) Status(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to count approved submissions")
 		return
 	}
+	approved, err := h.loadApprovedSubmissions(task.ID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load approved submissions")
+		return
+	}
 	var batch model.AcceptanceBatch
-	err := h.db.Where("task_id = ?", task.ID).Order("id DESC").First(&batch).Error
+	err = h.db.Where("task_id = ?", task.ID).Order("id DESC").First(&batch).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		httpx.OK(c, gin.H{"batch": nil, "spotChecks": []model.AcceptanceSpotCheck{}, "approvedCount": approvedCount})
+		httpx.OK(c, gin.H{"batch": nil, "spotChecks": []model.AcceptanceSpotCheck{}, "approvedCount": approvedCount, "approvedSubmissions": approved})
 		return
 	}
 	if err != nil {
@@ -72,7 +100,7 @@ func (h AcceptanceHandler) Status(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load spot checks")
 		return
 	}
-	httpx.OK(c, gin.H{"batch": batch, "spotChecks": checks, "approvedCount": approvedCount})
+	httpx.OK(c, gin.H{"batch": batch, "spotChecks": checks, "approvedCount": approvedCount, "approvedSubmissions": approved})
 }
 
 // Start 对该任务当前已通过数据发起一次验收批次。

@@ -92,6 +92,15 @@ export default function AcceptancePanel({ taskId }: AcceptancePanelProps) {
     })
   }
 
+  // 已通过列表里逐条直接抽检(无需手输 ID),与上面的手动入口共用接口。
+  function spotCheckSubmission(submissionId: number, result: 'ok' | 'flag') {
+    if (!batch) return
+    void run('抽检', async () => {
+      await recordAcceptanceSpotCheck(taskId, { batch_id: batch.id, submission_id: submissionId, result, note: '' })
+      Toast.success(result === 'flag' ? '已标记为不合格' : '已标记为合格')
+    })
+  }
+
   function onAccept() {
     if (!batch) return
     void run('验收通过', async () => {
@@ -156,6 +165,8 @@ export default function AcceptancePanel({ taskId }: AcceptancePanelProps) {
         <div style={{ marginTop: 'var(--space-md)', display: 'grid', gap: 'var(--space-md)' }}>
           <div style={cardStyle}>
             <div style={subHeadStyle}>抽检</div>
+            <ApprovedList status={status} onSpot={spotCheckSubmission} busy={busy} />
+            <div style={{ ...mutedStyle, marginTop: 'var(--space-md)', fontSize: 12 }}>或手动按提交 ID 抽检:</div>
             <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'center' }}>
               <input
                 aria-label="提交 ID"
@@ -222,6 +233,88 @@ function Metric({ label, value }: { label: string, value: string }) {
       <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--lh-text-1)' }}>{value}</div>
     </div>
   )
+}
+
+const fieldLabels: Record<string, string> = {
+  relevance_score: '相关性', accuracy_score: '准确性', format_score: '格式合规', safety_score: '安全性',
+  summary: '摘要', comment: '评语', issue_tags: '问题标签', ai_precheck: 'AI 预评分',
+}
+
+// ApprovedList 列出本任务全部「已通过」提交,每条平铺答案 + 就地标记合格 / 不合格,
+// 让 Owner 不必切到 Reviewer 视图或手输提交 ID 就能抽检。
+function ApprovedList({ status, onSpot, busy }: {
+  status: AcceptanceStatus | null
+  onSpot: (submissionId: number, result: 'ok' | 'flag') => void
+  busy: boolean
+}) {
+  const subs = status?.approvedSubmissions ?? []
+  const checks = status?.spotChecks ?? []
+  if (subs.length === 0) {
+    return <p style={{ ...mutedStyle, marginTop: 'var(--space-sm)' }}>当前没有「已通过」数据可抽检。</p>
+  }
+  return (
+    <div style={{ display: 'grid', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
+      {subs.map((sub) => {
+        const check = checks.find((c) => c.submissionId === sub.id)
+        return (
+          <div key={sub.id} style={approvedRowStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 13 }}>提交 #{sub.id}</strong>
+              <span style={{ ...mutedStyle, fontSize: 12 }}>题 #{sub.itemId} · 标注员 #{sub.labelerId}</span>
+              {sub.aiVerdict ? <span style={{ ...mutedStyle, fontSize: 12 }}>AI {sub.aiVerdict}{sub.aiScore != null ? ` · ${sub.aiScore}` : ''}</span> : null}
+              {check ? <StatusBadge status={check.result === 'flag' ? 'rejected' : 'approved'} label={check.result === 'flag' ? '抽检不合格' : '抽检合格'} /> : null}
+            </div>
+            <AnswerSummary answer={sub.answer} />
+            <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+              <button type="button" className="lh-btn lh-btn--sm" disabled={busy} onClick={() => onSpot(sub.id, 'ok')}>合格</button>
+              <button type="button" className="lh-btn lh-btn--sm lh-btn--danger" disabled={busy} onClick={() => onSpot(sub.id, 'flag')}>不合格</button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// AnswerSummary 把标注答案 JSON 按「字段名 → 中文标签」平铺,供 Owner 抽检时快速判断标注质量。
+function AnswerSummary({ answer }: { answer: string }) {
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(answer) as Record<string, unknown>
+  } catch {
+    return <span style={{ ...mutedStyle, fontSize: 12 }}>（答案无法解析）</span>
+  }
+  const entries = Object.entries(parsed).filter(([, v]) => v !== null && v !== '' && !(Array.isArray(v) && v.length === 0))
+  if (entries.length === 0) {
+    return <span style={{ ...mutedStyle, fontSize: 12 }}>（空答案）</span>
+  }
+  return (
+    <div style={answerGridStyle}>
+      {entries.map(([key, value]) => (
+        <div key={key} style={{ fontSize: 12 }}>
+          <span style={{ color: 'var(--lh-text-3)' }}>{fieldLabels[key] ?? key}：</span>
+          <span style={{ color: 'var(--lh-text-1)' }}>{Array.isArray(value) ? value.join('、') : String(value)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const approvedRowStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm) var(--space-md)',
+  border: '1px solid var(--lh-border)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--lh-bg-card)',
+}
+const answerGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gap: '2px 12px',
+  padding: 'var(--space-sm)',
+  background: 'var(--lh-bg)',
+  borderRadius: 'var(--radius-sm)',
 }
 
 const sectionStyle: React.CSSProperties = {

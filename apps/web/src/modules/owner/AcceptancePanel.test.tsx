@@ -72,6 +72,28 @@ describe('AcceptancePanel', () => {
     expect(screen.getByText('验收中')).toBeInTheDocument()
   })
 
+  it('lists approved submissions with answers and spot-checks one inline', async () => {
+    mockGet.mockResolvedValue({
+      batch: pendingBatch,
+      spotChecks: [],
+      approvedCount: 1,
+      approvedSubmissions: [
+        { id: 7, itemId: 11, labelerId: 3, aiVerdict: 'pass', aiScore: 88, answer: '{"relevance_score":5,"summary":"合格"}' },
+      ],
+    })
+    mockSpotCheck.mockResolvedValue({ spotCheck: {} } as never)
+    render(<AcceptancePanel taskId={1} />)
+
+    expect(await screen.findByText('提交 #7')).toBeInTheDocument()
+    expect(screen.getByText(/相关性/)).toBeInTheDocument()
+
+    // 列表行的「合格」就地抽检,带上该提交 ID,不必手输。
+    await userEvent.click(screen.getAllByRole('button', { name: '合格' })[0])
+    await waitFor(() =>
+      expect(mockSpotCheck).toHaveBeenCalledWith(1, { batch_id: 42, submission_id: 7, result: 'ok', note: '' }),
+    )
+  })
+
   it('accepts a pending batch with the entered note', async () => {
     mockGet.mockResolvedValue({ batch: pendingBatch, spotChecks: [], approvedCount: 3 })
     mockAccept.mockResolvedValue(undefined as never)

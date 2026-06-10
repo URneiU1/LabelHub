@@ -19,6 +19,10 @@ func TestAcceptanceStatusReturnsApprovedCountWithNoBatch(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).AddRow(1, 7, "Task", "published"))
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .submissions. WHERE task_id = \? AND status = \?`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
+	// loadApprovedSubmissions:已通过提交 + 当前答案,供 Owner 内联抽检。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM submissions AS s JOIN submission_revisions`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "item_id", "labeler_id", "ai_verdict", "ai_score", "answer"}).
+			AddRow(1, 11, 3, "pass", 88.0, `{"relevance_score":5}`))
 	mock.ExpectQuery(`(?is)^SELECT \* FROM .acceptance_batches. WHERE task_id = \?`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"})) // no batch yet
 
@@ -33,8 +37,13 @@ func TestAcceptanceStatusReturnsApprovedCountWithNoBatch(t *testing.T) {
 	}
 	var resp struct {
 		Data struct {
-			ApprovedCount int             `json:"approvedCount"`
-			Batch         json.RawMessage `json:"batch"`
+			ApprovedCount       int             `json:"approvedCount"`
+			Batch               json.RawMessage `json:"batch"`
+			ApprovedSubmissions []struct {
+				ID     int    `json:"id"`
+				ItemID int    `json:"itemId"`
+				Answer string `json:"answer"`
+			} `json:"approvedSubmissions"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -42,6 +51,12 @@ func TestAcceptanceStatusReturnsApprovedCountWithNoBatch(t *testing.T) {
 	}
 	if resp.Data.ApprovedCount != 5 {
 		t.Errorf("approvedCount = %d, want 5", resp.Data.ApprovedCount)
+	}
+	if len(resp.Data.ApprovedSubmissions) != 1 || resp.Data.ApprovedSubmissions[0].ID != 1 || resp.Data.ApprovedSubmissions[0].ItemID != 11 {
+		t.Fatalf("approvedSubmissions = %+v, want 1 row id=1 item=11", resp.Data.ApprovedSubmissions)
+	}
+	if resp.Data.ApprovedSubmissions[0].Answer != `{"relevance_score":5}` {
+		t.Errorf("approvedSubmissions answer = %q", resp.Data.ApprovedSubmissions[0].Answer)
 	}
 	if string(resp.Data.Batch) != "null" {
 		t.Errorf("batch = %s, want null", resp.Data.Batch)

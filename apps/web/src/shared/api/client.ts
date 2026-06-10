@@ -720,10 +720,21 @@ export type AcceptanceSpotCheck = {
   createdAt: string
 }
 
+export type AcceptanceApprovedSubmission = {
+  id: number
+  itemId: number
+  labelerId: number
+  aiVerdict: string | null
+  aiScore: number | null
+  answer: string
+}
+
 export type AcceptanceStatus = {
   batch: AcceptanceBatch | null
   spotChecks: AcceptanceSpotCheck[]
   approvedCount: number
+  // 后端 Status 总会返回;设为可选只是为了向后兼容旧的测试 mock,前端一律用 `?? []` 兜底。
+  approvedSubmissions?: AcceptanceApprovedSubmission[]
 }
 
 export function getAcceptance(taskId: number) {
