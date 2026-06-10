@@ -617,7 +617,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByText('mock')).toBeInTheDocument()
     await screen.findByText('needs human review')
-    expect(screen.getAllByText(/uncertain/).some((element) => element.textContent?.includes('75'))).toBe(true)
+    expect(screen.getAllByText(/待定/).some((element) => element.textContent?.includes('75'))).toBe(true)
     expect(screen.getByText('needs human review')).toBeInTheDocument()
   })
 
