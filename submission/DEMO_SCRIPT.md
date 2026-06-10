@@ -36,7 +36,9 @@ curl -s http://localhost/health                   # → ok
 $DC exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -e "SELECT id,title,status FROM tasks;"'  # 应有 2 行
 ```
 
-> 🐞 **已知部署坑(根因)**:`apps/api/Dockerfile` 只 COPY 了 binary + migration,**没 COPY `tools/seed/` 数据集**。所以容器内 `seed` 找不到 baseline/template 文件。上面的 `mkdir /tools` + `docker cp` 是临时绕过。**永久修法**:在 Dockerfile 最终 stage 加 `COPY tools/seed /tools/seed`(需重新 build + 部署才生效)。**只要不重 build 镜像,`/tools/seed` 这份拷贝在容器重建后会丢——每次 `down -v` 重置后都要重做这两行 cp。**
+> 🐞 **已知部署坑(根因)**:历史 `apps/api/Dockerfile` 只 COPY 了 binary + migration,**没 COPY `tools/seed/` 数据集**,所以容器内 `seed` 找不到 baseline/template 文件。
+> **永久修法已落地**:Dockerfile 最终 stage 现已加 `COPY tools/seed /tools/seed`(commit 见 git log)——**下次重新 build + 部署镜像后**,`seed` 自带数据集,本坑消失,`down -v` 重置后直接 `seed` 即可,不再需要 cp。
+> **但在重新 build 部署之前**:线上跑的还是旧镜像(无数据集),上面的 `mkdir /tools` + `docker cp` 临时绕过仍然必需,且 `/tools/seed` 是 ephemeral——**每次 `down -v` 重置后都要重做这两行 cp**。
 
 **重置后的干净基线**:`qa_quality` 30 题全可领 / `preference_compare` 12 题全可领 / 无空任务 / 所有账号无 draft 无认领 / 审核队列为空。
 
