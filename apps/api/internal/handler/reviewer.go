@@ -185,6 +185,19 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "review queue access denied")
 		return
 	}
+	// Independent multi-level review requires each level to be a distinct reviewer: the backend
+	// rejects a second approve from the same reviewer on the same revision (ErrDuplicateReviewerApproval).
+	// So a submission this reviewer has already approved (on its current revision, not superseded)
+	// must not keep appearing in their queue — otherwise the UI invites them to "complete" a stage they
+	// cannot. Arbitration is exempt from the duplicate-approval guard, so it is not filtered here.
+	if status != statemachine.StateNeedsArbitration {
+		query = query.Where(
+			"NOT EXISTS (SELECT 1 FROM human_reviews hr WHERE hr.submission_id = submissions.id"+
+				" AND hr.revision_id = submissions.current_revision_id"+
+				" AND hr.reviewer_id = ? AND hr.verdict = ? AND hr.superseded_at IS NULL)",
+			claims.UserID, "approve",
+		)
+	}
 	if err := query.Order("submissions.updated_at ASC").Limit(200).Find(&submissions).Error; err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review queue")
 		return

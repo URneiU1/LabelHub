@@ -209,6 +209,34 @@ func TestReviewerQueue_ExposesReviewStage(t *testing.T) {
 	}
 }
 
+func TestReviewerQueue_ExcludesSubmissionsThisReviewerAlreadyApproved(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+	rev := uint64(901)
+
+	// The main-list query must carry a NOT EXISTS over human_reviews keyed by the current reviewer:
+	// independent multi-level review means a submission this reviewer already approved (current
+	// revision, not superseded) is filtered out, so the UI never invites them to complete a stage the
+	// backend would reject with ErrDuplicateReviewerApproval.
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+LEFT JOIN task_reviewers.+NOT EXISTS.+human_reviews.+reviewer_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
+			AddRow(502, 1, 12, "human_reviewing", rev))
+	mock.ExpectQuery(`(?is)^SELECT revision_id, COUNT\(\*\) AS total FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id", "total"}))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestReviewerQueue_ExposesNeedsArbitration(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
