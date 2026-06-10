@@ -40,8 +40,16 @@ curl -s http://localhost/health                # → ok
 2. 等 5-10 秒,登 `reviewer1 / 123456` → 审核队列 / AI 预审队列。
 3. **判定**:
    - ✅ 队列里出现刚才那条、带 AI verdict(pass/reject/uncertain)+ 维度评分 → AI 管线 OK,可以正式录。
-   - ❌ 一直不出现 verdict → AI 没 fire。排查:`$DC logs worker | tail -50` 看是否 provider/key 报错;prod `deploy/.env` 的 `LLM_PROVIDER` 若是真豆包,确认 `LLM_API_KEY` 有效;**兜底**把 `LLM_PROVIDER=mock` 重起 worker(`$DC up -d worker`)→ deterministic mock 一定出 verdict,适合稳定录制。
+   - ❌ 一直不出现 verdict → AI 没 fire。排查:`$DC logs --tail=80 worker` 看报错。`llm provider returned HTTP 401` = key 认证失败;`404` = `LLM_MODEL`/endpoint 不存在。
+     - **最常见的坑(真实踩过)**:401 不一定是 key 本身坏。改完 `deploy/.env` 后**必须用 `--force-recreate` 重启 worker**,否则 worker 还在用旧内存里的旧 key 跑、永远 401:
+       ```bash
+       $DC up -d --force-recreate worker     # 强制重读 .env;光 up -d worker 不会重载改过的 env
+       $DC logs --tail=15 worker             # 看到 "AI Worker started" 且无 provider 报错即可
+       ```
+     - 真豆包修不好,**兜底切 mock**:`sed -i 's/^LLM_PROVIDER=.*/LLM_PROVIDER=mock/' deploy/.env` → `$DC up -d --force-recreate worker` → deterministic mock 必出 verdict,适合稳定录制。
 
+> ⚠️ **改任何 `deploy/.env` 后重启 worker 一律加 `--force-recreate`** —— compose 不重建容器就不会重载 env,这是本项目最坑的一处。
+>
 > smoke 会在 preference_compare 上留一条提交。正式录用的是 qa_quality(另一个任务),互不影响;若想连 preference_compare 也干净,smoke 后再跑一次 Phase 0 重置即可。
 
 ### Phase 2 · 正式录制(上镜)· 用 `qa_quality` + 全新 `labeler1`
@@ -68,7 +76,7 @@ curl -s http://localhost/health                # → ok
 | 现象 | 处理 |
 |---|---|
 | labeler1 进作答页自动恢复了旧 draft | 没重置干净 —— 回 Phase 0 重跑 `down -v` |
-| reviewer 队列里 AI verdict 不出现 | 回 Phase 1 排查;真豆包不稳就切 `LLM_PROVIDER=mock` 重起 worker 再录 |
+| reviewer 队列里 AI verdict 不出现 | 回 Phase 1 排查(多半是改了 .env 没 `--force-recreate` 重启 worker → 旧 key 401);真豆包不稳就切 `LLM_PROVIDER=mock` + `$DC up -d --force-recreate worker` 再录 |
 | 任务广场冒出空的「商品标题清洗」 | 没重置干净(那是测试残留),`down -v` 后只剩 2 个官方任务 |
 | 录到一半数据乱了 | 不要现场修库;停录 → Phase 0 重置 → 重录 |
 
