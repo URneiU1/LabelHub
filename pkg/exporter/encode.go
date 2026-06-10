@@ -21,6 +21,8 @@ func Encode(format string, w io.Writer, cols []Column, rows []Row) (int, error) 
 		return EncodeXLSX(w, cols, rows)
 	case "md":
 		return EncodeMarkdown(w, cols, rows)
+	case "coco":
+		return EncodeCOCO(w, cols, rows)
 	default:
 		return 0, ErrUnsupportedFormat
 	}
@@ -29,7 +31,7 @@ func Encode(format string, w io.Writer, cols []Column, rows []Row) (int, error) 
 // SupportedFormat 判断 format 是否受支持(handler 校验白名单用)。
 func SupportedFormat(format string) bool {
 	switch format {
-	case "json", "jsonl", "csv", "xlsx", "md":
+	case "json", "jsonl", "csv", "xlsx", "md", "coco":
 		return true
 	default:
 		return false
@@ -49,6 +51,8 @@ func FileExtension(format string) string {
 		return ".xlsx"
 	case "md":
 		return ".md"
+	case "coco":
+		return ".coco.json"
 	default:
 		return ".bin"
 	}
@@ -67,6 +71,8 @@ func ContentType(format string) string {
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	case "md":
 		return "text/markdown; charset=utf-8"
+	case "coco":
+		return "application/json; charset=utf-8"
 	default:
 		return "application/octet-stream"
 	}

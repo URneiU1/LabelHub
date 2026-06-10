@@ -35,6 +35,7 @@ describe('ExportPanel', () => {
     expect(screen.getByRole('button', { name: '格式 csv' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '格式 xlsx' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '格式 md' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '格式 coco' })).toBeInTheDocument()
     expect(await screen.findByText('#5')).toBeInTheDocument()
     expect(screen.getByText('已完成')).toBeInTheDocument()
   })
