@@ -232,8 +232,8 @@ func TestUpdateTaskBindsTemplateVersion(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).
 			AddRow(12, 1, 2))
 	mock.ExpectBegin()
-	// 切模板属冻结策略字段:UPDATE 必须带 status 乐观锁守卫 + 模板归属 EXISTS 守卫(与写原子,防 TOCTOU)。
-	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status = .+ AND \(EXISTS .+task_templates`).
+	// 切模板放行 draft/paused:UPDATE 必须带 status IN 乐观锁守卫 + 模板归属 EXISTS 守卫(与写原子,防 TOCTOU)。
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status IN .+ AND \(EXISTS .+task_templates`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
@@ -254,6 +254,38 @@ func TestUpdateTaskBindsTemplateVersion(t *testing.T) {
 	task := data["task"].(map[string]any)
 	if task["templateId"] != float64(12) {
 		t.Fatalf("templateId = %v", task["templateId"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestUpdateTaskAllowsTemplateSwitchWhenPaused(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	// paused 任务允许切换模板版本(与 TaskTemplateFrozen 一致),与 draft 同路径返回 200。
+	expectOwnedTask(mock, "paused")
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).
+			AddRow(12, 1, 2))
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status IN .+ AND \(EXISTS .+task_templates`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status", "template_id"}).
+			AddRow(1, 7, "Task", "paused", 12))
+
+	r := newGinWithClaims(ownerClaims())
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPut, "/tasks/1", map[string]any{
+		"templateId": 12,
+	}))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (paused allows template switch), got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

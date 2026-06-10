@@ -69,8 +69,15 @@ func TaskTransitions() []Transition {
 	return items
 }
 
-// TaskPoliciesFrozen:任务一旦发布,影响标注口径的配置必须冻结。
+// TaskPoliciesFrozen:任务一旦发布,影响标注口径的配置(分发 / 配额 / 重叠 / 抽检率)必须冻结。
 // paused / ended 仍属于已发布生命周期,不能绕过冻结重新改口径。
 func TaskPoliciesFrozen(status string) bool {
 	return status != TaskDraft
+}
+
+// TaskTemplateFrozen:模板 schema 比口径字段宽松——draft 和 paused 都允许调整。
+// 暂停时没有标注员在作答,改模板会生成新版本、恢复后才生效,不会污染进行中的提交;
+// 发布中(published)与已结束(ended)仍冻结,避免标注员作答途中 schema 变化。
+func TaskTemplateFrozen(status string) bool {
+	return status != TaskDraft && status != TaskPaused
 }

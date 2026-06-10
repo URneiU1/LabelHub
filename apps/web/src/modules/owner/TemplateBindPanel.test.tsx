@@ -86,6 +86,19 @@ describe('TemplateBindPanel', () => {
     expect(mockUpdateTask).not.toHaveBeenCalled()
   })
 
+  it('allows switching the bound version when the task is paused', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockResolvedValue(templates)
+    mockUpdateTask.mockResolvedValue({ ...draftTask, status: 'paused', templateId: 11 })
+    renderPanel({ ...draftTask, status: 'paused' })
+
+    // paused 不冻结:按钮可用、点击走 updateTask 绑定。
+    const btn = await screen.findByRole('button', { name: '绑定模板版本 v1' })
+    expect(btn).not.toBeDisabled()
+    await user.click(btn)
+    await waitFor(() => expect(mockUpdateTask).toHaveBeenCalledWith(7, { templateId: 11 }))
+  })
+
   it('shows an empty state with a designer link when no version exists', async () => {
     mockApiGet.mockResolvedValue([])
     renderPanel(draftTask)

@@ -64,3 +64,18 @@ func TestTaskPoliciesFrozen(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskTemplateFrozen(t *testing.T) {
+	// 模板比口径字段宽松:draft 与 paused 都可调整。
+	for _, status := range []string{TaskDraft, TaskPaused} {
+		if TaskTemplateFrozen(status) {
+			t.Fatalf("template must stay editable in status=%s", status)
+		}
+	}
+	// 发布中 / 已结束仍冻结,避免标注员作答途中 schema 变化。
+	for _, status := range []string{TaskPublished, TaskEnded} {
+		if !TaskTemplateFrozen(status) {
+			t.Fatalf("template must be frozen in status=%s", status)
+		}
+	}
+}

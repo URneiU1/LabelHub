@@ -92,7 +92,7 @@ func (h TemplateHandler) CreateTemplate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if statemachine.TaskPoliciesFrozen(task.Status) {
+	if statemachine.TaskTemplateFrozen(task.Status) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", "published task schema is frozen; copy the task to create a new version")
 		return
 	}
@@ -152,7 +152,7 @@ func (h TemplateHandler) createTemplateVersion(taskID uint64, createdBy uint64, 
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, taskID).Error; err != nil {
 			return err
 		}
-		if statemachine.TaskPoliciesFrozen(task.Status) {
+		if statemachine.TaskTemplateFrozen(task.Status) {
 			return errTaskPoliciesFrozen
 		}
 

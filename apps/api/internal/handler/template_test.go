@@ -201,6 +201,40 @@ func TestCreateTemplateRejectsPublishedTask(t *testing.T) {
 	}
 }
 
+func TestCreateTemplateAllowedWhenPaused(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	// paused 任务允许调整模板:走完整的版本号递增 + 绑定流程,返回 200。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "paused"))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
+			AddRow(1, 7, "Task", "paused"))
+	mock.ExpectQuery(`(?is)^SELECT COALESCE.+FROM .task_templates.`).
+		WillReturnRows(sqlmock.NewRows([]string{"COALESCE(MAX(version),0)"}).AddRow(1))
+	mock.ExpectExec(`(?is)^INSERT INTO .task_templates.`).
+		WillReturnResult(sqlmock.NewResult(22, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .template_id.`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, jsonRequest(http.MethodPost, "/tasks/1/templates", validTemplateBody()))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (paused allows template edit), got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestValidateTemplateReportsSchemaErrors(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()

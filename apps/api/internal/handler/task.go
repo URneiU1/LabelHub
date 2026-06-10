@@ -244,6 +244,11 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 		httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", "published task policies are frozen; copy the task to create a new version")
 		return
 	}
+	// 模板绑定比口径字段宽松:draft 与 paused 都可切换版本(与 TaskTemplateFrozen 一致),只有发布中 / 已结束才冻结。
+	if req.TemplateID != nil && statemachine.TaskTemplateFrozen(task.Status) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", "published task schema is frozen; copy the task to create a new version")
+		return
+	}
 	if !validateTaskPolicyFields(c, req.OverlapCount, req.OverlapCoveragePct, req.LeaseTimeoutMinutes, req.ReviewSamplingPct, req.DailySubmissionLimitPerLabeler) {
 		return
 	}
@@ -343,6 +348,9 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 		query = query.Where("status = ?", statemachine.TaskDraft)
 	}
 	if req.TemplateID != nil {
+		// 模板绑定的乐观锁守卫:只在 draft / paused 放行,与上面的 TaskTemplateFrozen 预检对齐;
+		// 若状态在预检后被并发改成 published/ended,这里 RowsAffected 变 0 → 下方 409。
+		query = query.Where("status IN ?", []string{statemachine.TaskDraft, statemachine.TaskPaused})
 		// Re-assert template ownership atomically with the write: the First() pre-check above is
 		// only for a friendly 422, but it leaves a TOCTOU window before this UPDATE. Gating the
 		// write on EXISTS makes binding a template that isn't a version of this task impossible
@@ -354,7 +362,7 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update task")
 		return
 	}
-	if frozenPolicyUpdate && result.RowsAffected != 1 {
+	if (frozenPolicyUpdate || req.TemplateID != nil) && result.RowsAffected != 1 {
 		httpx.Error(c, http.StatusConflict, "CONFLICT", "task status changed concurrently, please refresh")
 		return
 	}
@@ -370,8 +378,7 @@ func hasFrozenTaskPolicyUpdate(req updateTaskRequest) bool {
 		req.QuotaPerUser != nil ||
 		req.OverlapCount != nil ||
 		req.OverlapCoveragePct != nil ||
-		req.ReviewSamplingPct != nil ||
-		req.TemplateID != nil
+		req.ReviewSamplingPct != nil
 }
 
 func validateTaskPolicyFields(c *gin.Context, overlapCount, overlapCoveragePct, leaseTimeoutMinutes, reviewSamplingPct, dailySubmissionLimit *int) bool {

@@ -11,14 +11,14 @@ interface TemplateBindPanelProps {
 }
 
 // TemplateBindPanel:任务编辑抽屉的「模板」标签页。
-// 展示本任务的全部模板版本与当前绑定,draft 任务可显式切换绑定版本;
-// 发布后模板冻结(与后端 TaskPoliciesFrozen 一致),只读展示。
+// 展示本任务的全部模板版本与当前绑定;draft 与 paused 任务可显式切换绑定版本。
+// 发布中 / 已结束模板冻结(与后端 TaskTemplateFrozen 一致),只读展示。
 export default function TemplateBindPanel({ task, onTaskSaved }: TemplateBindPanelProps) {
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [bindingId, setBindingId] = useState<number | null>(null)
-  const frozen = task.status !== 'draft'
+  const frozen = task.status !== 'draft' && task.status !== 'paused'
 
   const loadTemplates = useCallback(async () => {
     setLoading(true)
