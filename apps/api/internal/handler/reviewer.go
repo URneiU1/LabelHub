@@ -38,6 +38,7 @@ func NewReviewerHandler(db *gorm.DB) ReviewerHandler {
 func (h ReviewerHandler) Register(api gin.IRouter) {
 	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "admin"), h.ReviewerQueue)
 	api.GET("/reviewer/results", middleware.RequireRoles("reviewer", "admin"), h.ReviewerResults)
+	api.GET("/reviewer/ai-reviews", middleware.RequireRoles("reviewer", "admin"), h.AIReviewQueue)
 	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "admin"), h.ReviewerDetail)
 	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "admin"), h.ReviewerAIPrompts)
 	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "admin"), h.RetryAIReview)
