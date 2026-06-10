@@ -85,6 +85,7 @@ pkg/llmreview   共享 LLM provider(mock / OpenAI-compatible / 豆包)
 - **类型契约** — `docs/openapi.yaml` 是真相源,`pnpm -F web gen:api` 生成 `schema.d.ts`,前端 TypeScript strict mode + 0 个 `any`
 - **测试纪律** — testcontainers 真 MySQL+Redis 集成测试覆盖主链路(submit→outbox→Redis→AI→review→export);CI 跑 Go workspace + web test+lint+build + 独立 `-tags=integration` job
 - **首屏性能** — VChart 通过 `React.lazy` + Vite vendor split,首屏 eager vendor 从 2.2MB(gzip 616KB)降到 412KB(gzip 125KB)
+- **大数据量压测(线上实测)** — 单任务导入 5000 题:`import-file` 5.4s、`publish` 0.24s、`GET labeler/items`(全量 5000 行 ≈468KB)0.7s、领题/打开题目 0.2–0.4s,API 侧均无瓶颈。前端题目导航当前**全量渲染**(5000 题 → DOM ~20K 节点、导航列表 5005 直接子节点),4× CPU 节流下首屏 Layout 220ms + Style 重算 237ms,有可感卡顿。**已知优化项**:题目导航上虚拟滚动(react-window / 视口切片)可把渲染节点压到常数级;常规任务规模(数十~数百题)无此问题
 - **编辑级 UI 系统** — 自建 Editorial design tokens(serif headings + 7 态 status + skeleton/top-progress),非套模板默认
 - **A11y** — Tabs 完整 ARIA `tablist/tab/tabpanel` + auto-jump first error tab,全局 `:focus-visible` ring,Labeler `Ctrl/Cmd+Enter` 提交快捷键
 
