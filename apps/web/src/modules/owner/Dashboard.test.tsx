@@ -1362,7 +1362,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     render(<OwnerDashboard />)
 
-    await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
+    await user.click(await screen.findByRole('button', { name: '运行全部可见样例' }))
 
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12], repeat_count: 1 })
@@ -1417,7 +1417,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     render(<OwnerDashboard />)
 
-    await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
+    await user.click(await screen.findByRole('button', { name: '运行全部可见样例' }))
     await user.click(screen.getByRole('button', { name: /Task B/ }))
     expect(await screen.findByText('暂无 golden samples')).toBeInTheDocument()
 
@@ -1498,7 +1498,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     render(<OwnerDashboard />)
 
-    await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
+    await user.click(await screen.findByRole('button', { name: '运行全部可见样例' }))
     await user.click(screen.getByRole('button', { name: /Task A/ }))
 
     await act(async () => {
@@ -1511,7 +1511,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     // 同任务再次点击不算切走,入队后轮询应正常填充该任务的结果(reason 出现在结果行与详情面板)。
     expect((await screen.findAllByText('same task batch golden run')).length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: 'Run all visible samples' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '运行全部可见样例' })).not.toBeDisabled()
   })
 
   it('ignores stale golden sample run responses after switching tasks', async () => {

@@ -882,11 +882,11 @@ export default function OwnerDashboard() {
               </div>
 
               <div style={controlStripStyle}>
-                <MetricCell label="TASK" value={`#${selected.id}`} detail={`${selected.finishedItems}/${selected.totalItems} finished`} />
-                <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={activePromptId ? promptVersionLabel(activePromptId) : 'no active prompt'} tone={aiReviewEnabled ? 'success' : 'muted'} />
-                <MetricCell label="PROMPTS" value={String(prompts.length)} detail={promptLoading ? 'loading config' : promptLoadFailed ? 'load failed' : 'versions loaded'} />
-                <MetricCell label="EVAL SET" value={String(goldenSamples.length)} detail={goldenSampleLoading ? 'loading samples' : `${Object.keys(goldenRunRows).length} recent runs`} tone="teal" />
-                <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
+                <MetricCell label="任务" value={`#${selected.id}`} detail={`${selected.finishedItems}/${selected.totalItems} 已完成`} />
+                <MetricCell label="AI 预审" value={aiReviewEnabled ? '开' : '关'} detail={activePromptId ? promptVersionLabel(activePromptId) : '无生效 Prompt'} tone={aiReviewEnabled ? 'success' : 'muted'} />
+                <MetricCell label="Prompt 版本" value={String(prompts.length)} detail={promptLoading ? '加载配置中' : promptLoadFailed ? '加载失败' : '版本已加载'} />
+                <MetricCell label="评测集" value={String(goldenSamples.length)} detail={goldenSampleLoading ? '加载样本中' : `${Object.keys(goldenRunRows).length} 次近期试跑`} tone="teal" />
+                <MetricCell label="试跑历史" value={String(dryRunHistorySummary.total)} detail={`匹配率 ${formatPercent(dryRunHistorySummary.matchRate)} / 均分 ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
 
               {detailSection === 'template' && (
@@ -910,8 +910,8 @@ export default function OwnerDashboard() {
                     人工审核的初审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
                   </p>
                   <div style={controlStripStyle}>
-                    <MetricCell label="PROGRESS" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
-                    <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
+                    <MetricCell label="进度" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
+                    <MetricCell label="AI 预审" value={aiReviewEnabled ? '开' : '关'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
                   </div>
                   <p style={mutedStyle}>
                     通过率、AI vs 人工差异、两级审核进度等汇总图表见左侧「生产看板」;下方是逐条质检结果,用于回看 AI 预审标准。
@@ -1010,14 +1010,14 @@ export default function OwnerDashboard() {
 
                 </div>
                 <div id="ai-dryrun" style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
-                  <h4 style={{ ...subHeadingStyle, marginBottom: 'var(--space-md)' }}>AI Dry-run 测试</h4>
+                  <h4 style={{ ...subHeadingStyle, marginBottom: 'var(--space-md)' }}>AI 试跑测试</h4>
                   <div style={dryRunGridStyle}>
                     <label style={fieldStyle}>
-                      <span>Sample Payload</span>
+                      <span>样例素材</span>
                       <textarea aria-label="sample_payload" value={samplePayload} onChange={(event) => setSamplePayload(event.target.value)} style={{ ...textareaStyle, height: 120 }} />
                     </label>
                     <label style={fieldStyle}>
-                      <span>Sample Answer</span>
+                      <span>样例答案</span>
                       <textarea aria-label="sample_answer" value={sampleAnswer} onChange={(event) => setSampleAnswer(event.target.value)} style={{ ...textareaStyle, height: 120 }} />
                     </label>
                   </div>
@@ -1029,7 +1029,7 @@ export default function OwnerDashboard() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
                         <strong style={{ fontFamily: 'var(--lh-font-mono)', fontSize: 'var(--text-sm)' }}>{dryRun.provider}</strong>
                         <span style={{ ...verdictPillStyle, color: dryRun.result.verdict === 'pass' ? 'var(--lh-success)' : 'var(--lh-danger)' }}>
-                          {dryRun.result.verdict} ({dryRun.result.overall_score})
+                          {dryRun.result.verdict === 'pass' ? '通过' : dryRun.result.verdict === 'reject' ? '打回' : '待定'} ({dryRun.result.overall_score})
                         </span>
                       </div>
                       <div style={{ fontSize: 'var(--text-base)', marginBottom: 'var(--space-md)' }}>{dryRun.result.reason}</div>
@@ -1048,17 +1048,17 @@ export default function OwnerDashboard() {
 
                 <div id="ai-golden" style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
                   <div style={aiSettingsRowStyle}>
-                    <h3 style={subHeadingStyle}>Golden Samples (评测集)</h3>
+                    <h3 style={subHeadingStyle}>黄金样本（评测集）</h3>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>
-                        <span>稳定性重复次数 / Runs</span>
+                        <span>稳定性重复次数</span>
                         <select aria-label="dry_run_repeat_count" value={String(dryRunRepeatCount)} onChange={(event) => setDryRunRepeatCount(Number(event.target.value))} style={{ ...inputStyle, width: 72 }}>
                           <option value="1">1</option>
                           <option value="3">3</option>
                           <option value="5">5</option>
                         </select>
                       </label>
-                      <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
+                      <Button aria-label="运行全部可见样例" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
                         批量运行评测
                       </Button>
                     </div>
@@ -1068,11 +1068,11 @@ export default function OwnerDashboard() {
                   <div style={{ display: 'grid', gap: 'var(--space-md)', marginTop: 'var(--space-md)', padding: 'var(--space-md)', background: '#f8f9fa', borderRadius: 'var(--radius-md)' }}>
                     <div style={dryRunGridStyle}>
                       <label style={fieldStyle}>
-                        <span>Payload</span>
+                        <span>素材</span>
                         <textarea aria-label="golden_sample_payload" value={goldenPayload} onChange={(event) => setGoldenPayload(event.target.value)} style={{ ...textareaStyle, height: 80 }} />
                       </label>
                       <label style={fieldStyle}>
-                        <span>Expected Answer</span>
+                        <span>期望答案</span>
                         <textarea aria-label="golden_sample_expected_answer" value={goldenExpectedAnswer} onChange={(event) => setGoldenExpectedAnswer(event.target.value)} style={{ ...textareaStyle, height: 80 }} />
                       </label>
                     </div>
@@ -1080,23 +1080,23 @@ export default function OwnerDashboard() {
                       <label style={fieldStyle}>
                         <span>预期结论</span>
                         <select aria-label="golden_sample_expected_verdict" value={goldenExpectedVerdict} onChange={(event) => setGoldenExpectedVerdict(event.target.value)} style={inputStyle}>
-                          <option value="pass">pass</option>
-                          <option value="reject">reject</option>
-                          <option value="uncertain">uncertain</option>
+                          <option value="pass">通过</option>
+                          <option value="reject">打回</option>
+                          <option value="uncertain">待定</option>
                         </select>
                       </label>
                       <label style={fieldStyle}>
                         <span>绑定 Prompt</span>
                         <select aria-label="golden_sample_prompt" value={goldenPromptChoice} onChange={(event) => setGoldenPromptChoice(event.target.value)} style={inputStyle}>
-                          <option value="active">当前 active prompt{activePromptId ? ` (#${activePromptId})` : ''}</option>
-                          <option value="none">不绑定 prompt</option>
+                          <option value="active">当前生效 Prompt{activePromptId ? ` (#${activePromptId})` : ''}</option>
+                          <option value="none">不绑定 Prompt</option>
                           {prompts.map((prompt) => (
                             <option key={prompt.id} value={String(prompt.id)}>Prompt v{prompt.version} #{prompt.id}</option>
                           ))}
                         </select>
                       </label>
                       <label style={fieldStyle}>
-                        <span>Notes</span>
+                        <span>备注</span>
                         <input aria-label="golden_sample_notes" value={goldenNotes} onChange={(event) => setGoldenNotes(event.target.value)} style={inputStyle} />
                       </label>
                     </div>
@@ -1186,7 +1186,7 @@ export default function OwnerDashboard() {
                       <select aria-label="dry_run_history_sample_filter" value={dryRunHistorySampleFilter} onChange={(event) => setDryRunHistorySampleFilter(event.target.value)} style={{ ...inputStyle, width: 260 }}>
                         <option value="all">全部记录</option>
                         {goldenSamples.map((sample) => (
-                          <option key={sample.id} value={String(sample.id)}>Sample #{sample.id}</option>
+                          <option key={sample.id} value={String(sample.id)}>样本 #{sample.id}</option>
                         ))}
                       </select>
                     </label>
@@ -1226,7 +1226,7 @@ export default function OwnerDashboard() {
                               <th style={resultCellStyle}>实际</th>
                               <th style={resultCellStyle}>匹配</th>
                               <th style={resultCellStyle}>状态</th>
-                              <th style={resultCellStyle}>Prompt</th>
+                              <th style={resultCellStyle}>提示词</th>
                               <th style={resultCellStyle}>完成时间</th>
                             </tr>
                           </thead>
