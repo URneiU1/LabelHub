@@ -803,6 +803,10 @@ components:
           $ref: '#/components/schemas/Submission'
         revision:
           $ref: '#/components/schemas/SubmissionRevision'
+        revisionHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionRevision'
     Submission:
       type: object
       required: [id, taskId, itemId, status]

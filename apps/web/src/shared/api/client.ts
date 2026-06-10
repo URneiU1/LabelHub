@@ -500,8 +500,12 @@ export type TaskTemplate = {
 
 export type SubmissionRevision = {
   id: number
+  submissionId?: number
+  revisionNo?: number
   answer: string
   draft: boolean
+  createdBy?: number
+  createdAt?: string
 }
 
 export type AIPromptSummary = {
@@ -561,6 +565,7 @@ export type TaskBundle = {
   template?: TaskTemplate
   submission?: Submission
   revision?: SubmissionRevision | null
+  revisionHistory?: SubmissionRevision[]
   aiReview?: AIReviewDetail | null
   latestHumanReview?: HumanReviewSummary | null
   auditLogs?: AuditLog[]
