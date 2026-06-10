@@ -80,11 +80,14 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
     }
   }, [])
 
-  const loadMyTasks = useCallback(async () => {
+  const loadMyTasks = useCallback(async (): Promise<MyTask[]> => {
     try {
-      setMyTasks(await listMyTasks())
+      const tasks = await listMyTasks()
+      setMyTasks(tasks)
+      return tasks
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载已领取的任务失败')
+      return []
     }
   }, [])
 
@@ -506,16 +509,25 @@ export default function LabelerPlaza({ initialView = 'plaza', initialPlazaTab = 
       return
     }
     didAutoResumeRef.current = true
-    void loadMySubmissions().then((subs) => {
+    void (async () => {
+      const subs = (await loadMySubmissions()) ?? []
       const resumable = subs.find((submission) => isResumable(submission.status))
       if (resumable) {
         openFromMyData(resumable)
-      } else {
-        // 没有进行中的任务:明确提示去领取,而不是默默回落到任务广场让用户困惑。
-        Toast.info('还没有进行中的任务,请先在任务广场领取任务')
+        return
       }
-    })
-  }, [initialView, loadMySubmissions, openFromMyData])
+      // 没有「进行中的提交」,但 first_come/assigned 整体领取后只锁了题、还没产生提交,
+      // 这种也算进行中。所以再看「已领取的任务」:有就进入(openTask 会恢复 resumeItemId
+      // 或领下一题),确实一个都没领才提示去领取——避免「明明领了却说没领」。
+      const mine = await loadMyTasks()
+      const claimed = mine.find((task) => (task.myInProgress ?? 0) > 0 || task.resumeItemId != null) ?? mine[0]
+      if (claimed) {
+        openTask(claimed)
+        return
+      }
+      Toast.info('还没有进行中的任务,请先在任务广场领取任务')
+    })()
+  }, [initialView, loadMySubmissions, loadMyTasks, openFromMyData, openTask])
 
   const backToPlaza = useCallback(() => {
     setView('plaza')
