@@ -22,13 +22,21 @@ DC="docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml"
 # (可选)先备份当前库
 $DC exec -T mysql sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' > ~/labelhub-backup-before-demo.sql
 
-$DC down -v          # 清空 mysql/redis/exports 数据卷
-$DC up -d            # 复用现有镜像重起;api 启动自动迁移建表
-sleep 60 && $DC ps   # 等 7 个服务 running/healthy 再继续
+$DC down -v                       # 清空 mysql/redis/exports 数据卷
+$DC up -d --wait --wait-timeout 150   # 复用现有镜像重起并等健康;api 启动自动迁移建表
 
-$DC exec -e SEED_ALLOW_IN_PROD=true api seed   # 写入 2 个官方任务 + 9 个账号
-curl -s http://localhost/health                # → ok
+# ⚠️ seed 前必做:api 镜像没 COPY tools/seed/(Dockerfile 缺),seed 在容器内读
+#    /tools/seed/datasets|templates/ 会 "no such file or directory"。先把 host 的
+#    数据集拷进容器(host /home/ubuntu/labelhub/tools/seed/ 是全的):
+$DC exec -u root -T api mkdir -p /tools
+$DC cp tools/seed api:/tools/seed
+
+$DC exec -e SEED_ALLOW_IN_PROD=true -T api seed   # 写入 2 个官方任务 + 9 个账号
+curl -s http://localhost/health                   # → ok
+$DC exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -e "SELECT id,title,status FROM tasks;"'  # 应有 2 行
 ```
+
+> 🐞 **已知部署坑(根因)**:`apps/api/Dockerfile` 只 COPY 了 binary + migration,**没 COPY `tools/seed/` 数据集**。所以容器内 `seed` 找不到 baseline/template 文件。上面的 `mkdir /tools` + `docker cp` 是临时绕过。**永久修法**:在 Dockerfile 最终 stage 加 `COPY tools/seed /tools/seed`(需重新 build + 部署才生效)。**只要不重 build 镜像,`/tools/seed` 这份拷贝在容器重建后会丢——每次 `down -v` 重置后都要重做这两行 cp。**
 
 **重置后的干净基线**:`qa_quality` 30 题全可领 / `preference_compare` 12 题全可领 / 无空任务 / 所有账号无 draft 无认领 / 审核队列为空。
 
