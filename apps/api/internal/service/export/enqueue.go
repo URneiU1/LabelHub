@@ -1,3 +1,8 @@
+// Package export 封装任务结果导出。
+//
+// 导出走异步路径:Enqueue 单事务写 exports(queued) + outbox_events,outbox publisher
+// 把它投到 asynq 的 export 队列,由 ai-worker 侧的 exporter 跑实际编码
+// (JSON / JSONL / CSV / XLSX + Markdown);字段映射 / include_reviews 由 exporter 处理。
 package export
 
 import (

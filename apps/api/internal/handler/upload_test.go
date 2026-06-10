@@ -11,7 +11,39 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"labelhub-api/internal/auth"
+	"labelhub-api/internal/model"
 )
+
+// M-05:被授权的 reviewer 应能下载 needs_arbitration submission 的证据附件。
+// 直接测 canDownloadUpload 的授权判定,避开磁盘文件不存在导致的 FileAttachment 404。
+func TestCanDownloadUploadAllowsAssignedReviewerForArbitration(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	// reviewer 被指派到该 task(task_reviewers 命中)。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 附件挂在该 task 下一个 needs_arbitration submission 的 revision 上 → 命中状态白名单。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submission_revisions. JOIN submissions.+status IN`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	h := UploadHandler{db: db}
+	revID := uint64(901)
+	allowed, err := h.canDownloadUpload(
+		&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}},
+		model.Task{ID: 1, OwnerID: 99},
+		model.UploadedFile{ID: 301, TaskID: 1, CreatedBy: 8, SubmissionRevisionID: &revID},
+	)
+	if err != nil {
+		t.Fatalf("canDownloadUpload error: %v", err)
+	}
+	if !allowed {
+		t.Fatal("assigned reviewer should be allowed to download needs_arbitration evidence")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
 
 // storageKey 必须能去重:相邻调用产出不同 key,因为含纳秒时间戳。
 func TestStorageKeyUnique(t *testing.T) {
@@ -83,6 +115,35 @@ func TestUploadOwnerCannotUploadToOtherTask(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// IDOR 回归守卫:未被指派到该 task 的 reviewer 不能上传文件,
+// 即使该 task 存在 human_reviewing 提交。canUploadToTask 的 reviewer 分支
+// 必须先过 canReviewTask(task_reviewers 绑定校验)。
+func TestUploadReviewerNotAssignedForbidden(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status"}).
+			AddRow(2, 99, "published"))
+	// canReviewTask 查 task_reviewers:未绑定 -> count 0 -> CanReviewTask 返回 false -> 403,
+	// 且不会再查 submissions(被 !assigned 提前 return)。
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "reviewer1", Roles: []string{"reviewer"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, multipartUploadRequest("/uploads", "2", "note.txt", "text/plain", []byte("hello")))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for reviewer not assigned to task, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/model"
@@ -86,5 +87,258 @@ func TestResubmitClearedFieldsWipesVerdicts(t *testing.T) {
 		if value != nil {
 			t.Errorf("%s must be nil(写入 NULL),got %v", field, value)
 		}
+	}
+}
+
+func TestLockClaimedItemRejectsExpiredLease(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 6, 1, 4, 0, 0, 0, time.UTC)
+	previousNow := NowUTC
+	NowUTC = func() time.Time { return now }
+	defer func() { NowUTC = previousNow }()
+
+	labelerID := uint64(5)
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by", "claimed_at"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID, now.Add(-31*time.Minute)))
+
+	_, err := lockClaimedItem(db, model.Task{ID: 1, LeaseTimeoutMinutes: 30}, 7, labelerID)
+	if !errors.Is(err, ErrLeaseExpired) {
+		t.Fatalf("expected ErrLeaseExpired, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// H-01 回归:租约回收只能命中仍处于编辑态(draft/revising)的认领,
+// SQL 必须带 NOT EXISTS ... submissions ... status NOT IN(...) 守卫,
+// 否则审核中(ai_reviewing/human_reviewing/needs_arbitration)的题目会被一并回收,
+// 进而被第二位标注员重领、再被旧审核结果误终结。
+func TestReleaseExpiredClaimsGuardsAgainstReviewingItems(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	now := time.Date(2026, 6, 1, 4, 0, 0, 0, time.UTC)
+	previousNow := NowUTC
+	NowUTC = func() time.Time { return now }
+	defer func() { NowUTC = previousNow }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET.+NOT EXISTS.+submissions.+status NOT IN`).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	if err := releaseExpiredClaims(db, model.Task{ID: 1, LeaseTimeoutMinutes: 30}); err != nil {
+		t.Fatalf("releaseExpiredClaims returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// LeaseTimeoutMinutes<=0 时回收逻辑直接早返回,不发任何 SQL。
+func TestReleaseExpiredClaimsNoopWhenLeaseDisabled(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	if err := releaseExpiredClaims(db, model.Task{ID: 1, LeaseTimeoutMinutes: 0}); err != nil {
+		t.Fatalf("releaseExpiredClaims returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestSaveRejectsFirstSubmitAtDailyLimit(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "daily_submission_limit_per_labeler"}).
+			AddRow(1, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateDraft))
+	mock.ExpectQuery(`(?is)^SELECT count.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectRollback()
+
+	_, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"x"}`),
+	})
+	if !errors.Is(err, ErrDailySubmissionLimitReached) {
+		t.Fatalf("expected ErrDailySubmissionLimitReached, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestSaveOverlapWaitsForPeerAndReleasesItem(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "overlap_count", "overlap_coverage_pct"}).
+			AddRow(1, 2, 100))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateDraft))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(nil))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(101, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.+task_id.+version`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
+			AddRow(101, 1, 1, `{"fields":[]}`))
+	mock.ExpectQuery(`(?is)^SELECT submission_revisions.answer FROM .submissions. JOIN submission_revisions`).
+		WillReturnRows(sqlmock.NewRows([]string{"answer"}))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, statemachine.StateSubmitted))
+	mock.ExpectCommit()
+
+	result, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"pass"}`),
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if result.Status != statemachine.StateSubmitted {
+		t.Fatalf("status = %s, want submitted", result.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+// F-1 回归:overlap 任务上,被打回后的 revise-resubmit(from=revising)不得重跑 overlap 共识
+// (否则会把已归档的 consensus_evidence 同伴答案重新拉来比较,误判 needs_arbitration)。
+// 断言方式:任务虽配了 overlap(count=2,coverage=100),但因 from=revising,代码绝不发
+// priorOverlapAnswers 查询(此处不 mock 它);若 F-1 守卫失效,该查询会发出 → sqlmock 报"unexpected"。
+// 行为上 revise 重提直接走审核(此处 AI/人审都关 → 自动通过)。
+func TestSaveRevisingResubmitSkipsOverlapOnOverlapTask(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "overlap_count", "overlap_coverage_pct", "review_sampling_pct", "human_review_enabled", "ai_review_enabled"}).
+			AddRow(1, 2, 100, 0, false, false))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	// findOrCreateSubmission 命中一份 revising 提交(被 reviewer 打回后等待重提)。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateRevising))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(2))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(103, 1))
+	// 注意:这里没有 priorOverlapAnswers 的 SELECT —— overlap 被 from=revising 跳过。
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, statemachine.StateApproved))
+	mock.ExpectCommit()
+
+	result, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"fixed"}`),
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if result.Status != statemachine.StateApproved {
+		t.Fatalf("status = %s, want approved", result.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestSaveAutoApprovesUnsampledSubmissionWithoutAI(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	labelerID := uint64(5)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "review_sampling_pct", "human_review_enabled"}).
+			AddRow(1, 0, true))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "status", "claimed_by"}).
+			AddRow(7, 1, ItemStatusClaimed, labelerID))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "labeler_id", "status"}).
+			AddRow(9, 1, 7, labelerID, statemachine.StateDraft))
+	mock.ExpectQuery(`(?is)^SELECT MAX.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(nil))
+	mock.ExpectExec(`(?is)^INSERT INTO .submission_revisions.`).
+		WillReturnResult(sqlmock.NewResult(101, 1))
+	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`(?is)^INSERT INTO .audit_logs.`).
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, statemachine.StateApproved))
+	mock.ExpectCommit()
+
+	result, err := Save(db, SaveInput{
+		Task:      model.Task{ID: 1},
+		Item:      model.TaskItem{ID: 7},
+		UserID:    labelerID,
+		AnswerRaw: []byte(`{"label":"pass"}`),
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+	if result.Status != statemachine.StateApproved {
+		t.Fatalf("status = %s, want approved", result.Status)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
 	}
 }

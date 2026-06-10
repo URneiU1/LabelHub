@@ -26,4 +26,5 @@ func registerAllHandlers(r gin.IRouter, db *gorm.DB) {
 	NewGoldenSampleHandler(db).Register(r)
 	NewAIDryRunHandler(db).Register(r)
 	NewStatsHandler(db).Register(r)
+	NewAcceptanceHandler(db).Register(r)
 }

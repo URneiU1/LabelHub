@@ -90,6 +90,19 @@ describe('parseTemplateSchema', () => {
     }
   })
 
+  it('rejects reserved field names', () => {
+    const result = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'value', widget: 'Input' }],
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.field).toBe('fields[0].name')
+      expect(result.error.message).toContain('reserved')
+    }
+  })
+
   it('rejects invalid radio options instead of silently filtering them', () => {
     const result = parseTemplateSchema({
       title: 'bad',
@@ -102,15 +115,31 @@ describe('parseTemplateSchema', () => {
     }
   })
 
-  it('requires non-empty options for radio and tags', () => {
+  it('requires non-empty options for choice widgets', () => {
     const result = parseTemplateSchema({
       title: 'bad',
-      fields: [{ name: 'issue_tags', widget: 'Tags' }],
+      fields: [{ name: 'issue_tags', widget: 'MultiSelect' }],
     })
 
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.field).toBe('fields[0].options')
+    }
+  })
+
+  it('parses multi-select and image-upload widgets', () => {
+    const result = parseTemplateSchema({
+      title: 'media_review',
+      fields: [
+        { name: 'choices', widget: 'MultiSelect', label: '多选', options: ['a', 'b'] },
+        { name: 'image_evidence', widget: 'ImageUpload', label: '图片证据', maxFiles: 2 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields[0]).toMatchObject({ widget: 'MultiSelect', options: ['a', 'b'] })
+      expect(result.value.fields[1]).toMatchObject({ widget: 'ImageUpload', maxFiles: 2 })
     }
   })
 
@@ -123,6 +152,21 @@ describe('parseTemplateSchema', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.field).toBe('fields[0].maxFiles')
+    }
+  })
+
+  it('accepts MultiSelect and ImageUpload schemas', () => {
+    const result = parseTemplateSchema({
+      title: 'media',
+      fields: [
+        { name: 'choices', widget: 'MultiSelect', options: ['a', 'b'] },
+        { name: 'image', widget: 'ImageUpload', maxFiles: 2 },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields.map((field) => field.widget)).toEqual(['MultiSelect', 'ImageUpload'])
     }
   })
 
@@ -178,6 +222,58 @@ describe('parseTemplateSchema', () => {
     expect(badRef.ok).toBe(false)
     if (!badRef.ok) {
       expect(badRef.error.field).toBe('fields[0].requiredWhen.field')
+    }
+  })
+
+  it('parses visibleWhen and customRule validation metadata', () => {
+    const result = parseTemplateSchema({
+      title: 'advanced',
+      fields: [
+        { name: 'decision', widget: 'Radio', options: ['pass', 'reject'] },
+        { name: 'reject_reason', widget: 'Input', visibleWhen: { field: 'decision', equals: 'reject' } },
+        { name: 'score', widget: 'Input', customRule: { expr: 'len(value) >= 4', message: '至少 4 个字符' } },
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.fields[1]).toMatchObject({
+        visibleWhen: { field: 'decision', equals: 'reject' },
+      })
+      expect(result.value.fields[2]).toMatchObject({
+        customRule: { expr: 'len(value) >= 4', message: '至少 4 个字符' },
+      })
+    }
+  })
+
+  it('rejects dangling visibleWhen references', () => {
+    const badRef = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'reason', widget: 'Input', visibleWhen: { field: 'missing', notEmpty: true } }],
+    })
+    expect(badRef.ok).toBe(false)
+    if (!badRef.ok) {
+      expect(badRef.error.field).toBe('fields[0].visibleWhen.field')
+    }
+  })
+
+  it('rejects an un-parseable customRule expr and an empty message', () => {
+    const badExpr = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'score', widget: 'Input', customRule: { expr: 'value >= ', message: 'invalid' } }],
+    })
+    expect(badExpr.ok).toBe(false)
+    if (!badExpr.ok) {
+      expect(badExpr.error.field).toBe('fields[0].customRule.expr')
+    }
+
+    const badMessage = parseTemplateSchema({
+      title: 'bad',
+      fields: [{ name: 'score', widget: 'Input', customRule: { expr: 'value > 0', message: '' } }],
+    })
+    expect(badMessage.ok).toBe(false)
+    if (!badMessage.ok) {
+      expect(badMessage.error.field).toBe('fields[0].customRule.message')
     }
   })
 

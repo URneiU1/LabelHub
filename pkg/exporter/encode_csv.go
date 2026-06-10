@@ -40,14 +40,15 @@ func EncodeCSV(w io.Writer, cols []Column, rows []Row) (int, error) {
 	return len(rows), nil
 }
 
-// csvSafeCell 防 CSV 公式注入:以 = + - @ \t \r 开头的单元格会被 Excel / LibreOffice
+// csvSafeCell 防 CSV 公式注入:以 = + - @ \t \r \n 开头的单元格会被 Excel / LibreOffice
 // 当公式执行(如用户答案 =HYPERLINK(...));给这类值加前导单引号,使其被当作纯文本。
+// 注意 \n 同样要防:形如 "\n=HYPERLINK(...)" 的值在部分解析器里仍会被当公式。
 func csvSafeCell(s string) string {
 	if s == "" {
 		return s
 	}
 	switch s[0] {
-	case '=', '+', '-', '@', '\t', '\r':
+	case '=', '+', '-', '@', '\t', '\r', '\n':
 		return "'" + s
 	}
 	return s

@@ -16,6 +16,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/statemachine"
 )
 
 type TemplateHandler struct {
@@ -91,6 +92,10 @@ func (h TemplateHandler) CreateTemplate(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if statemachine.TaskPoliciesFrozen(task.Status) {
+		httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", "published task schema is frozen; copy the task to create a new version")
+		return
+	}
 
 	raw, ok := bindCanonicalTemplateSchema(c, task.Title)
 	if !ok {
@@ -104,6 +109,10 @@ func (h TemplateHandler) CreateTemplate(c *gin.Context) {
 	claims, _ := middleware.Claims(c)
 	template, err := h.createTemplateVersion(task.ID, claims.UserID, raw)
 	if err != nil {
+		if errors.Is(err, errTaskPoliciesFrozen) {
+			httpx.Error(c, http.StatusUnprocessableEntity, "INVALID_STATE", "published task schema is frozen; copy the task to create a new version")
+			return
+		}
 		if errors.Is(err, errTemplateVersionConflict) {
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "template version already exists")
 			return
@@ -131,7 +140,10 @@ func (h TemplateHandler) ValidateTemplate(c *gin.Context) {
 	})
 }
 
-var errTemplateVersionConflict = errors.New("template version conflict")
+var (
+	errTemplateVersionConflict = errors.New("template version conflict")
+	errTaskPoliciesFrozen      = errors.New("published task policies are frozen")
+)
 
 func (h TemplateHandler) createTemplateVersion(taskID uint64, createdBy uint64, raw []byte) (model.TaskTemplate, error) {
 	var created model.TaskTemplate
@@ -139,6 +151,9 @@ func (h TemplateHandler) createTemplateVersion(taskID uint64, createdBy uint64, 
 		var task model.Task
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, taskID).Error; err != nil {
 			return err
+		}
+		if statemachine.TaskPoliciesFrozen(task.Status) {
+			return errTaskPoliciesFrozen
 		}
 
 		var maxVersion int

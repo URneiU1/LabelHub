@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +16,12 @@ import (
 func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error {
 	payload, err := parseAIReviewPayload(t.Payload())
 	if err != nil {
+		// Payload is produced by our own enqueue side, so a parse failure is a coding bug,
+		// not a transient error. Surface it as a non-retryable asynq failure (visible in the
+		// dead queue) instead of returning nil, which would mark the job succeeded and hide it.
+		// The submission is still rescued by the sweeper after the stall timeout.
 		h.logger.Warn("invalid ai review payload", zap.Error(err), zap.ByteString("payload", t.Payload()))
-		return nil
+		return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
 	}
 	claimed, err := h.markRunning(ctx, payload)
 	if err != nil {
@@ -55,7 +57,7 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 	}
 	h.circuit.recordProviderSuccess()
 	if err := h.complete(ctx, payload, result); err != nil {
-		return h.retryOrFailover(ctx, payload, err)
+		return err
 	}
 	h.logger.Info("ai review completed",
 		zap.Uint64("submission_id", payload.SubmissionID),
@@ -67,6 +69,7 @@ func (h workerHandlers) handleAIReview(ctx context.Context, t *asynq.Task) error
 }
 
 type aiReviewPayload struct {
+	TaskID         uint64 `json:"task_id,omitempty"`
 	SubmissionID   uint64 `json:"submission_id"`
 	RevisionID     uint64 `json:"revision_id"`
 	PromptConfigID uint64 `json:"prompt_config_id"`
@@ -126,6 +129,7 @@ func newEvaluatorFromEnv() (aiEvaluator, error) {
 
 func evaluateWithProvider(ctx context.Context, provider llmreview.Provider, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
 	result, err := provider.Evaluate(ctx, input.Prompt, llmreview.EvaluationInput{
+		TaskID:              payload.TaskID,
 		SubmissionID:        payload.SubmissionID,
 		RevisionID:          payload.RevisionID,
 		PromptConfigID:      payload.PromptConfigID,
@@ -165,16 +169,19 @@ func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
 	if payload.SubmissionID == 0 || payload.RevisionID == 0 || payload.PromptConfigID == 0 || payload.PromptVersion <= 0 || payload.IdempotencyKey == "" {
 		return aiReviewPayload{}, errors.New("missing required ai review payload fields")
 	}
-	if payload.IdempotencyKey != aiReviewIdempotencyKey(payload.SubmissionID, payload.RevisionID, payload.PromptConfigID, payload.PromptVersion) {
+	if payload.IdempotencyKey != llmreview.AIReviewIdempotencyKey(payload.SubmissionID, payload.RevisionID, payload.PromptConfigID, payload.PromptVersion) {
 		return aiReviewPayload{}, errors.New("ai review idempotency key does not match payload anchors")
 	}
 	return payload, nil
 }
 
 func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload) (bool, error) {
+	// started_at 记为本次进入 running 的时间,sweeper 用它判断 running 是否真卡死(M-06)。
+	// failed → running 的重试会刷新 started_at:每次重跑都应获得一个全新的超时窗口,
+	// 而不是沿用上一次失败前的开始时间,故此处是有意覆写(非取首次开始时间)。
 	res, err := h.db.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1 WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','failed')`,
-		payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'running', retry_count = retry_count + 1, started_at = ?, prompt_config_id = COALESCE(prompt_config_id, ?) WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','failed')`,
+		time.Now().UTC(), payload.PromptConfigID, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return false, err
@@ -188,8 +195,8 @@ func (h workerHandlers) markRunning(ctx context.Context, payload aiReviewPayload
 
 func (h workerHandlers) markFailed(ctx context.Context, payload aiReviewPayload, cause error) error {
 	_, err := h.db.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'failed', error_msg = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
-		llmreview.SafeErrorMessage(cause), payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'failed', error_msg = ?, prompt_config_id = COALESCE(prompt_config_id, ?) WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		llmreview.SafeErrorMessage(cause), payload.PromptConfigID, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	return err
 }
@@ -266,15 +273,10 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	if status != "ai_reviewing" || !currentRevisionID.Valid || uint64(currentRevisionID.Int64) != payload.RevisionID {
 		return tx.Commit()
 	}
-	meta, err := lockedAICompletionMeta(ctx, tx, payload.SubmissionID)
-	if err != nil {
-		return err
-	}
-
 	now := time.Now().UTC()
 	reviewRes, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'succeeded', verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
-		result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'succeeded', prompt_config_id = COALESCE(prompt_config_id, ?), verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		payload.PromptConfigID, result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return err
@@ -282,57 +284,35 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	if rows, _ := reviewRes.RowsAffected(); rows != 1 {
 		return errors.New("ai review completion lost review update race")
 	}
+	// 综合判定(对齐审核流程图,三条独立分支):
+	//   明确不合格(reject) → 直接打回标注员(revising);标注员修改后重提会再次过 AI 评测。
+	//   可疑(uncertain) → 转人工复核(manual_review),走专属的初审入口分支。
+	//   通过(pass) → 进初审(human_reviewing),等终审定夺。
+	// AI 不再自动入库 / 不抽检直通——是否入库只由人工终审决定。
 	toState := "human_reviewing"
 	event := "ai_done"
-	if result.Verdict == "pass" && !meta.HumanReviewEnabled {
-		toState = "approved"
-		event = "ai_auto_approved"
-		res, err := tx.ExecContext(ctx,
-			`UPDATE submissions SET status = 'approved', ai_verdict = ?, ai_score = ?, approved_at = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`,
-			result.Verdict, result.Score, now, payload.SubmissionID, payload.RevisionID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost submission update race")
-		}
-		res, err = tx.ExecContext(ctx,
-			`UPDATE task_items SET status = 'finished', finished_at = ? WHERE id = ? AND status = 'claimed'`,
-			now, meta.ItemID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost task item update race")
-		}
-		res, err = tx.ExecContext(ctx,
-			`UPDATE tasks SET finished_items = finished_items + 1 WHERE id = ?`,
-			meta.TaskID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost task update race")
-		}
-	} else {
-		res, err := tx.ExecContext(ctx,
-			`UPDATE submissions SET status = 'human_reviewing', ai_verdict = ?, ai_score = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`,
-			result.Verdict, result.Score, payload.SubmissionID, payload.RevisionID,
-		)
-		if err != nil {
-			return err
-		}
-		if rows, _ := res.RowsAffected(); rows != 1 {
-			return errors.New("ai review completion lost submission update race")
-		}
+	switch result.Verdict {
+	case "reject":
+		toState = "revising"
+		event = "ai_reject"
+	case "uncertain":
+		toState = "manual_review"
+		event = "ai_uncertain"
+	}
+	submissionSQL := `UPDATE submissions SET status = ?, ai_verdict = ?, ai_score = ? WHERE id = ? AND status = 'ai_reviewing' AND current_revision_id = ?`
+	res, err := tx.ExecContext(ctx, submissionSQL,
+		toState, result.Verdict, result.Score, payload.SubmissionID, payload.RevisionID,
+	)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows != 1 {
+		return errors.New("ai review completion lost submission update race")
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "score": result.Score})
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', ?, 'system', ?, ?, ?)`,
-		payload.SubmissionID, toState, event, string(auditPayload), now,
+		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, actor_id, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', ?, 'ai_worker', ?, ?, ?, ?)`,
+		payload.SubmissionID, toState, h.aiActorID, event, string(auditPayload), now,
 	); err != nil {
 		return err
 	}
@@ -359,8 +339,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	now := time.Now().UTC()
 	deadRes, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'dead', error_msg = ?, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND status IN ('pending','running','failed')`,
-		llmreview.SafeErrorMessage(cause), now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`UPDATE ai_reviews SET status = 'dead', prompt_config_id = COALESCE(prompt_config_id, ?), error_msg = ?, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		payload.PromptConfigID, llmreview.SafeErrorMessage(cause), now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return err
@@ -383,8 +363,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 	}
 	auditPayload, _ := json.Marshal(map[string]any{"idempotency_key": payload.IdempotencyKey, "error": llmreview.SafeErrorMessage(cause)})
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', 'human_reviewing', 'system', 'ai_fail_max', ?, ?)`,
-		payload.SubmissionID, string(auditPayload), now,
+		`INSERT INTO audit_logs (entity_type, entity_id, from_state, to_state, actor_type, actor_id, event, payload, created_at) VALUES ('submission', ?, 'ai_reviewing', 'human_reviewing', 'ai_worker', ?, 'ai_fail_max', ?, ?)`,
+		payload.SubmissionID, h.aiActorID, string(auditPayload), now,
 	); err != nil {
 		return err
 	}
@@ -399,8 +379,8 @@ func (h workerHandlers) failover(ctx context.Context, payload aiReviewPayload, c
 func lockedAIReviewStatus(ctx context.Context, tx *sql.Tx, payload aiReviewPayload) (string, error) {
 	var status string
 	err := tx.QueryRowContext(ctx,
-		`SELECT status FROM ai_reviews WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? FOR UPDATE`,
-		payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion,
+		`SELECT status FROM ai_reviews WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) FOR UPDATE`,
+		payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	).Scan(&status)
 	return status, err
 }
@@ -424,21 +404,6 @@ func lockedSubmissionState(ctx context.Context, tx *sql.Tx, submissionID uint64)
 	return status, currentRevisionID, err
 }
 
-type aiCompletionMeta struct {
-	TaskID             uint64
-	ItemID             uint64
-	HumanReviewEnabled bool
-}
-
-func lockedAICompletionMeta(ctx context.Context, tx *sql.Tx, submissionID uint64) (aiCompletionMeta, error) {
-	var meta aiCompletionMeta
-	err := tx.QueryRowContext(ctx,
-		`SELECT s.task_id, s.item_id, t.human_review_enabled FROM submissions s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? FOR UPDATE`,
-		submissionID,
-	).Scan(&meta.TaskID, &meta.ItemID, &meta.HumanReviewEnabled)
-	return meta, err
-}
-
 func rollbackUnlessCommitted(tx *sql.Tx) {
 	_ = tx.Rollback()
 }
@@ -450,9 +415,4 @@ func shouldFailover(ctx context.Context) bool {
 		return true
 	}
 	return retryCount >= maxRetry
-}
-
-func aiReviewIdempotencyKey(submissionID uint64, revisionID uint64, promptID uint64, promptVersion int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d", submissionID, revisionID, promptID, promptVersion)))
-	return hex.EncodeToString(sum[:])
 }

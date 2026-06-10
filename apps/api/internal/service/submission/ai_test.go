@@ -47,6 +47,37 @@ func TestBuildAIReviewPlanAnchorsPayloadAndKey(t *testing.T) {
 	}
 }
 
+func TestCreatePendingAIReviewPersistsPromptConfigID(t *testing.T) {
+	db, mock, sqlDB := newSubmissionMockDB(t)
+	defer sqlDB.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?is)^SELECT .+FROM .ai_reviews. WHERE idempotency_key = .+ORDER BY .ai_reviews.\..id. LIMIT`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectExec(`(?is)^INSERT INTO .ai_reviews..*prompt_config_id.*prompt_version`).
+		WillReturnResult(sqlmock.NewResult(81, 1))
+	mock.ExpectCommit()
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return createPendingAIReview(tx,
+			model.Submission{ID: 42},
+			model.SubmissionRevision{ID: 901},
+			aiReviewPlan{
+				Enabled:        true,
+				PromptID:       33,
+				PromptVersion:  3,
+				IdempotencyKey: "idem",
+			},
+		)
+	})
+	if err != nil {
+		t.Fatalf("createPendingAIReview returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 func TestBuildAIReviewPlanSkipsWhenTaskAIReviewDisabled(t *testing.T) {
 	db, mock, sqlDB := newSubmissionMockDB(t)
 	defer sqlDB.Close()

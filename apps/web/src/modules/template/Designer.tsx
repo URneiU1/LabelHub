@@ -1,11 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Button, Toast } from '@douyinfe/semi-ui'
+import { Parser as ExprParser } from 'expr-eval'
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
 import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
+import SchemaRenderer from '../../renderer/SchemaRenderer'
 import { parseTemplateSchema } from '../../renderer/parser'
+import type { AnswerValue } from '../../renderer/types'
 import { widgetRegistry } from '../../renderer/widgets'
-import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type WidgetType } from '../../renderer/types'
+import { showItemModes, widgetTypes, type FieldOption, type FieldSchema, type RenderPayload, type ShowItemMode, type TabSchema, type TemplateSchema, type VisibleWhen, type WidgetType } from '../../renderer/types'
+import { Icon } from '../../shared/components/Icon'
+import '../../styles/lh/designer.css'
 import './Designer.css'
 
 type TemplateDetailResponse = {
@@ -41,10 +66,12 @@ const widgetLabels: Record<WidgetType, string> = {
   Input: '单行输入',
   TextArea: '多行文本',
   Radio: '单选',
-  Tags: '标签多选',
+  MultiSelect: '多选',
+  Tags: '标签选择',
   RichText: '富文本',
   JSONEditor: 'JSON',
   FileUpload: '文件上传',
+  ImageUpload: '图片上传',
   LLMTrigger: 'LLM 触发',
 }
 
@@ -55,20 +82,74 @@ const widgetPrefixes: Record<WidgetType, string> = {
   Input: 'input',
   TextArea: 'text_area',
   Radio: 'radio',
+  MultiSelect: 'multi_select',
   Tags: 'tags',
   RichText: 'rich_text',
   JSONEditor: 'json_editor',
   FileUpload: 'file_upload',
+  ImageUpload: 'image_upload',
   LLMTrigger: 'llm_trigger',
 }
 
+const widgetIcons: Record<WidgetType, string> = {
+  ShowItem: '◎',
+  Group: '[ ]',
+  Tabs: 'T',
+  Input: 'Aa',
+  TextArea: '¶',
+  Radio: '◉',
+  MultiSelect: '☑',
+  Tags: '#',
+  RichText: 'R',
+  JSONEditor: '{}',
+  FileUpload: '↑',
+  ImageUpload: '▧',
+  LLMTrigger: '✦',
+}
+
+const paletteGroups: Array<{ label: string, widgets: WidgetType[] }> = [
+  { label: '物料', widgets: widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs') },
+  { label: '布局', widgets: ['Group', 'Tabs'] },
+]
+
 const nestedWidgetTypes = widgetTypes.filter((widget) => widget !== 'Group' && widget !== 'Tabs')
+
+const optionWidgets: WidgetType[] = ['Radio', 'MultiSelect', 'Tags']
+const uploadWidgets: WidgetType[] = ['FileUpload', 'ImageUpload']
+// Widgets that hold an answer value: visibleWhen / customRule are only meaningful on these.
+const advancedConfigWidgets: WidgetType[] = ['Input', 'TextArea', ...optionWidgets, 'RichText', 'JSONEditor', ...uploadWidgets]
+
+function isOptionWidget(widget: WidgetType) {
+  return optionWidgets.includes(widget)
+}
+
+function isUploadWidget(widget: WidgetType) {
+  return uploadWidgets.includes(widget)
+}
+
+// @dnd-kit drag sources. A palette drag INSERTS a new widget; a canvas drag REORDERS.
+// active.data.current.source distinguishes them in onDragEnd.
+type PaletteDragData = { source: 'palette', widget: WidgetType }
+type CanvasDragData = { source: 'canvas', draftId: string }
+type DragData = PaletteDragData | CanvasDragData
+
+// id used by the canvas droppable so empty-canvas / below-last-field drops still land.
+const CANVAS_DROPPABLE_ID = 'canvas-droppable'
+
+// Shared parser used only to surface a non-blocking parse hint for customRule expr in the panel.
+const designerExprParser = new ExprParser()
 
 export default function TemplateDesigner() {
   const { taskId, templateId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // isNew:templateId === 'new' 进入空白新建态,不拉取已有模板,保存即创建该任务的第一个版本。
+  const isNew = templateId === 'new'
+  // copyFromTaskId:新建态可带 ?copyFrom=<源任务 id>,从该任务最新模板克隆 schema 预填画布(仍是新建态)。
+  const copyFromTaskId = isNew ? searchParams.get('copyFrom') : null
   const numericTaskId = Number(taskId)
-  const numericTemplateId = Number(templateId)
+  // 新建态用 0 占位(而非 NaN),让 isCurrentRoute 的 templateId 比较稳定;loadTemplate 在 isNew 分支提前返回,不会触发 <=0 无效判定。
+  const numericTemplateId = isNew ? 0 : Number(templateId)
   const [template, setTemplate] = useState<TaskTemplate | null>(null)
   const [schema, setSchema] = useState<TemplateSchema | null>(null)
   const [title, setTitle] = useState('')
@@ -84,8 +165,16 @@ export default function TemplateDesigner() {
   const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
-  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null)
+  // activeDrag:当前正在拖拽的来源(palette 新增 / canvas 重排),驱动 DragOverlay 预览与卡片半透明态。
+  const [activeDrag, setActiveDrag] = useState<DragData | null>(null)
+  const [activeCanvasTab, setActiveCanvasTab] = useState('base')
+  const [showSchemaPreview, setShowSchemaPreview] = useState(false)
+  // 预览面板有两种子模式:原始 JSON / 表单预览(标注员看到的最终可填写表单)。
+  const [previewMode, setPreviewMode] = useState<'json' | 'form'>('json')
+  // previewAnswer:表单预览里临时填写的答案,仅本地 state,不提交。
+  const [previewAnswer, setPreviewAnswer] = useState<AnswerValue>({})
   const loadSeq = useRef(0)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
   const routeRef = useRef({ taskId: numericTaskId, templateId: numericTemplateId })
 
   useEffect(() => {
@@ -98,6 +187,50 @@ export default function TemplateDesigner() {
     const routeTaskId = numericTaskId
     const routeTemplateId = numericTemplateId
     const isCurrentLoad = () => loadSeq.current === requestSeq
+
+    if (isNew) {
+      // 复制模式:从源任务最新模板克隆 schema 预填画布;克隆失败则退回空白新建态。仍是新建态,保存走 POST 创建本任务首版。
+      if (copyFromTaskId) {
+        setLoading(true)
+        try {
+          const list = await apiGet<TaskTemplate[]>(`/tasks/${copyFromTaskId}/templates`)
+          if (!isCurrentLoad()) return
+          const source = list[0]
+          const parsed = source ? parseTemplateSchema(source.schemaJson) : null
+          if (parsed && parsed.ok) {
+            const draftFields = parsed.value.fields.map((field, index) => attachDraftIdsToField(field, `${field.name}-${index}`))
+            setTemplate(null)
+            setSchema(parsed.value)
+            setTitle(parsed.value.title)
+            setFields(draftFields)
+            setSelectedId(draftFields[0]?._draftId ?? null)
+            setIsLatest(true)
+            setLatestTemplateId(null)
+            setSchemaError(null)
+            setTaskMismatch(false)
+            setError('')
+            setLoading(false)
+            return
+          }
+        } catch {
+          if (!isCurrentLoad()) return
+          // 克隆失败:落到下方空白新建态。
+        }
+      }
+      // 新建模式:跳过拉取,初始化一张空白可编辑模板,保存时走 POST /tasks/:id/templates 创建首版。
+      setTemplate(null)
+      setSchema({ title: '', layout: 'single_page', fields: [] })
+      setTitle('')
+      setFields([])
+      setSelectedId(null)
+      setIsLatest(true)
+      setLatestTemplateId(null)
+      setSchemaError(null)
+      setTaskMismatch(false)
+      setError('')
+      setLoading(false)
+      return
+    }
 
     if (!Number.isFinite(routeTemplateId) || routeTemplateId <= 0) {
       setTemplate(null)
@@ -162,7 +295,7 @@ export default function TemplateDesigner() {
         setLoading(false)
       }
     }
-  }, [numericTaskId, numericTemplateId])
+  }, [numericTaskId, numericTemplateId, isNew, copyFromTaskId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -215,6 +348,44 @@ export default function TemplateDesigner() {
   const validationErrorsByDraftId = useMemo(() => groupValidationErrorsByDraftId(validationErrors), [validationErrors])
   const canEdit = isLatest && !schemaError && !taskMismatch
   const saveDisabled = saving || !canEdit || validationErrors.length > 0 || fields.length === 0
+  // 表单预览:把当前设计的 schema 走渲染引擎解析,渲成标注员真正会看到的可填写表单。
+  // 配置非法(校验未通过)时 parse 仍可能成功,但若结构不可解析则给出提示。
+  const previewSchemaResult = useMemo(
+    () => parseTemplateSchema(JSON.stringify(buildTemplatePayload(title, fields, schema))),
+    [title, fields, schema],
+  )
+
+  // focusFirstError:校验未通过时,选中并滚动到首个出错字段,形成「校验不通过→回到配置」闭环。
+  // 返回是否存在错误(供保存前拦截判断)。
+  const focusFirstError = useCallback(() => {
+    if (validationErrors.length === 0) return false
+    const targetDraftId = validationErrors.find((item) => item.draftId)?.draftId
+    if (!targetDraftId) return true
+    // 出错字段若在某个分页 Tab 内,先切回基础信息画布(顶层字段都在那渲染),保证目标卡片可见。
+    setActiveCanvasTab('base')
+    setSelectedId(targetDraftId)
+    // 等画布按新选中态重渲染后再滚动定位。
+    window.requestAnimationFrame(() => {
+      const node = canvasRef.current?.querySelector(`[data-draft-id="${targetDraftId}"]`)
+      if (node instanceof HTMLElement) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+    return true
+  }, [validationErrors])
+
+  function handleSaveClick() {
+    // 出现校验错误时,先把用户带回首个出错字段,而不是静默禁用按钮。
+    if (focusFirstError()) return
+    void saveTemplate()
+  }
+  const canvasTabsField = fields.find((field) => field.widget === 'Tabs') ?? null
+  // 画布按子导航 tab 切换内容:基础信息=全部顶层字段(可编辑,与原行为一致,分页组仍在此可选中编辑);
+  // 内容 tab=该分页 tab 的字段(只读预览,编辑走右侧已选中的分页组属性面板)。
+  const isBaseCanvasTab = activeCanvasTab === 'base'
+  const activeTabIndex = isBaseCanvasTab ? -1 : Number(activeCanvasTab.replace('tab-', ''))
+  const baseCanvasFields = fields
+  const activeTabFields = (!isBaseCanvasTab && canvasTabsField ? (canvasTabsField.tabs?.[activeTabIndex]?.fields ?? []) : []) as DraftField[]
 
   function appendField(widget: WidgetType) {
     if (!canEdit) return
@@ -250,9 +421,54 @@ export default function TemplateDesigner() {
     setFields((current) => reorderFieldByOffset(current, fieldId, direction))
   }
 
-  function moveFieldToDragTarget(fieldId: string, targetFieldId: string) {
-    if (!canEdit || fieldId === targetFieldId) return
-    setFields((current) => reorderFieldsToTarget(current, fieldId, targetFieldId))
+  function insertWidgetBeforeTarget(widget: WidgetType, targetFieldId: string | null) {
+    if (!canEdit) return
+    setFields((current) => {
+      const field = createDefaultField(widget, current)
+      const targetIndex = targetFieldId === null ? current.length : current.findIndex((item) => item._draftId === targetFieldId)
+      const insertIndex = targetIndex < 0 ? current.length : targetIndex
+      const next = [...current.slice(0, insertIndex), field, ...current.slice(insertIndex)]
+      setSelectedId(field._draftId)
+      return next
+    })
+  }
+
+  // 拖拽传感器:Pointer 带 8px 触发距离阈值,避免点击物料按钮(追加字段)被误判为拖拽;
+  // Keyboard 接 sortable 的方向键坐标算法,提供键盘可达性(本次迁移的主要收益)。
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  function handleDragStart(event: DragStartEvent) {
+    if (!canEdit) return
+    const data = event.active.data.current as DragData | undefined
+    setActiveDrag(data ?? null)
+  }
+
+  // onDragEnd 用 active.data.current.source 区分两类拖拽:
+  // - palette:在 over 目标字段前插入新 widget(over 为画布占位/空白时追加到末尾)。
+  // - canvas:把被拖字段移动到 over 目标字段的位置(reorderFieldsToTarget 保留「插到目标前」语义)。
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDrag(null)
+    if (!canEdit) return
+    const data = event.active.data.current as DragData | undefined
+    if (!data) return
+    const overId = event.over?.id
+    if (data.source === 'palette') {
+      const targetFieldId = !overId || overId === CANVAS_DROPPABLE_ID ? null : String(overId)
+      if (widgetTypes.includes(data.widget)) {
+        insertWidgetBeforeTarget(data.widget, targetFieldId)
+      }
+      return
+    }
+    // canvas 重排:over 落在另一张顶层字段卡上才移动,落到自身/画布空白不动。
+    if (!overId || overId === CANVAS_DROPPABLE_ID || overId === data.draftId) return
+    setFields((current) => reorderFieldsToTarget(current, data.draftId, String(overId)))
+  }
+
+  function handleDragCancel() {
+    setActiveDrag(null)
   }
 
   function updateSelected(patch: Partial<FieldSchema>) {
@@ -269,6 +485,45 @@ export default function TemplateDesigner() {
     setFields(draftFields)
     setSelectedId(draftFields[0]?._draftId ?? null)
     setError('')
+  }
+
+  function selectCanvasTab(index: number) {
+    if (!canvasTabsField) return
+    setActiveCanvasTab(`tab-${index}`)
+    setSelectedId(canvasTabsField._draftId)
+  }
+
+  function addCanvasTab() {
+    if (!canEdit) return
+    if (!canvasTabsField) {
+      const tabsField = createDefaultField('Tabs', fields)
+      setFields((current) => [...current, tabsField])
+      setSelectedId(tabsField._draftId)
+      setActiveCanvasTab('tab-0')
+      return
+    }
+    const nextIndex = (canvasTabsField.tabs?.length ?? 0) + 1
+    const nextTab = attachDraftIdsToTab({
+      label: `Tab ${nextIndex}`,
+      fields: [createNestedDefaultField(nextNestedFieldName(fields, `${canvasTabsField.name}_tab${nextIndex}`, 'Input'), 'Input')],
+    })
+    setFields((current) => current.map((field) => (
+      field._draftId === canvasTabsField._draftId
+        ? normalizeDraftField({ ...field, tabs: [...(field.tabs ?? []), nextTab] })
+        : field
+    )))
+    setSelectedId(canvasTabsField._draftId)
+    setActiveCanvasTab(`tab-${nextIndex - 1}`)
+  }
+
+  function exportSchemaJSON() {
+    const blob = new Blob([JSON.stringify(buildTemplatePayload(title, fields, schema), null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `task-${numericTaskId}-template-r${template?.version ?? 1}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   function isCurrentRoute(routeTaskId: number, routeTemplateId: number) {
@@ -320,28 +575,58 @@ export default function TemplateDesigner() {
 
   return (
     <div style={pageStyle}>
-      <div style={{ ...toolbarStyle, background: 'var(--color-surface)', padding: 'var(--space-lg) var(--space-xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
+      <div className="template-designer-toolbar" style={{ ...toolbarStyle, background: 'var(--color-surface)', padding: 'var(--space-lg) var(--space-xl)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
         <div>
-          <Link to={`/owner/tasks/${numericTaskId}/templates`} style={backLinkStyle}>← 返回版本列表</Link>
-          <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>Template Designer</h1>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
-             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>ID: {template?.id}</span>
-             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}>Version: v{template?.version ?? '-'}</span>
-             <span style={{ fontSize: 'var(--text-sm)', padding: '2px 8px', borderRadius: 4, background: isLatest ? '#e8f5e9' : '#fff3e0', color: isLatest ? '#2e7d32' : '#ef6c00', fontWeight: 600 }}>{isLatest ? 'LATEST / EDITABLE' : 'READONLY'}</span>
+          <div className="template-designer-breadcrumb">
+            <span>任务负责人后台</span>
+            <span>/</span>
+            <Link to={`/owner/tasks/${numericTaskId}/templates`}>模板搭建</Link>
+            <span>/</span>
+            <span>T-{numericTaskId} · {isNew ? '新建' : `r${template?.version ?? '-'}`}</span>
+          </div>
+          <h1 style={{ ...headingStyle, marginTop: 'var(--space-sm)' }}>模板搭建器（Designer）</h1>
+          <div className="template-designer-subtitle">拖拽物料、配置联动与校验规则，发布后由标注工作台直接消费。</div>
+          <div className="template-designer-version-row">
+             <span className="designer-version">{isNew ? '新建模板' : `当前版本 r${template?.version ?? '-'}`}</span>
+             <span className="designer-task-link">绑定任务 T-{numericTaskId}</span>
+             <span className={isLatest ? 'template-designer-status template-designer-status--latest' : 'template-designer-status template-designer-status--readonly'}>{isLatest ? 'LATEST / EDITABLE' : 'READONLY'}</span>
           </div>
         </div>
         <div style={toolbarActionsStyle}>
+          <Link
+            to="/owner/template"
+            aria-label="返回模板搭建"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--color-border-light)',
+              background: 'var(--color-surface)',
+              color: 'var(--color-text)',
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            ← 返回模板搭建
+          </Link>
           {!isLatest && latestTemplateId ? (
             <Link to={`/owner/tasks/${numericTaskId}/templates/${latestTemplateId}`} style={latestTemplateLinkStyle}>查看最新版本</Link>
           ) : null}
+          <Button aria-label="预览 Schema" onClick={() => setShowSchemaPreview((current) => !current)} theme="light">预览</Button>
+          <Button aria-label="导出 Schema JSON" onClick={exportSchemaJSON} theme="light">导出 Schema JSON</Button>
           {taskMismatch ? null : canEdit ? (
             <>
               <Button aria-label="Discard" disabled={saving} onClick={discardChanges} theme="light">重置修改</Button>
-              <Button aria-label="Save as new version" disabled={saveDisabled} loading={saving} theme="solid" onClick={() => void saveTemplate()}>保存并发布新版</Button>
+              {/* 仅校验未通过时不禁用按钮,改为点击时聚焦首个出错字段(闭环);其它阻断条件仍禁用。 */}
+              <Button aria-label="Save as new version" disabled={saving || !canEdit || fields.length === 0} loading={saving} theme="solid" onClick={handleSaveClick}>保存并发布版本 r{(template?.version ?? 0) + 1}</Button>
             </>
           ) : (
             <Button aria-label="Fork as new version" disabled={saving || !schema} loading={saving} theme="solid" onClick={() => void forkTemplate()}>Fork 为新版本</Button>
           )}
+          <span className="template-designer-avatar" aria-label="当前用户">O</span>
         </div>
       </div>
 
@@ -353,99 +638,225 @@ export default function TemplateDesigner() {
           {validationErrors.map((item) => <div key={`${item.field}-${item.message}`} style={{ fontSize: 13 }}>• {item.field}: {item.message}</div>)}
         </div>
       ) : null}
-
-      <div className="template-designer-grid" style={{ marginTop: 'var(--space-lg)' }}>
-        <aside className="template-designer-palette" style={panelStyle}>
-          <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
-            <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
+      {showSchemaPreview ? (
+        <div aria-label="schema preview panel" style={{ margin: 'var(--space-md) 0' }}>
+          <div role="tablist" aria-label="preview mode" className="canvas-tabs" style={{ marginBottom: 'var(--space-sm)' }}>
+            <button type="button" role="tab" aria-selected={previewMode === 'json'} className={`canvas-tab${previewMode === 'json' ? ' canvas-tab--active' : ''}`} onClick={() => setPreviewMode('json')}>原始 JSON</button>
+            <button type="button" role="tab" aria-selected={previewMode === 'form'} className={`canvas-tab${previewMode === 'form' ? ' canvas-tab--active' : ''}`} onClick={() => setPreviewMode('form')}>表单预览</button>
           </div>
-          <div style={paletteStyle}>
-            {widgetTypes.map((widget) => (
-              <Button key={widget} aria-label={`Add ${widget}`} disabled={!canEdit} onClick={() => appendField(widget)} theme="light" style={paletteButtonStyle}>
-                <span style={paletteButtonNodeStyle}>
-                  <span style={paletteWidgetCodeStyle}>{widget}</span>
-                  <span style={paletteWidgetLabelStyle}>{widgetLabels[widget]}</span>
-                </span>
-              </Button>
-            ))}
-          </div>
-        </aside>
-
-        <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 800 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
-            <label style={fieldStyle}>
-              <span style={{ fontWeight: 600 }}>模板名称</span>
-              <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} placeholder="输入模板标题..." />
-            </label>
-
-            <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-                <div style={{ fontWeight: 600 }}>画布区域 (Canvas)</div>
-                <PreviewItemStatus
-                  item={previewItem}
-                  loading={previewLoading}
-                  loadError={previewError}
-                  parseError={previewPayloadResult.error}
-                />
+          {previewMode === 'json' ? (
+            <pre aria-label="schema preview" style={jsonPreviewStyle}>{JSON.stringify(buildTemplatePayload(title, fields, schema), null, 2)}</pre>
+          ) : previewSchemaResult.ok ? (
+            <div aria-label="form preview" style={formPreviewStyle}>
+              <div className="lh-muted lh-text-13" style={{ marginBottom: 'var(--space-sm)' }}>
+                标注员视角的最终表单(可填写预览,不会提交)。
               </div>
+              <SchemaRenderer
+                schema={previewSchemaResult.value}
+                payload={previewPayloadResult.payload}
+                value={previewAnswer}
+                onChange={setPreviewAnswer}
+              />
+            </div>
+          ) : (
+            <div role="alert" style={{ ...alertStyle, background: '#fff1f0' }}>当前配置无法渲染为表单预览:{previewSchemaResult.error.message}</div>
+          )}
+        </div>
+      ) : null}
 
-              <div style={canvasStyle}>
-                {fields.length === 0 ? (
-                  <EmptyCanvasDiagram />
-                ) : fields.map((field, index) => (
-                  <CanvasField
-                    key={field._draftId}
-                    field={field}
-                    errors={validationErrorsByDraftId.get(field._draftId) ?? []}
-                    isFirst={index === 0}
-                    isLast={index === fields.length - 1}
-                    previewPayload={previewPayloadResult.payload}
-                    selected={field._draftId === selectedId}
-                    dragging={field._draftId === draggingFieldId}
-                    disabled={!canEdit}
-                    onSelect={() => setSelectedId(field._draftId)}
-                    onCopy={() => copyField(field._draftId)}
-                    onDelete={() => deleteField(field._draftId)}
-                    onMoveDown={() => moveField(field._draftId, 1)}
-                    onMoveUp={() => moveField(field._draftId, -1)}
-                    onDragEnd={() => setDraggingFieldId(null)}
-                    onDragOver={(event) => {
-                      if (!canEdit) return
-                      event.preventDefault()
-                      event.dataTransfer.dropEffect = 'move'
-                    }}
-                    onDragStart={(event) => {
-                      if (!canEdit) return
-                      event.dataTransfer.effectAllowed = 'move'
-                      event.dataTransfer.setData('text/plain', field._draftId)
-                      setDraggingFieldId(field._draftId)
-                    }}
-                    onDrop={(event) => {
-                      if (!canEdit) return
-                      event.preventDefault()
-                      const draggedId = draggingFieldId ?? event.dataTransfer.getData('text/plain')
-                      if (draggedId) {
-                        moveFieldToDragTarget(draggedId, field._draftId)
-                      }
-                      setDraggingFieldId(null)
-                    }}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className="template-designer-grid" style={{ marginTop: 'var(--space-lg)' }}>
+          <aside className="template-designer-palette" style={panelStyle}>
+            <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-sm)', marginBottom: 'var(--space-sm)' }}>
+              <h2 style={{ ...subHeadingStyle, fontSize: 'var(--text-base)' }}>组件物料</h2>
+            </div>
+            <div style={paletteStyle}>
+              {paletteGroups.map((group) => (
+                <section key={group.label} className="template-designer-palette-group">
+                  <div className="palette-group__title">{group.label}</div>
+                  {group.widgets.map((widget) => (
+                    <PaletteItem
+                      key={widget}
+                      widget={widget}
+                      disabled={!canEdit}
+                      onAppend={() => appendField(widget)}
+                    />
+                  ))}
+                </section>
+              ))}
+            </div>
+          </aside>
+
+          <main className="template-designer-canvas" style={{ ...panelStyle, minHeight: 360 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+              <label style={fieldStyle}>
+                <span style={{ fontWeight: 600 }}>模板名称</span>
+                <input aria-label="template_title" disabled={!canEdit} value={title} onChange={(event) => setTitle(event.target.value)} style={inputStyle} placeholder="输入模板标题..." />
+              </label>
+
+              <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: 'var(--space-lg)' }}>
+                <div role="tablist" aria-label="canvas tabs" className="canvas-tabs">
+                  <button type="button" role="tab" aria-selected={activeCanvasTab === 'base'} className={`canvas-tab${activeCanvasTab === 'base' ? ' canvas-tab--active' : ''}`} onClick={() => setActiveCanvasTab('base')}>基础信息</button>
+                  {(canvasTabsField?.tabs ?? []).map((tab, index) => (
+                    <button key={tab._draftId ?? `${tab.label}-${index}`} type="button" role="tab" aria-selected={activeCanvasTab === `tab-${index}`} className={`canvas-tab${activeCanvasTab === `tab-${index}` ? ' canvas-tab--active' : ''}`} onClick={() => selectCanvasTab(index)}>{tab.label}</button>
+                  ))}
+                  <button type="button" aria-label="新增画布 Tab" className="canvas-tab canvas-tab--add" disabled={!canEdit} onClick={addCanvasTab}>+ 新 Tab</button>
+                  <span className="canvas-hint">拖拽字段卡调整顺序</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+                  <div style={{ fontWeight: 600 }}>画布区域 (Canvas)</div>
+                  <PreviewItemStatus
+                    item={previewItem}
+                    loading={previewLoading}
+                    loadError={previewError}
+                    parseError={previewPayloadResult.error}
                   />
-                ))}
+                </div>
+
+                <CanvasDropZone canvasRef={canvasRef}>
+                  {isBaseCanvasTab ? (
+                    baseCanvasFields.length === 0 ? (
+                      <EmptyCanvasDiagram />
+                    ) : (
+                      <SortableContext items={baseCanvasFields.map((field) => field._draftId)} strategy={verticalListSortingStrategy}>
+                        {baseCanvasFields.map((field, index) => (
+                          <CanvasField
+                            key={field._draftId}
+                            field={field}
+                            errors={validationErrorsByDraftId.get(field._draftId) ?? []}
+                            isFirst={index === 0}
+                            isLast={index === baseCanvasFields.length - 1}
+                            previewPayload={previewPayloadResult.payload}
+                            selected={field._draftId === selectedId}
+                            disabled={!canEdit}
+                            onSelect={() => setSelectedId(field._draftId)}
+                            onCopy={() => copyField(field._draftId)}
+                            onDelete={() => deleteField(field._draftId)}
+                            onMoveDown={() => moveField(field._draftId, 1)}
+                            onMoveUp={() => moveField(field._draftId, -1)}
+                          />
+                        ))}
+                      </SortableContext>
+                    )
+                  ) : activeTabFields.length === 0 ? (
+                    <div style={{ padding: 'var(--space-xl)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                      该 Tab 暂无字段。在右侧「属性 · 分页组」中为此 Tab 添加字段。
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: 'var(--space-sm)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                        只读预览 · 编辑此 Tab 的字段请在右侧「属性 · 分页组」中操作
+                      </div>
+                      {activeTabFields.map((child, index) => (
+                        <CanvasField
+                          key={child._draftId ?? `${child.name}-${index}`}
+                          field={child}
+                          errors={[]}
+                          isFirst={index === 0}
+                          isLast={index === activeTabFields.length - 1}
+                          previewPayload={previewPayloadResult.payload}
+                          selected={false}
+                          disabled
+                          readOnly
+                          onSelect={() => undefined}
+                          onCopy={() => undefined}
+                          onDelete={() => undefined}
+                          onMoveDown={() => undefined}
+                          onMoveUp={() => undefined}
+                        />
+                      ))}
+                    </>
+                  )}
+                </CanvasDropZone>
               </div>
             </div>
-          </div>
-        </main>
+          </main>
 
-        <aside className="template-designer-property" style={panelStyle}>
-          <PropertyPanel
-            field={selectedField}
-            errors={selectedField ? validationErrorsByDraftId.get(selectedField._draftId) ?? [] : []}
-            fields={fields}
-            disabled={!canEdit}
-            onChange={updateSelected}
-          />
-        </aside>
-      </div>
+          <aside className="template-designer-property" style={panelStyle}>
+            <PropertyPanel
+              field={selectedField}
+              errors={selectedField ? validationErrorsByDraftId.get(selectedField._draftId) ?? [] : []}
+              fields={fields}
+              disabled={!canEdit}
+              onChange={updateSelected}
+            />
+          </aside>
+        </div>
+
+        {/* DragOverlay:拖拽时跟随指针/键盘焦点的预览,palette 显示物料名,canvas 显示字段名。 */}
+        <DragOverlay dropAnimation={null}>
+          {activeDrag ? (
+            <div style={dragOverlayStyle}>
+              {activeDrag.source === 'palette'
+                ? `+ ${widgetLabels[activeDrag.widget]}`
+                : (fields.find((field) => field._draftId === activeDrag.draftId)?.name ?? '字段')}
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
+  )
+}
+
+// 物料按钮:useDraggable 提供拖入画布的能力,onClick 仍负责「点击追加」(两者并存)。
+// PointerSensor 的 8px 距离阈值保证小幅点击不会被吞成拖拽。
+function PaletteItem({ widget, disabled, onAppend }: {
+  widget: WidgetType
+  disabled: boolean
+  onAppend: () => void
+}) {
+  const data: PaletteDragData = { source: 'palette', widget }
+  // Semi <Button> 的 ref 指向组件实例而非 DOM,@dnd-kit 需要 DOM 节点,故把拖拽 ref/监听器
+  // 挂在外层 <div> 上;内层 Button 仍负责点击追加与视觉样式。
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `palette-${widget}`,
+    data,
+    disabled,
+  })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ opacity: isDragging ? 0.5 : 1, cursor: disabled ? undefined : 'grab', touchAction: 'none' }}
+      {...attributes}
+      {...listeners}
+    >
+      <Button
+        aria-label={`Add ${widget}`}
+        className="palette-item"
+        disabled={disabled}
+        onClick={onAppend}
+        theme="light"
+      >
+        <span className={`palette-item__icon${widget === 'LLMTrigger' ? ' palette-item__icon--purple' : widget === 'ShowItem' ? ' palette-item__icon--show' : ''}`}>{widgetIcons[widget]}</span>
+        <span>{widgetLabels[widget]}</span>
+      </Button>
+    </div>
+  )
+}
+
+// 画布放置区:useDroppable 让空画布与字段卡之间/末尾的空白也能接收 palette 拖入。
+// 保留 canvasRef(focusFirstError 滚动定位与 data-draft-id 查询依赖它)。
+function CanvasDropZone({ canvasRef, children }: {
+  canvasRef: MutableRefObject<HTMLDivElement | null>
+  children: ReactNode
+}) {
+  const { setNodeRef } = useDroppable({ id: CANVAS_DROPPABLE_ID })
+  return (
+    <div
+      ref={(node) => {
+        canvasRef.current = node
+        setNodeRef(node)
+      }}
+      aria-label="canvas drop zone"
+      style={canvasStyle}
+    >
+      {children}
     </div>
   )
 }
@@ -457,17 +868,13 @@ function CanvasField({
   isLast,
   previewPayload,
   selected,
-  dragging,
   disabled,
+  readOnly = false,
   onSelect,
   onCopy,
   onDelete,
   onMoveDown,
   onMoveUp,
-  onDragEnd,
-  onDragOver,
-  onDragStart,
-  onDrop,
 }: {
   field: DraftField
   errors: DraftValidationError[]
@@ -475,45 +882,61 @@ function CanvasField({
   isLast: boolean
   previewPayload: RenderPayload
   selected: boolean
-  dragging: boolean
   disabled: boolean
+  readOnly?: boolean
   onSelect: () => void
   onCopy: () => void
   onDelete: () => void
   onMoveDown: () => void
   onMoveUp: () => void
-  onDragEnd: () => void
-  onDragOver: (event: DragEvent<HTMLElement>) => void
-  onDragStart: (event: DragEvent<HTMLButtonElement>) => void
-  onDrop: (event: DragEvent<HTMLElement>) => void
 }) {
   const Widget = widgetRegistry[field.widget]
+  // Canvas stays compact like the org mockup (name/type/label per card); the live
+  // widget preview is opt-in per card so a long template doesn't become a wall of
+  // rendered controls. ShowItem is a display widget (its preview IS the source data
+  // being labeled), so it stays expanded; input controls default collapsed. Full
+  // WYSIWYG is still one click away via the 预览 button.
+  const [showPreview, setShowPreview] = useState(field.widget === 'ShowItem')
+  // useSortable:顶层可编辑字段用 _draftId 作为 sortable id 接入排序;
+  // 只读(Tab 内预览)与禁用态不挂拖拽,listeners 仅绑在拖拽手柄上,不影响卡片内点击/编辑。
+  const data: CanvasDragData = { source: 'canvas', draftId: field._draftId }
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: field._draftId, data, disabled: readOnly || disabled })
+  const sortableStyle: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+  }
+  const baseStyle = isDragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle
   return (
     <section
+      ref={readOnly ? undefined : setNodeRef}
       aria-label={`canvas field ${field.name}`}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      style={dragging ? draggingCanvasItemStyle : selected ? selectedCanvasItemStyle : canvasItemStyle}
+      data-draft-id={field._draftId}
+      className={`template-designer-field canvas-field${selected ? ' canvas-field--selected' : ''}${field.widget === 'LLMTrigger' ? ' canvas-field--llm' : ''}${field.widget === 'ShowItem' ? ' canvas-field--show' : ''}`}
+      style={{ ...baseStyle, ...sortableStyle }}
     >
       <span aria-hidden="true" style={leftPortStyle} />
       <span aria-hidden="true" style={rightPortStyle} />
       <div style={{ ...canvasItemHeaderStyle, background: selected ? 'var(--color-bg)' : '#fafafa' }}>
-        <button type="button" aria-label={`select ${field.name}`} onClick={onSelect} style={selectFieldButtonStyle}>
+        <button type="button" aria-label={`select ${field.name}`} onClick={readOnly ? undefined : onSelect} style={selectFieldButtonStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
             <strong style={{ fontSize: 'var(--text-base)', color: selected ? 'var(--color-accent)' : 'var(--color-text)' }}>{field.name}</strong>
             <span style={{ fontSize: 11, padding: '1px 6px', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 4, color: 'var(--color-text-muted)' }}>{widgetLabels[field.widget]}</span>
           </div>
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{field.label}</span>
         </button>
-        <div style={fieldActionsStyle}>
-          <Button size="small" theme="light" disabled={disabled} draggable={!disabled} onDragEnd={onDragEnd} onDragStart={onDragStart} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
-          <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
-            <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`}>↑</Button>
-            <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`}>↓</Button>
+        {readOnly ? null : (
+          <div style={fieldActionsStyle}>
+            <span ref={setActivatorNodeRef} style={{ display: 'inline-flex', cursor: disabled ? undefined : 'grab', touchAction: 'none' }} {...attributes} {...listeners}>
+              <Button size="small" theme="light" disabled={disabled} aria-label={`drag ${field.name}`} icon={<span>⠿</span>} />
+            </span>
+            <div style={{ display: 'flex', background: 'white', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }}>
+              <Button size="small" theme="borderless" disabled={disabled || isFirst} onClick={onMoveUp} aria-label={`move up ${field.name}`} icon={<Icon name="up" size={14} />} />
+              <Button size="small" theme="borderless" disabled={disabled || isLast} onClick={onMoveDown} aria-label={`move down ${field.name}`} icon={<Icon name="down" size={14} />} />
+            </div>
+            <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`} icon={<Icon name="copy" size={14} />} />
+            <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger" icon={<Icon name="close" size={14} />} />
           </div>
-          <Button size="small" theme="light" disabled={disabled} onClick={onCopy} aria-label={`copy ${field.name}`}>复制</Button>
-          <Button size="small" theme="light" disabled={disabled} onClick={onDelete} aria-label={`delete ${field.name}`} type="danger">删除</Button>
-        </div>
+        )}
       </div>
       {errors.length > 0 ? (
         <div aria-label={`validation ${field.name}`} style={fieldErrorListStyle}>
@@ -522,18 +945,36 @@ function CanvasField({
           </div>)}
         </div>
       ) : null}
+      {isOptionWidget(field.widget) && field.options?.length ? (
+        <div className="canvas-options template-designer-option-row">
+          {field.options.map((option) => <span key={option} className="canvas-option">{option}</span>)}
+        </div>
+      ) : null}
       {field.widget === 'Group' || field.widget === 'Tabs' ? (
         <NestedCanvasPreview field={field} />
       ) : (
-        <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8 }}>
-          <Widget
-            field={field}
-            value={field.widget === 'Tags' ? [] : ''}
-            answer={{}}
-            payload={previewPayload}
-            readOnly
-            onChange={() => undefined}
-          />
+        <div style={{ padding: '0 16px 12px' }}>
+          <button
+            type="button"
+            aria-label={`toggle preview ${field.name}`}
+            aria-expanded={showPreview}
+            onClick={() => setShowPreview((value) => !value)}
+            style={previewToggleStyle}
+          >
+            {showPreview ? '▾ 收起控件预览' : '▸ 预览控件'}
+          </button>
+          {showPreview ? (
+            <div style={{ ...widgetPreviewStyle, opacity: selected ? 1 : 0.8, marginTop: 8 }}>
+              <Widget
+                field={field}
+                value={field.widget === 'Tags' || field.widget === 'MultiSelect' ? [] : ''}
+                answer={{}}
+                payload={previewPayload}
+                readOnly
+                onChange={() => undefined}
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </section>
@@ -562,12 +1003,51 @@ function NestedCanvasPreview({ field }: { field: DraftField }) {
   )
 }
 
+const NESTED_INPUT_HINT: Record<string, string> = {
+  Input: '单行输入…',
+  Textarea: '多行文本…',
+  RichText: '富文本编辑…',
+  JSON: '{ } JSON 编辑器',
+  FileUpload: '↑ 文件',
+  ImageUpload: '▧ 图片',
+}
+
+// 嵌套子字段的控件预览:把真实控件/选项铺出来,对齐 demo 的「饱满卡」观感
+function NestedFieldPreview({ child }: { child: FieldSchema }) {
+  if (isOptionWidget(child.widget) && child.options?.length) {
+    return (
+      <div className="canvas-options template-designer-option-row">
+        {child.options.map((option) => <span key={option} className="canvas-option">{option}</span>)}
+      </div>
+    )
+  }
+  if (child.widget === 'ShowItem') {
+    return (
+      <div style={nestedShowItemBoxStyle}>
+        {child.label || child.name} · 只读展示{child.path ? ` · ${child.path}` : ''}
+      </div>
+    )
+  }
+  if (child.widget === 'LLMTrigger') {
+    return (
+      <span style={nestedLlmBoxStyle}>
+        <Icon name="sparkle" size={12} />
+        LLM 触发组件
+      </span>
+    )
+  }
+  return <div style={nestedFieldBoxStyle}>{NESTED_INPUT_HINT[child.widget] ?? child.widget}</div>
+}
+
 function NestedCanvasRow({ child }: { child: FieldSchema }) {
   return (
     <div style={nestedCanvasRowStyle} aria-label={`nested field ${child.name}`}>
-      <span style={nestedCanvasWidgetStyle}>{child.widget}</span>
-      <strong>{child.name}</strong>
-      <span>{child.label}</span>
+      <div style={nestedCanvasRowHeadStyle}>
+        <span style={nestedCanvasWidgetStyle}>{child.widget}</span>
+        <strong>{child.name}</strong>
+        <span>{child.label}</span>
+      </div>
+      <NestedFieldPreview child={child} />
     </div>
   )
 }
@@ -608,6 +1088,8 @@ function PreviewItemStatus({ item, loading, loadError, parseError }: {
   return <div aria-label="preview_item_status" style={previewStatusStyle}>{text}</div>
 }
 
+type PropertyTab = 'basic' | 'validation' | 'logic'
+
 function PropertyPanel({ field, errors, fields, disabled, onChange }: {
   field: DraftField | null
   errors: DraftValidationError[]
@@ -615,6 +1097,21 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
   disabled: boolean
   onChange: (patch: Partial<FieldSchema>) => void
 }) {
+  const [activeTab, setActiveTab] = useState<PropertyTab>('basic')
+  // Advanced config (visibleWhen / customRule) only applies to answer-holding widgets.
+  const supportsAdvanced = field ? advancedConfigWidgets.includes(field.widget) : false
+
+  // Reset to 基础 whenever a different field is selected, so the panel never opens on an
+  // advanced tab that the newly selected widget cannot show. React-recommended
+  // "adjust state during render" pattern, avoids an effect-driven cascading render.
+  const lastDraftId = useRef<string | null>(field?._draftId ?? null)
+  if (lastDraftId.current !== (field?._draftId ?? null)) {
+    lastDraftId.current = field?._draftId ?? null
+    if (activeTab !== 'basic') {
+      setActiveTab('basic')
+    }
+  }
+
   if (!field) {
     return (
       <>
@@ -624,6 +1121,7 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
     )
   }
   const duplicateName = fields.some((candidate) => candidate._draftId !== field._draftId && candidate.name === field.name)
+  const currentTab = activeTab !== 'basic' && !supportsAdvanced ? 'basic' : activeTab
   return (
     <>
       <h2 style={subHeadingStyle}>属性</h2>
@@ -633,55 +1131,237 @@ function PropertyPanel({ field, errors, fields, disabled, onChange }: {
             {errors.map((item) => <div key={`${item.field}-${item.message}`}>{item.field}: {item.message}</div>)}
           </div>
         ) : null}
-        <label style={fieldStyle}>
-          name
-          <input aria-label="field_name" disabled={disabled} value={field.name} onChange={(event) => onChange({ name: event.target.value })} style={inputStyle} />
-        </label>
-        {duplicateName ? <span style={errorTextStyle}>name 已存在</span> : null}
-        <label style={fieldStyle}>
-          label
-          <input aria-label="field_label" disabled={disabled} value={field.label} onChange={(event) => onChange({ label: event.target.value })} style={inputStyle} />
-        </label>
-        <label style={checkboxRowStyle}>
-          <input aria-label="field_required" type="checkbox" disabled={disabled} checked={field.required === true} onChange={(event) => onChange({ required: event.target.checked })} />
-          required
-        </label>
-        {(field.widget === 'Input' || field.widget === 'TextArea') ? (
-          <LengthControls field={field} disabled={disabled} onChange={onChange} />
+        {supportsAdvanced ? (
+          <div role="tablist" aria-label="property tabs" style={propertyTabBarStyle}>
+            <PropertyTabButton tab="basic" current={currentTab} label="基础" onSelect={setActiveTab} />
+            <PropertyTabButton tab="validation" current={currentTab} label="校验" onSelect={setActiveTab} />
+            <PropertyTabButton tab="logic" current={currentTab} label="联动" onSelect={setActiveTab} />
+          </div>
         ) : null}
-        {(field.widget === 'Radio' || field.widget === 'Tags') ? (
-          <label style={fieldStyle}>
-            options
-            <textarea
-              aria-label="field_options"
-              disabled={disabled}
-              value={(field.options ?? []).join('\n')}
-              onChange={(event) => onChange({ options: parseOptionsInput(event.target.value) })}
-              style={textareaStyle}
-            />
-          </label>
+
+        {currentTab === 'basic' ? (
+          <div role="tabpanel" aria-label="property tab 基础" style={propertyStackStyle}>
+            <label style={fieldStyle}>
+              name
+              <input aria-label="field_name" disabled={disabled} value={field.name} onChange={(event) => onChange({ name: event.target.value })} style={inputStyle} />
+            </label>
+            {duplicateName ? <span style={errorTextStyle}>name 已存在</span> : null}
+            <label style={fieldStyle}>
+              label
+              <input aria-label="field_label" disabled={disabled} value={field.label} onChange={(event) => onChange({ label: event.target.value })} style={inputStyle} />
+            </label>
+            <label style={checkboxRowStyle}>
+              <input aria-label="field_required" type="checkbox" disabled={disabled} checked={field.required === true} onChange={(event) => onChange({ required: event.target.checked })} />
+              required
+            </label>
+            {(field.widget === 'Input' || field.widget === 'TextArea') ? (
+              <LengthControls field={field} disabled={disabled} onChange={onChange} />
+            ) : null}
+            {isOptionWidget(field.widget) ? (
+              <OptionsEditor key={field._draftId} field={field} disabled={disabled} onChange={onChange} />
+            ) : null}
+            {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
+            {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
+            {field.widget === 'Tabs' ? <TabsControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
+            {isUploadWidget(field.widget) ? (
+              <label style={fieldStyle}>
+                maxFiles
+                <input
+                  aria-label="field_max_files"
+                  disabled={disabled}
+                  type="number"
+                  min={1}
+                  value={field.maxFiles ?? 5}
+                  onChange={(event) => onChange({ maxFiles: positiveNumberInput(event.target.value, 1) })}
+                  style={inputStyle}
+                />
+              </label>
+            ) : null}
+            {field.widget === 'LLMTrigger' ? <LLMTriggerControls field={field} disabled={disabled} fields={fields} onChange={onChange} /> : null}
+          </div>
         ) : null}
-        {field.widget === 'ShowItem' ? <ShowItemControls field={field} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'Group' ? <GroupControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'Tabs' ? <TabsControls field={field} fields={fields} disabled={disabled} onChange={onChange} /> : null}
-        {field.widget === 'FileUpload' ? (
-          <label style={fieldStyle}>
-            maxFiles
-            <input
-              aria-label="field_max_files"
-              disabled={disabled}
-              type="number"
-              min={1}
-              value={field.maxFiles ?? 5}
-              onChange={(event) => onChange({ maxFiles: positiveNumberInput(event.target.value, 1) })}
-              style={inputStyle}
-            />
-          </label>
+
+        {currentTab === 'validation' ? (
+          <div role="tabpanel" aria-label="property tab 校验" style={propertyStackStyle}>
+            <CustomRuleControls field={field} disabled={disabled} onChange={onChange} />
+          </div>
         ) : null}
-        {field.widget === 'LLMTrigger' ? <LLMTriggerControls field={field} disabled={disabled} fields={fields} onChange={onChange} /> : null}
+
+        {currentTab === 'logic' ? (
+          <div role="tabpanel" aria-label="property tab 联动" style={propertyStackStyle}>
+            <VisibleWhenControls field={field} fields={fields} disabled={disabled} onChange={onChange} />
+          </div>
+        ) : null}
       </div>
     </>
   )
+}
+
+function PropertyTabButton({ tab, current, label, onSelect }: {
+  tab: PropertyTab
+  current: PropertyTab
+  label: string
+  onSelect: (tab: PropertyTab) => void
+}) {
+  const active = current === tab
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-label={`property_tab_${tab}`}
+      onClick={() => onSelect(tab)}
+      style={active ? propertyTabButtonActiveStyle : propertyTabButtonStyle}
+    >
+      {label}
+    </button>
+  )
+}
+
+function VisibleWhenControls({ field, fields, disabled, onChange }: {
+  field: DraftField
+  fields: DraftField[]
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  // Controlling field can be any OTHER answer-holding field (excludes self, ShowItem, LLMTrigger, Group, Tabs).
+  const candidates = fields.filter((candidate) => (
+    candidate._draftId !== field._draftId && advancedConfigWidgets.includes(candidate.widget)
+  ))
+  const visibleWhen = field.visibleWhen
+  const controllingField = visibleWhen?.field ?? ''
+  const usesNotEmpty = visibleWhen?.notEmpty === true
+  const equalsText = usesNotEmpty ? '' : equalsToText(visibleWhen)
+
+  function selectControllingField(nextField: string) {
+    if (!nextField) {
+      onChange({ visibleWhen: undefined })
+      return
+    }
+    // Default to equals='' so the schema is parser-valid the moment a field is chosen.
+    onChange({ visibleWhen: { field: nextField, equals: visibleWhen && !usesNotEmpty ? visibleWhen.equals : '' } })
+  }
+
+  function setMode(notEmpty: boolean) {
+    if (!controllingField) return
+    onChange({ visibleWhen: notEmpty ? { field: controllingField, notEmpty: true } : { field: controllingField, equals: '' } })
+  }
+
+  function setEquals(value: string) {
+    if (!controllingField) return
+    onChange({ visibleWhen: { field: controllingField, equals: value } })
+  }
+
+  return (
+    <div style={nestedEditorStyle}>
+      <span style={nestedEditorLabelStyle}>条件显示 (visibleWhen)</span>
+      <span style={hintTextStyle}>选择一个控制字段后, 仅当其值满足条件时才显示当前字段。清空控制字段即移除联动。</span>
+      <label style={fieldStyle}>
+        控制字段
+        <select
+          aria-label="visible_when_field"
+          disabled={disabled}
+          value={controllingField}
+          onChange={(event) => selectControllingField(event.target.value)}
+          style={inputStyle}
+        >
+          <option value="">（无, 始终显示）</option>
+          {candidates.map((candidate) => (
+            <option key={candidate._draftId} value={candidate.name}>{candidate.name}</option>
+          ))}
+        </select>
+      </label>
+      {controllingField ? (
+        <>
+          <label style={checkboxRowStyle}>
+            <input
+              aria-label="visible_when_not_empty"
+              type="checkbox"
+              disabled={disabled}
+              checked={usesNotEmpty}
+              onChange={(event) => setMode(event.target.checked)}
+            />
+            仅要求控制字段非空 (notEmpty)
+          </label>
+          {usesNotEmpty ? null : (
+            <label style={fieldStyle}>
+              等于该值 (equals)
+              <input
+                aria-label="visible_when_equals"
+                disabled={disabled}
+                value={equalsText}
+                onChange={(event) => setEquals(event.target.value)}
+                style={inputStyle}
+                placeholder="例如 reject"
+              />
+            </label>
+          )}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function CustomRuleControls({ field, disabled, onChange }: {
+  field: DraftField
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  const customRule = field.customRule
+  const expr = customRule?.expr ?? ''
+  const message = customRule?.message ?? ''
+  const parseHint = useMemo(() => {
+    if (!expr.trim()) return ''
+    try {
+      designerExprParser.parse(expr)
+      return ''
+    } catch (error) {
+      return error instanceof Error ? error.message : '表达式无法解析'
+    }
+  }, [expr])
+
+  function update(nextExpr: string, nextMessage: string) {
+    if (!nextExpr.trim() && !nextMessage.trim()) {
+      onChange({ customRule: undefined })
+      return
+    }
+    onChange({ customRule: { expr: nextExpr, message: nextMessage } })
+  }
+
+  return (
+    <div style={nestedEditorStyle}>
+      <span style={nestedEditorLabelStyle}>自定义校验 (customRule)</span>
+      <span style={hintTextStyle}>表达式为真即视为通过。可用变量: value, len(value), answer.&lt;字段名&gt;。运算符用 and / or / not, 例如 len(value) &lt;= 35。</span>
+      <label style={fieldStyle}>
+        表达式 (expr)
+        <textarea
+          aria-label="custom_rule_expr"
+          disabled={disabled}
+          value={expr}
+          onChange={(event) => update(event.target.value, message)}
+          style={textareaStyle}
+          placeholder='len(value) <= 35'
+        />
+      </label>
+      {parseHint ? <span aria-label="custom_rule_expr_hint" style={errorTextStyle}>表达式解析提示: {parseHint}</span> : null}
+      <label style={fieldStyle}>
+        错误提示 (message)
+        <input
+          aria-label="custom_rule_message"
+          disabled={disabled}
+          value={message}
+          onChange={(event) => update(expr, event.target.value)}
+          style={inputStyle}
+          placeholder="不能超过 35 个字符"
+        />
+      </label>
+    </div>
+  )
+}
+
+function equalsToText(visibleWhen: VisibleWhen | undefined): string {
+  if (!visibleWhen || !('equals' in visibleWhen) || visibleWhen.equals === undefined) return ''
+  return typeof visibleWhen.equals === 'string' ? visibleWhen.equals : String(visibleWhen.equals)
 }
 
 function LengthControls({ field, disabled, onChange }: {
@@ -899,7 +1579,7 @@ function NestedFieldsEditor({ label, fields, allFields, parentName, disabled, on
             />
             required
           </label>
-          {(child.widget === 'Radio' || child.widget === 'Tags') ? (
+          {isOptionWidget(child.widget) ? (
             <label style={fieldStyle}>
               child_options
               <textarea
@@ -961,9 +1641,9 @@ function createDefaultField(widget: WidgetType, current: DraftField[]): DraftFie
       { label: 'Tab 1', fields: [createNestedDefaultField(`${name}_tab1_input`, 'Input')] },
       { label: 'Tab 2', fields: [createNestedDefaultField(`${name}_tab2_text`, 'TextArea')] },
     ] } : {}),
-    ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
+    ...(isOptionWidget(widget) ? { options: ['pass', 'reject', 'uncertain'] } : {}),
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
-    ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
+    ...(isUploadWidget(widget) ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
   }, createDraftId())
 }
@@ -978,9 +1658,9 @@ function createNestedFieldForWidget(name: string, widget: WidgetType, label: str
     widget,
     label,
     required: false,
-    ...(widget === 'Radio' || widget === 'Tags' ? { options: ['pass', 'reject', 'uncertain'] } : {}),
+    ...(isOptionWidget(widget) ? { options: ['pass', 'reject', 'uncertain'] } : {}),
     ...(widget === 'ShowItem' ? { path: '$payload', mode: 'auto' as ShowItemMode } : {}),
-    ...(widget === 'FileUpload' ? { maxFiles: 3 } : {}),
+    ...(isUploadWidget(widget) ? { maxFiles: 3 } : {}),
     ...(widget === 'LLMTrigger' ? { target_field: name, prompt: '请根据 payload 和当前答案给出辅助建议。' } : {}),
   }, draftId)
 }
@@ -1063,7 +1743,7 @@ function attachDraftIdsToTab(tab: TabSchema): TabSchema {
 function normalizeFieldSchema(field: FieldSchema): FieldSchema {
   const next = { ...field }
   next.name = next.name.trim()
-  if (next.widget !== 'Radio' && next.widget !== 'Tags') {
+  if (!isOptionWidget(next.widget)) {
     delete next.options
   }
   if (next.widget !== 'Input' && next.widget !== 'TextArea') {
@@ -1080,12 +1760,18 @@ function normalizeFieldSchema(field: FieldSchema): FieldSchema {
   if (next.widget !== 'Tabs') {
     delete next.tabs
   }
-  if (next.widget !== 'FileUpload') {
+  if (!isUploadWidget(next.widget)) {
     delete next.maxFiles
   }
   if (next.widget !== 'LLMTrigger') {
     delete next.prompt
     delete next.target_field
+  }
+  if (!advancedConfigWidgets.includes(next.widget)) {
+    // visibleWhen / customRule only apply to answer-holding widgets; drop them when the
+    // widget is switched to a display/container type so stale rules don't survive.
+    delete next.visibleWhen
+    delete next.customRule
   }
   return next
 }
@@ -1123,6 +1809,9 @@ function stripDraftField(field: DraftField): FieldSchema {
   if (field.maxFiles !== undefined) result.maxFiles = field.maxFiles
   if (field.prompt !== undefined) result.prompt = field.prompt
   if (field.target_field !== undefined) result.target_field = field.target_field
+  if (field.visibleWhen !== undefined) result.visibleWhen = field.visibleWhen
+  if (field.customRule !== undefined) result.customRule = field.customRule
+  if (field.requiredWhen !== undefined) result.requiredWhen = field.requiredWhen
   if (field.fields !== undefined) result.fields = field.fields.map(stripFieldSchema)
   if (field.tabs !== undefined) {
     result.tabs = field.tabs.map((tab) => ({
@@ -1206,7 +1895,7 @@ function visitFieldsForValidation(fields: FieldSchema[], pathPrefix: string, nam
     } else {
       names.add(name)
     }
-    if ((field.widget === 'Radio' || field.widget === 'Tags') && (!field.options || field.options.length === 0)) {
+    if (isOptionWidget(field.widget) && (!field.options || field.options.length === 0)) {
       errors.push({ draftId, field: `${path}.options`, message: 'options must be non-empty' })
     }
     if (field.minLength !== undefined && field.maxLength !== undefined && field.minLength > field.maxLength) {
@@ -1283,6 +1972,34 @@ function parseOptionsInput(value: string): FieldOption[] {
   return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
 }
 
+// options 编辑器:用本地字符串态承接输入。之前 textarea 的受控值由「过滤后的 options 数组」
+// 反推(options.join('\n')),逐字打到换行/逗号时,产生的空白会被 parseOptionsInput 的
+// filter(Boolean) 即时过滤掉、分隔符被「吃」回去,导致无法输入第二个选项。本地态让用户自由
+// 输入(含尾随换行/逗号),仅在 onChange 时把过滤后的结果写回 schema。
+// 由 <OptionsEditor key={field._draftId}> 保证切换字段时重挂载、本地态用新字段的值刷新。
+function OptionsEditor({ field, disabled, onChange }: {
+  field: DraftField
+  disabled: boolean
+  onChange: (patch: Partial<FieldSchema>) => void
+}) {
+  const [text, setText] = useState(() => (field.options ?? []).join('\n'))
+  return (
+    <label style={fieldStyle}>
+      options
+      <textarea
+        aria-label="field_options"
+        disabled={disabled}
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value)
+          onChange({ options: parseOptionsInput(event.target.value) })
+        }}
+        style={textareaStyle}
+      />
+    </label>
+  )
+}
+
 const fallbackPreviewPayload: RenderPayload = {
   prompt: 'Preview payload',
   model_answer: 'Preview answer',
@@ -1347,35 +2064,6 @@ const panelStyle: CSSProperties = {
 const paletteStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-sm)',
-}
-
-const paletteButtonStyle: CSSProperties = {
-  justifyContent: 'stretch',
-  textAlign: 'left',
-  height: 'auto',
-  padding: 0,
-  borderColor: 'var(--color-node-border)',
-  background: 'var(--color-node-bg)',
-}
-
-const paletteButtonNodeStyle: CSSProperties = {
-  display: 'grid',
-  gap: 3,
-  width: '100%',
-  padding: 'var(--space-sm) var(--space-md)',
-  borderLeft: '3px solid var(--color-rail)',
-}
-
-const paletteWidgetCodeStyle: CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 10,
-  color: 'var(--color-text-muted)',
-  textTransform: 'uppercase',
-}
-
-const paletteWidgetLabelStyle: CSSProperties = {
-  color: 'var(--color-text)',
-  fontWeight: 600,
 }
 
 const canvasStyle: CSSProperties = {
@@ -1455,7 +2143,21 @@ const selectedCanvasItemStyle: CSSProperties = {
 const draggingCanvasItemStyle: CSSProperties = {
   ...selectedCanvasItemStyle,
   opacity: 0.6,
-  transform: 'scale(0.98)',
+}
+
+const dragOverlayStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: 'var(--space-sm) var(--space-md)',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-accent)',
+  background: 'var(--color-surface)',
+  boxShadow: 'var(--shadow-md)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  color: 'var(--color-accent)',
+  cursor: 'grabbing',
+  pointerEvents: 'none',
 }
 
 const canvasItemHeaderStyle: CSSProperties = {
@@ -1487,6 +2189,7 @@ const rightPortStyle: CSSProperties = {
 
 const fieldActionsStyle: CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
   gap: 8,
   alignItems: 'center',
 }
@@ -1508,6 +2211,16 @@ const selectFieldButtonStyle: CSSProperties = {
 
 const widgetPreviewStyle: CSSProperties = {
   padding: 'var(--space-lg)',
+}
+
+const previewToggleStyle: CSSProperties = {
+  padding: '3px 10px',
+  fontSize: 'var(--text-sm)',
+  color: 'var(--color-text-secondary)',
+  background: 'var(--color-surface)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
+  cursor: 'pointer',
 }
 
 const nestedCanvasPreviewStyle: CSSProperties = {
@@ -1532,16 +2245,50 @@ const nestedCanvasRowsStyle: CSSProperties = {
 }
 
 const nestedCanvasRowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '72px minmax(90px, 1fr) minmax(90px, 1fr)',
-  gap: 'var(--space-sm)',
-  alignItems: 'center',
-  padding: 'var(--space-xs) var(--space-sm)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 'var(--space-xs)',
+  padding: 'var(--space-sm)',
   border: '1px solid var(--color-border-light)',
   borderRadius: 'var(--radius-sm)',
   background: 'var(--color-bg)',
   color: 'var(--color-text-secondary)',
   fontSize: 'var(--text-sm)',
+}
+
+const nestedCanvasRowHeadStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '72px minmax(90px, 1fr) minmax(90px, 1fr)',
+  gap: 'var(--space-sm)',
+  alignItems: 'center',
+}
+
+const nestedFieldBoxStyle: CSSProperties = {
+  padding: '8px 12px',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--color-surface)',
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
+}
+
+const nestedShowItemBoxStyle: CSSProperties = {
+  ...nestedFieldBoxStyle,
+  background: 'var(--color-surface-subtle)',
+  color: 'var(--color-text-secondary)',
+}
+
+const nestedLlmBoxStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '8px 12px',
+  border: '1px dashed #722ed1',
+  borderRadius: 'var(--radius-sm)',
+  background: '#f5e8ff',
+  color: '#722ed1',
+  fontSize: 'var(--text-sm)',
+  width: 'fit-content',
 }
 
 const nestedCanvasWidgetStyle: CSSProperties = {
@@ -1592,6 +2339,38 @@ const textareaStyle: CSSProperties = {
 const propertyStackStyle: CSSProperties = {
   display: 'grid',
   gap: 'var(--space-lg)',
+}
+
+const propertyTabBarStyle: CSSProperties = {
+  display: 'flex',
+  gap: 'var(--space-xs)',
+  borderBottom: '1px solid var(--color-border-light)',
+}
+
+const propertyTabButtonStyle: CSSProperties = {
+  flex: 1,
+  border: 0,
+  borderBottom: '2px solid transparent',
+  background: 'transparent',
+  padding: 'var(--space-sm) 0',
+  color: 'var(--color-text-secondary)',
+  fontFamily: 'var(--font-body)',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 500,
+  cursor: 'pointer',
+}
+
+const propertyTabButtonActiveStyle: CSSProperties = {
+  ...propertyTabButtonStyle,
+  color: 'var(--color-accent)',
+  borderBottom: '2px solid var(--color-accent)',
+  fontWeight: 600,
+}
+
+const hintTextStyle: CSSProperties = {
+  color: 'var(--color-text-muted)',
+  fontSize: 'var(--text-sm)',
+  lineHeight: 1.5,
 }
 
 const nestedEditorStyle: CSSProperties = {
@@ -1650,6 +2429,15 @@ const jsonPreviewStyle: CSSProperties = {
   whiteSpace: 'pre-wrap',
   fontSize: 12,
   fontFamily: 'var(--font-mono)',
+}
+
+const formPreviewStyle: CSSProperties = {
+  padding: 'var(--space-md)',
+  border: '1px solid var(--color-border-light)',
+  borderRadius: 'var(--radius-md)',
+  background: 'var(--color-surface)',
+  maxHeight: 600,
+  overflow: 'auto',
 }
 
 const backLinkStyle: CSSProperties = {

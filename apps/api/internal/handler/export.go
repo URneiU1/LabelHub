@@ -35,7 +35,6 @@ func NewExportHandler(db *gorm.DB, downloadSecret string, ttl time.Duration) Exp
 }
 
 func (h ExportHandler) Register(api gin.IRouter) {
-	api.GET("/tasks/:taskId/export/json", middleware.RequireRoles("owner", "admin"), h.ExportJSON)
 	api.POST("/tasks/:taskId/exports", middleware.RequireRoles("owner", "admin"), h.CreateExport)
 	api.GET("/tasks/:taskId/exports", middleware.RequireRoles("owner", "admin"), h.ListExports)
 	api.GET("/tasks/:taskId/exports/:exportId/download-url", middleware.RequireRoles("owner", "admin"), h.DownloadURL)
@@ -44,26 +43,6 @@ func (h ExportHandler) Register(api gin.IRouter) {
 // RegisterPublic 挂在未鉴权的 api 组(签名 token 即鉴权)。
 func (h ExportHandler) RegisterPublic(api gin.IRouter) {
 	api.GET("/exports/download", h.Download)
-}
-
-func (h ExportHandler) ExportJSON(c *gin.Context) {
-	task, ok := loadOwnedTask(h.db, c)
-	if !ok {
-		return
-	}
-	claims, _ := middleware.Claims(c)
-	includeReviews := c.DefaultQuery("include_reviews", "false") == "true"
-
-	result, err := export.RunJSON(h.db, export.JSONInput{
-		Task:           task,
-		CreatedBy:      claims.UserID,
-		IncludeReviews: includeReviews,
-	})
-	if err != nil {
-		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to export task")
-		return
-	}
-	httpx.OK(c, gin.H{"task": result.Task, "rows": result.Rows, "include_reviews": result.IncludeReviews})
 }
 
 type createExportRequest struct {
@@ -78,12 +57,11 @@ func (h ExportHandler) CreateExport(c *gin.Context) {
 		return
 	}
 	var req createExportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid export request body")
+	if !bindLimitedJSON(c, &req, maxExportConfigBytes) {
 		return
 	}
 	if !exporter.SupportedFormat(req.Format) {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "format must be one of json, jsonl, csv, xlsx")
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "format must be one of json, jsonl, csv, xlsx, md")
 		return
 	}
 	var fieldMap *string

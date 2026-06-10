@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/auth"
+	"labelhub-api/internal/envutil"
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
@@ -123,7 +124,7 @@ func (h UploadHandler) Upload(c *gin.Context) {
 		return
 	}
 	key := storageKey(file.Filename) + ext
-	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
+	uploadDir := envutil.Default("UPLOAD_DIR", defaultUploadBaseDir)
 	dest := filepath.Join(uploadDir, strconv.FormatUint(taskID, 10), key)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to prepare upload dir")
@@ -163,8 +164,18 @@ func (h UploadHandler) canUploadToTask(claims *auth.Claims, task model.Task) (bo
 		return count > 0, err
 	}
 	if policy.HasRole(claims, policy.RoleReviewer) {
+		// Reviewer 必须先被指派到该 task(task_reviewers),否则任意 reviewer 都能
+		// 往任何处于 human_reviewing 的任务写文件(IDOR-write)。复用 canReviewTask
+		// 做绑定校验,再确认该任务确实有进行中的人工审核提交。
+		assigned, err := canReviewTask(h.db, claims, task)
+		if err != nil {
+			return false, err
+		}
+		if !assigned {
+			return false, nil
+		}
 		var count int64
-		err := h.db.Model(&model.Submission{}).
+		err = h.db.Model(&model.Submission{}).
 			Where("task_id = ? AND status = ?", task.ID, statemachine.StateHumanReviewing).
 			Count(&count).Error
 		return count > 0, err
@@ -173,13 +184,6 @@ func (h UploadHandler) canUploadToTask(claims *auth.Claims, task model.Task) (bo
 }
 
 // --- upload-internal helpers(被 s1_test.go 引用,故保留包级符号)---
-
-func envOrDefault(key string, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
 
 func allowedMIMEKeys() []string {
 	keys := make([]string, 0, len(allowedUploadMIME))
@@ -272,7 +276,7 @@ func (h UploadHandler) Download(c *gin.Context) {
 		return
 	}
 
-	uploadDir := envOrDefault("UPLOAD_DIR", defaultUploadBaseDir)
+	uploadDir := envutil.Default("UPLOAD_DIR", defaultUploadBaseDir)
 	dest := filepath.Join(uploadDir, strconv.FormatUint(uploaded.TaskID, 10), uploaded.StorageKey)
 	c.FileAttachment(dest, uploaded.OriginalName)
 }
@@ -294,7 +298,9 @@ func (h UploadHandler) canDownloadUpload(claims *auth.Claims, task model.Task, u
 		Where("submission_revisions.id = ? AND submissions.task_id = ? AND submissions.status IN ?",
 			*uploaded.SubmissionRevisionID,
 			task.ID,
-			[]string{statemachine.StateHumanReviewing, statemachine.StateApproved, statemachine.StateRejected},
+			// M-05:needs_arbitration 也要可下载,否则仲裁 reviewer 看不到冲突 submission 的证据附件。
+			// task 级 reviewer 授权仍由上面的 canReviewTask 把关。
+			[]string{statemachine.StateHumanReviewing, statemachine.StateNeedsArbitration, statemachine.StateApproved, statemachine.StateRejected},
 		).
 		Count(&count).Error
 	return count > 0, err

@@ -1,7 +1,7 @@
 # LabelHub · 评委交付包
 
 > 字节 AI 全栈挑战赛 · 数据标注平台 LabelHub
-> 提交人:Zhang Youchen(URneiU1) · 提交日期:2026-07-XX
+> 提交人:Zhang Youchen(URneiU1) · 提交日期:2026-06-10
 
 本目录是评委评估的入口。所有交付物都在这里,**评委无需阅读 `docs/` 下的开发文档**(那是 8 周开发流水)。
 
@@ -13,16 +13,17 @@
 |---|---|---|---|
 | 1 | 源码 Monorepo | 仓库根目录(`apps/` + `pkg/`) | 功能完备性 60% + 工程质量 25% |
 | 2 | 评委 README + 5 分钟评估路径 | 本文件 + [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | 产品体验 15% |
-| 3 | 演示视频(5-10 分钟) | [`assets/demo.mp4`](assets/) — *待录制* | 产品体验 15% |
-| 4 | 架构图 + 关键技术点 | [`ARCHITECTURE.md`](ARCHITECTURE.md) + [`assets/architecture.png`](assets/) | 工程质量 25% |
-| 5 | Demo 截图 | [`assets/screenshots/`](assets/) — *待截取* | 产品体验 15% |
-| 6 | AI Coding 过程记录(8-15 页 PDF) | [`assets/AI-Coding-Process.pdf`](assets/) — *待写*;原料 [`../docs/CHANGELOG.md`](../docs/CHANGELOG.md) | 工程质量 25%(附加) |
+| 3 | 演示视频脚本(5-10 分钟) | [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md);视频二进制由最终提交平台上传,不纳入 Git | 产品体验 15% |
+| 4 | 架构图 + 关键技术点 | [`ARCHITECTURE.md`](ARCHITECTURE.md)(含 Mermaid topology / 状态机 / outbox sequence) | 工程质量 25% |
+| 5 | Demo 截图 | [`assets/screenshots/`](assets/screenshots/) — 10 张主流程截图 + 1 张修复前问题证据已入库 | 产品体验 15% |
+| 6 | AI Coding 过程记录(8-15 页 PDF) | [`assets/AI-Coding-Process.pdf`](assets/AI-Coding-Process.pdf) + [`assets/AI-Coding-Process.md`](assets/AI-Coding-Process.md) | 工程质量 25%(附加) |
 | 7 | 部署说明 | [`DEPLOY.md`](DEPLOY.md) | 工程质量 25% |
 | 8 | API 文档 | [`api/openapi.yaml`](api/openapi.yaml) + [`api/postman_collection.json`](api/postman_collection.json) | 工程质量 25% |
 | 9 | 交付前 Code Review | [`CODE-REVIEW-FINAL.md`](CODE-REVIEW-FINAL.md) | 工程质量 25%(附加) |
-| 10 | License | [`LICENSE`](LICENSE) — MIT | — |
+| 10 | 课题要求完成度与超额项对照 | [`BEYOND-REQUIREMENTS.md`](BEYOND-REQUIREMENTS.md) — 逐条要求 vs 交付 + 答辩取舍说明 | 功能完备性 60%(答辩材料) |
+| 11 | License | [`LICENSE`](LICENSE) — MIT | — |
 
-> *待* 标注的三项(视频/截图/PDF)在最终提交前由作者补齐,本文档内置占位与说明。
+> 大体积视频文件不放入 Git 仓库;最终提交时按 [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) 录制并上传到比赛平台或外部附件。
 
 ---
 
@@ -59,14 +60,14 @@ make web       # 终端 C — http://localhost:5173
 
 打开浏览器到 http://localhost:5173 即可。
 
-### 评估账号(密码均为 `pass`)
+### 评估账号(密码均为 `123456`)
 
 | 用户名 | 角色 | 评估场景 |
 |---|---|---|
 | `owner1` | Owner | 任务配置 / 模板 Designer / AI Prompt / Golden Sample / Stats Board / 多格式导出 |
 | `labeler1` | Labeler | 任务广场领题 / 答题(支持 Group + Tabs + ShowItem + Radio + Tags + RichText + JSONEditor + FileUpload + LLMTrigger 9+2 物料)/ 草稿自动保存 / 提交 |
 | `reviewer1` | Reviewer | 审核队列 / AI verdict + 维度评分展示 / 规则查看 / 通过-打回-修订 / 批量审核 |
-| `admin` | Admin | 全局管理 |
+| `admin1` | Admin | 全局管理 |
 
 ### 5 分钟跑通三角色完整链路
 
@@ -113,7 +114,7 @@ React 18 + TS strict + Semi Design (SPA, 角色路由)
 
 | 维度 | 实现 |
 |---|---|
-| **状态机驱动** | 任务 4 态 + 提交 7 态,所有跃迁走 `internal/statemachine.Transitions()`,100% 单测覆盖 |
+| **状态机驱动** | 任务 4 态 + 提交 9 态(含仲裁与共识证据),所有跃迁走 `internal/statemachine.Transitions()`,100% 单测覆盖 |
 | **Outbox 一致性** | 业务事务同写 `outbox_events`,后台 publisher 用 `FOR UPDATE SKIP LOCKED` + deterministic Asynq TaskID 防双投 |
 | **AI 预审幂等** | Worker `complete()/failover()` 双锁 + `RowsAffected != 1` 守每个状态跃迁 |
 | **熔断 + 限流** | Provider 5xx 连续 20 次/5 分钟自动熔断;dry-run 走 task-scoped quota;登录 IP token bucket |
@@ -166,11 +167,10 @@ submission/
 │   ├── openapi.yaml          OpenAPI 3 主流程契约
 │   └── postman_collection.json   按 3 角色组织的请求集
 └── assets/
-    ├── README.md             视频/截图/PDF 占位说明
-    ├── demo.mp4              [待录制]
-    ├── architecture.png      [待渲染]
-    ├── AI-Coding-Process.pdf [待写]
-    └── screenshots/          [待截取]
+    ├── README.md             素材说明与最终提交检查
+    ├── AI-Coding-Process.md  AI Coding 过程源文件
+    ├── AI-Coding-Process.pdf AI Coding 过程 PDF
+    └── screenshots/          Owner/Designer/Labeler/Reviewer/Export 截图
 ```
 
 ## ❓ 联系

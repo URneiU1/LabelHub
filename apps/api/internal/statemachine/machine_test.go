@@ -12,14 +12,22 @@ func TestAllPlannedTransitions(t *testing.T) {
 		{StateDraft, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventEnqueue, StateAIReviewing},
 		{StateSubmitted, EventSkipAI, StateHumanReviewing},
-		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
-		{StateAIReviewing, EventAIAutoApproved, StateApproved},
+		{StateAIReviewing, EventAIUncertain, StateManualReview},
+		{StateAIReviewing, EventAIReject, StateRevising},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},
 		{StateHumanReviewing, EventApprove, StateApproved},
 		{StateHumanReviewing, EventReject, StateRejected},
 		{StateHumanReviewing, EventRevise, StateRevising},
+		{StateManualReview, EventApprove, StateHumanReviewing},
+		{StateManualReview, EventReject, StateRejected},
+		{StateManualReview, EventRevise, StateRevising},
 		{StateRevising, EventSubmit, StateSubmitted},
+		{StateSubmitted, EventConsensusConflict, StateNeedsArbitration},
+		{StateSubmitted, EventConsensusEvidence, StateConsensusEvidence},
+		{StateNeedsArbitration, EventApprove, StateApproved},
+		{StateNeedsArbitration, EventReject, StateRejected},
+		{StateSubmitted, EventSamplingAutoApproved, StateApproved},
 	}
 
 	for _, tt := range tests {
@@ -64,6 +72,7 @@ func TestInvalidTransitions(t *testing.T) {
 		{StateHumanReviewing, EventSubmit, StateSubmitted},
 		{StateApproved, EventRevise, StateRevising},
 		{StateRejected, EventSubmit, StateSubmitted},
+		{StateAIReviewing, EventAIDone, StateApproved},
 	}
 
 	for _, tt := range tests {
@@ -79,6 +88,9 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		StateSubmitted,
 		StateAIReviewing,
 		StateHumanReviewing,
+		StateManualReview,
+		StateNeedsArbitration,
+		StateConsensusEvidence,
 		StateApproved,
 		StateRejected,
 		StateRevising,
@@ -89,8 +101,11 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 		EventEnqueue,
 		EventSkipAI,
 		EventAIDone,
-		EventAIAutoApproved,
+		EventAIUncertain,
 		EventAIFailMax,
+		EventConsensusConflict,
+		EventConsensusEvidence,
+		EventSamplingAutoApproved,
 		EventApprove,
 		EventReject,
 		EventRevise,
@@ -114,8 +129,8 @@ func TestEveryStateRejectsAtLeastOneInvalidEvent(t *testing.T) {
 }
 
 func TestTransitionTableCoversPlan(t *testing.T) {
-	if got := len(Transitions()); got != 11 {
-		t.Fatalf("Transitions() len = %d, want 11", got)
+	if got := len(Transitions()); got != 21 {
+		t.Fatalf("Transitions() len = %d, want 21", got)
 	}
 }
 
@@ -131,13 +146,38 @@ func plannedTransitions() []plannedTransition {
 		{StateDraft, EventSubmit, StateSubmitted},
 		{StateSubmitted, EventEnqueue, StateAIReviewing},
 		{StateSubmitted, EventSkipAI, StateHumanReviewing},
-		{StateAIReviewing, EventAIDone, StateApproved},
 		{StateAIReviewing, EventAIDone, StateHumanReviewing},
-		{StateAIReviewing, EventAIAutoApproved, StateApproved},
+		{StateAIReviewing, EventAIUncertain, StateManualReview},
+		{StateAIReviewing, EventAIReject, StateRevising},
 		{StateAIReviewing, EventAIFailMax, StateHumanReviewing},
 		{StateHumanReviewing, EventApprove, StateApproved},
 		{StateHumanReviewing, EventReject, StateRejected},
 		{StateHumanReviewing, EventRevise, StateRevising},
+		{StateManualReview, EventApprove, StateHumanReviewing},
+		{StateManualReview, EventReject, StateRejected},
+		{StateManualReview, EventRevise, StateRevising},
 		{StateRevising, EventSubmit, StateSubmitted},
+		{StateSubmitted, EventConsensusConflict, StateNeedsArbitration},
+		{StateSubmitted, EventConsensusEvidence, StateConsensusEvidence},
+		{StateNeedsArbitration, EventApprove, StateApproved},
+		{StateNeedsArbitration, EventReject, StateRejected},
+		{StateSubmitted, EventSamplingAutoApproved, StateApproved},
+		{StateApproved, EventAcceptanceReopen, StateHumanReviewing},
+	}
+}
+
+func TestAcceptanceReopenTransition(t *testing.T) {
+	if !Can(StateApproved, EventAcceptanceReopen, StateHumanReviewing) {
+		t.Error("approved --acceptance_reopen--> human_reviewing should be allowed")
+	}
+	if err := Apply(StateApproved, EventAcceptanceReopen, StateHumanReviewing); err != nil {
+		t.Errorf("Apply approved->human_reviewing should succeed: %v", err)
+	}
+	// 验收打回绝不能把数据直接留在/推回 approved,也不能跳到其它终态。
+	if Can(StateApproved, EventAcceptanceReopen, StateApproved) {
+		t.Error("acceptance_reopen must not keep/return approved")
+	}
+	if Can(StateApproved, EventAcceptanceReopen, StateRejected) {
+		t.Error("acceptance_reopen must not jump to rejected")
 	}
 }

@@ -1,10 +1,19 @@
+# H-06 HTTPS:把 CADDY_SITE_ADDRESS 设为真实域名(如 labelhub.example.com)后,
+# Caddy 会自动签发并续期 Let's Encrypt 证书,并把 HTTP 自动 301 跳转到 HTTPS;
+# 此时下面的 HSTS 头才会真正生效(浏览器对明文 HTTP 上收到的 HSTS 一律忽略)。
+# 仅本地 compose 冒烟可保留 :80 明文,切勿把 :80 直接暴露公网做演示(见 docs/HTTPS_AND_HARDENING.md)。
 {$CADDY_SITE_ADDRESS} {
 	encode zstd gzip
+	request_body {
+		max_size 16MB
+	}
 
 	header {
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https: data:; media-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# 暂不加 preload:那是难以撤销的强承诺,等域名稳定后再单独评估并提交 preload 列表。
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
 

@@ -5,12 +5,23 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"labelhub-api/internal/customrule"
 )
 
 // allowedWidgets: S2 v1 锁定的核心物料,与前端 renderer/types.ts 保持一致。
 var allowedWidgets = map[string]struct{}{
-	"ShowItem": {}, "Group": {}, "Tabs": {}, "Input": {}, "TextArea": {}, "Radio": {}, "Tags": {},
-	"RichText": {}, "JSONEditor": {}, "FileUpload": {}, "LLMTrigger": {},
+	"ShowItem": {}, "Group": {}, "Tabs": {}, "Input": {}, "TextArea": {}, "Radio": {}, "MultiSelect": {}, "Tags": {},
+	"RichText": {}, "JSONEditor": {}, "FileUpload": {}, "ImageUpload": {}, "LLMTrigger": {},
+}
+
+var reservedTemplateFieldNames = map[string]struct{}{
+	"answer":      {},
+	"constructor": {},
+	"len":         {},
+	"prototype":   {},
+	"value":       {},
+	"__proto__":   {},
 }
 
 // ValidationError 是 POST /templates/:id/validate 响应里 errors[] 的单条结构。
@@ -58,6 +69,11 @@ func validateTemplateSchema(raw string) []ValidationError {
 			state.errs = append(state.errs, ValidationError{Field: condition.path + ".requiredWhen.field", Message: "requiredWhen.field must reference an existing field"})
 		}
 	}
+	for _, condition := range state.visibleWhenRefs {
+		if _, ok := state.fieldNames[condition.field]; !ok {
+			state.errs = append(state.errs, ValidationError{Field: condition.path + ".visibleWhen.field", Message: "visibleWhen.field must reference an existing field"})
+		}
+	}
 	return state.errs
 }
 
@@ -68,6 +84,7 @@ type templateValidationState struct {
 	fieldCount       int
 	llmTargets       []templateLLMTarget
 	requiredWhenRefs []templateRequiredWhenRef
+	visibleWhenRefs  []templateRequiredWhenRef
 }
 
 type templateLLMTarget struct {
@@ -114,6 +131,8 @@ func (state *templateValidationState) validateField(path string, f map[string]an
 	name := strings.TrimSpace(nameRaw)
 	if name == "" {
 		state.errs = append(state.errs, ValidationError{Field: path + ".name", Message: "name is required"})
+	} else if _, reserved := reservedTemplateFieldNames[name]; reserved {
+		state.errs = append(state.errs, ValidationError{Field: path + ".name", Message: "name is reserved"})
 	} else if _, dup := state.seenNames[name]; dup {
 		state.errs = append(state.errs, ValidationError{Field: path + ".name", Message: "duplicate name " + name})
 	} else {
@@ -144,7 +163,23 @@ func (state *templateValidationState) validateField(path string, f map[string]an
 		if !ok {
 			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen", Message: "requiredWhen must be an object"})
 		} else {
-			state.validateRequiredWhen(path, condition)
+			state.validateCondition(path, "requiredWhen", condition, &state.requiredWhenRefs)
+		}
+	}
+	if visibleWhenRaw, has := f["visibleWhen"]; has {
+		condition, ok := visibleWhenRaw.(map[string]any)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".visibleWhen", Message: "visibleWhen must be an object"})
+		} else {
+			state.validateCondition(path, "visibleWhen", condition, &state.visibleWhenRefs)
+		}
+	}
+	if customRuleRaw, has := f["customRule"]; has {
+		rule, ok := customRuleRaw.(map[string]any)
+		if !ok {
+			state.errs = append(state.errs, ValidationError{Field: path + ".customRule", Message: "customRule must be an object"})
+		} else {
+			state.validateCustomRule(path, rule)
 		}
 	}
 	minLen, hasMin, minOK := numericField(f, "minLength")
@@ -195,25 +230,45 @@ func (state *templateValidationState) validateField(path string, f map[string]an
 	}
 }
 
-func (state *templateValidationState) validateRequiredWhen(path string, condition map[string]any) {
+func (state *templateValidationState) validateCondition(path string, key string, condition map[string]any, refs *[]templateRequiredWhenRef) {
 	fieldRaw, hasField := condition["field"]
 	field, fieldOK := fieldRaw.(string)
 	field = strings.TrimSpace(field)
 	if !hasField || !fieldOK || field == "" {
-		state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen.field", Message: "field is required"})
+		state.errs = append(state.errs, ValidationError{Field: path + "." + key + ".field", Message: "field is required"})
 	} else {
-		state.requiredWhenRefs = append(state.requiredWhenRefs, templateRequiredWhenRef{path: path, field: field})
+		*refs = append(*refs, templateRequiredWhenRef{path: path, field: field})
 	}
 	if notEmptyRaw, hasNotEmpty := condition["notEmpty"]; hasNotEmpty {
 		if _, ok := notEmptyRaw.(bool); !ok {
-			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen.notEmpty", Message: "notEmpty must be bool"})
+			state.errs = append(state.errs, ValidationError{Field: path + "." + key + ".notEmpty", Message: "notEmpty must be bool"})
 		}
 	}
 	if _, hasEquals := condition["equals"]; !hasEquals {
 		notEmpty, _ := condition["notEmpty"].(bool)
 		if !notEmpty {
-			state.errs = append(state.errs, ValidationError{Field: path + ".requiredWhen", Message: "requiredWhen must set equals or notEmpty=true"})
+			state.errs = append(state.errs, ValidationError{Field: path + "." + key, Message: key + " must set equals or notEmpty=true"})
 		}
+	}
+}
+
+func (state *templateValidationState) validateCustomRule(path string, rule map[string]any) {
+	expr, exprOK := rule["expr"].(string)
+	expr = strings.TrimSpace(expr)
+	if !exprOK || expr == "" {
+		state.errs = append(state.errs, ValidationError{Field: path + ".customRule.expr", Message: "expr is required"})
+	} else if len(expr) > maxTemplateStringBytes {
+		state.errs = append(state.errs, ValidationError{Field: path + ".customRule.expr", Message: fmt.Sprintf("expr must be <= %d bytes", maxTemplateStringBytes)})
+	} else if _, err := customrule.Parse(expr); err != nil {
+		// 拒绝后端运行时无法强制的表达式:落库的 customRule 必须是 customrule 受支持子集,
+		// 否则提交时无法在服务端做等价校验(会形成绕过)。
+		state.errs = append(state.errs, ValidationError{Field: path + ".customRule.expr", Message: "expr uses unsupported syntax: " + strings.TrimPrefix(err.Error(), "customrule: ")})
+	}
+	message, messageOK := rule["message"].(string)
+	if !messageOK || strings.TrimSpace(message) == "" {
+		state.errs = append(state.errs, ValidationError{Field: path + ".customRule.message", Message: "message is required"})
+	} else if len(message) > maxTemplateStringBytes {
+		state.errs = append(state.errs, ValidationError{Field: path + ".customRule.message", Message: fmt.Sprintf("message must be <= %d bytes", maxTemplateStringBytes)})
 	}
 }
 
@@ -263,10 +318,10 @@ func validateTemplateFieldLimits(path string, f map[string]any, widget string) [
 		} else {
 			errs = append(errs, validateOptions(path, options)...)
 		}
-	} else if widget == "Radio" || widget == "Tags" {
+	} else if widget == "Radio" || widget == "MultiSelect" || widget == "Tags" {
 		errs = append(errs, ValidationError{Field: path + ".options", Message: "options must be non-empty"})
 	}
-	if widget == "FileUpload" {
+	if widget == "FileUpload" || widget == "ImageUpload" {
 		maxFiles, hasMaxFiles, ok := numericField(f, "maxFiles")
 		if hasMaxFiles && (!ok || maxFiles <= 0) {
 			errs = append(errs, ValidationError{Field: path + ".maxFiles", Message: "maxFiles must be > 0"})

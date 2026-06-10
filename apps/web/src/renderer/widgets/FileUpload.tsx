@@ -16,6 +16,7 @@ export default function FileUploadWidget({ field, value, runtime, readOnly, onCh
   const files = Array.isArray(value) ? value.map(String) : []
   const maxFiles = field.maxFiles ?? 5
   const disabled = readOnly || uploading || !runtime?.taskId || files.length >= maxFiles
+  const accept = field.widget === 'ImageUpload' ? 'image/*' : undefined
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -48,6 +49,7 @@ export default function FileUploadWidget({ field, value, runtime, readOnly, onCh
       <input
         aria-label={field.label}
         type="file"
+        accept={accept}
         disabled={disabled}
         onChange={(event) => void upload(event)}
       />

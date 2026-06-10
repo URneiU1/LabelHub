@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"labelhub-api/internal/auth"
+	"labelhub.local/llmreview"
 )
 
 // HIGH 1 回归:labeler 对 draft / paused / archived task 不能领新题。
@@ -182,6 +183,24 @@ func TestGetItem_LabelerCannotReadPeerClaimedItem(t *testing.T) {
 	}
 }
 
+func TestGetItem_OwnerBlockedFromLabelerModule(t *testing.T) {
+	db, mock, sqlDB := newMockDB(t)
+	defer sqlDB.Close()
+
+	r := newGinWithClaims(&auth.Claims{UserID: 10, Username: "owner1", Roles: []string{"owner"}})
+	registerAllHandlers(r, db)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/1/items/11", nil))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
 // HIGH 2 配套:reviewer 在没有 submission 的 item 上拿不到 raw payload。
 func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
@@ -213,13 +232,9 @@ func TestGetItem_ReviewerBlockedWithoutSubmission(t *testing.T) {
 	}
 }
 
-func TestReviewerQueueOwnerScopedToOwnTasks(t *testing.T) {
+func TestReviewerQueueRejectsOwnerRole(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
-
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. JOIN tasks ON tasks.id = submissions.task_id.+tasks.owner_id`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status"}).
-			AddRow(501, 1, 11, "human_reviewing"))
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)
@@ -227,8 +242,8 @@ func TestReviewerQueueOwnerScopedToOwnTasks(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reviewer/submissions", nil))
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -240,6 +255,7 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	defer sqlDB.Close()
 
 	now := time.Date(2026, 5, 26, 13, 0, 0, 0, time.UTC)
+	previousRevisionID := uint64(900)
 	revisionID := uint64(901)
 	verdict := "pass"
 	score := 92.5
@@ -250,6 +266,8 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
 			AddRow(1, 7, "商品标题清洗", "published"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "payload", "status"}).
 			AddRow(11, 1, `{"title":"raw"}`, "finished"))
@@ -258,7 +276,11 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 			AddRow(101, 1, 3, `{"title":"v3","fields":[]}`))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submission_revisions.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_no", "answer", "draft", "created_by"}).
-			AddRow(revisionID, 501, 1, `{"cleaned_title":"ok"}`, false, 8))
+			AddRow(revisionID, 501, 2, `{"cleaned_title":"ok"}`, false, 8))
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submission_revisions.`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_no", "answer", "draft", "created_by", "created_at"}).
+			AddRow(previousRevisionID, 501, 1, `{"cleaned_title":"old"}`, false, 8, now.Add(-time.Hour)).
+			AddRow(revisionID, 501, 2, `{"cleaned_title":"ok"}`, false, 8, now))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key", "prompt_version", "verdict", "overall_score", "dimensions", "reason", "raw_response", "tokens_input", "tokens_output", "latency_ms", "status", "retry_count", "created_at"}).
 			AddRow(31, 501, revisionID, "abc", 2, verdict, score, `[{"name":"相关性","score":92}]`, "looks good", `{"ok":true}`, 100, 20, 1420, "succeeded", 1, now))
@@ -271,8 +293,11 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .human_reviews.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "reviewer_id", "stage", "verdict", "reason", "created_at"}).
 			AddRow(81, 501, revisionID, 7, "first", "revise", "上一轮意见", now))
+	// 派生 reviewStage 的 approve 计数(当前 revision 已有 1 条 approve → 复审/second)。
+	mock.ExpectQuery(`(?is)^SELECT revision_id, COUNT\(\*\) AS total FROM .human_reviews.`).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id", "total"}).AddRow(revisionID, 1))
 
-	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
 	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
@@ -282,6 +307,9 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 	data := responseData(t, rec)
+	if data["reviewStage"] != "final" || data["reviewLevel"] != float64(2) || data["requiredLevels"] != float64(2) {
+		t.Fatalf("reviewStage/level/required = %v/%v/%v", data["reviewStage"], data["reviewLevel"], data["requiredLevels"])
+	}
 	aiReview := data["aiReview"].(map[string]any)
 	if aiReview["reason"] != "looks good" {
 		t.Fatalf("aiReview.reason = %v", aiReview["reason"])
@@ -301,6 +329,13 @@ func TestReviewerDetailIncludesAIReviewAndAuditLogs(t *testing.T) {
 	latestHumanReview := data["latestHumanReview"].(map[string]any)
 	if latestHumanReview["reason"] != "上一轮意见" {
 		t.Fatalf("latestHumanReview = %v", latestHumanReview)
+	}
+	revisionHistory := data["revisionHistory"].([]any)
+	if len(revisionHistory) != 2 {
+		t.Fatalf("revisionHistory length = %d, want 2 (%v)", len(revisionHistory), revisionHistory)
+	}
+	if revisionHistory[0].(map[string]any)["answer"] != `{"cleaned_title":"old"}` || revisionHistory[1].(map[string]any)["answer"] != `{"cleaned_title":"ok"}` {
+		t.Fatalf("revisionHistory answers = %v", revisionHistory)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations not met: %v", err)
@@ -395,7 +430,7 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 	defer sqlDB.Close()
 
 	revisionID := uint64(901)
-	key := reviewerAIReviewIdempotencyKey(501, revisionID, 41, 2)
+	key := llmreview.AIReviewIdempotencyKey(501, revisionID, 41, 2)
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
@@ -404,6 +439,8 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "title", "status"}).
 			AddRow(1, 7, "商品标题清洗", "published"))
+	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .ai_reviews.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key", "prompt_version", "status", "retry_count"}).
 			AddRow(31, 501, revisionID, key, 2, "dead", 5))
@@ -420,7 +457,7 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(91, 1))
 	mock.ExpectCommit()
 
-	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
+	r := newGinWithClaims(&auth.Claims{UserID: 5, Username: "reviewer1", Roles: []string{"reviewer"}})
 	registerAllHandlers(r, db)
 
 	rec := httptest.NewRecorder()
@@ -445,18 +482,6 @@ func TestRetryAIReviewRequeuesFailedReview(t *testing.T) {
 func TestReviewSubmissionOwnerCannotReviewOtherTask(t *testing.T) {
 	db, mock, sqlDB := newMockDB(t)
 	defer sqlDB.Close()
-
-	revisionID := uint64(901)
-	mock.ExpectBegin()
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
-			AddRow(501, 1, 11, "human_reviewing", revisionID))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id"}).AddRow(1, 99))
-	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions.+FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "item_id", "status", "current_revision_id"}).
-			AddRow(501, 1, 11, "human_reviewing", revisionID))
-	mock.ExpectRollback()
 
 	r := newGinWithClaims(&auth.Claims{UserID: 7, Username: "owner1", Roles: []string{"owner"}})
 	registerAllHandlers(r, db)
@@ -490,6 +515,8 @@ func TestBatchReviewAppliesApproveForSelectedSubmissions(t *testing.T) {
 			AddRow(501, 1, 11, "human_reviewing", revisionID))
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 已有 2 条 approve → batch approve 这一条触发终审,落到 approved。
+	expectReviewApproveCounts(mock, 2, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(71, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions.`).

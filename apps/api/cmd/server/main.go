@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,7 @@ import (
 
 	"labelhub-api/internal/auth"
 	"labelhub-api/internal/db"
+	"labelhub-api/internal/envutil"
 	"labelhub-api/internal/handler"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
@@ -55,6 +57,11 @@ func main() {
 	}
 
 	r := gin.New()
+	// 配置可信反向代理,使 c.ClientIP() 只在直连方为可信代理时才采信 X-Forwarded-For;
+	// 否则公网客户端可伪造 XFF 绕过按 IP 的登录限流。
+	if err := r.SetTrustedProxies(trustedProxies()); err != nil {
+		logger.Fatal("invalid TRUSTED_PROXIES", zap.Error(err))
+	}
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS())
@@ -84,6 +91,7 @@ func main() {
 	handler.NewAIPromptHandler(database).Register(authedAPI)
 	handler.NewGoldenSampleHandler(database).Register(authedAPI)
 	handler.NewAIDryRunHandler(database).Register(authedAPI)
+	handler.NewAcceptanceHandler(database).Register(authedAPI)
 
 	port := serverPort()
 	logger.Info("API server starting", zap.String("port", port))
@@ -100,6 +108,7 @@ func healthResponse(c *gin.Context) {
 	})
 }
 
+// newLogger 与 ai-worker 的同名工厂保持一致(两者是独立 module,internal 无法跨 module 共享)。
 func newLogger() (*zap.Logger, error) {
 	if os.Getenv("GIN_MODE") == "debug" {
 		return zap.NewDevelopment()
@@ -121,6 +130,7 @@ func serverPort() string {
 // mustAbsExportDir 校验 EXPORT_DIR 为绝对路径并返回它。
 // api 与 worker 从不同工作目录启动(见 Makefile),相对路径会各自解析到不同目录,
 // 导致 worker 写入的文件 api 下载时 base 不匹配,safeExportPath 永远 403。
+// 与 ai-worker 的同名函数保持一致(独立 module,不能跨 module 复用)。
 func mustAbsExportDir() string {
 	dir := os.Getenv("EXPORT_DIR")
 	if dir == "" {
@@ -143,7 +153,7 @@ func exportDownloadTTL() time.Duration {
 }
 
 func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
-	if envOrDefault("OUTBOX_PUBLISHER_ENABLED", "true") == "false" {
+	if envutil.Default("OUTBOX_PUBLISHER_ENABLED", "true") == "false" {
 		logger.Info("outbox publisher disabled")
 		return
 	}
@@ -160,18 +170,28 @@ func startOutboxPublisher(ctx context.Context, database *gorm.DB, logger *zap.Lo
 }
 
 func redisAddr() string {
-	return net.JoinHostPort(envOrDefault("REDIS_HOST", "localhost"), envOrDefault("REDIS_PORT", "6379"))
+	return net.JoinHostPort(envutil.Default("REDIS_HOST", "localhost"), envutil.Default("REDIS_PORT", "6379"))
 }
 
-func envOrDefault(key string, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// trustedProxies 返回 Gin 信任的反向代理网段。默认只信任回环 + 私有网段
+// (Caddy / 容器网络所在),从而忽略公网客户端伪造的 X-Forwarded-For,避免
+// 按 IP 的登录限流被绕过;部署在其它拓扑时用 TRUSTED_PROXIES(逗号分隔 CIDR/IP)覆盖。
+func trustedProxies() []string {
+	if raw := os.Getenv("TRUSTED_PROXIES"); raw != "" {
+		parts := strings.Split(raw, ",")
+		proxies := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				proxies = append(proxies, trimmed)
+			}
+		}
+		return proxies
 	}
-	return fallback
+	return []string{"127.0.0.1/32", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
 }
 
 func outboxInterval() time.Duration {
-	ms, err := strconv.Atoi(envOrDefault("OUTBOX_POLL_INTERVAL_MS", "1000"))
+	ms, err := strconv.Atoi(envutil.Default("OUTBOX_POLL_INTERVAL_MS", "1000"))
 	if err != nil || ms <= 0 {
 		return time.Second
 	}
@@ -179,7 +199,7 @@ func outboxInterval() time.Duration {
 }
 
 func outboxBatch() int {
-	batch, err := strconv.Atoi(envOrDefault("OUTBOX_BATCH", "20"))
+	batch, err := strconv.Atoi(envutil.Default("OUTBOX_BATCH", "20"))
 	if err != nil || batch <= 0 {
 		return 20
 	}
@@ -187,7 +207,7 @@ func outboxBatch() int {
 }
 
 func startAIReviewSweeper(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
-	if envOrDefault("AI_REVIEW_SWEEPER_ENABLED", "true") == "false" {
+	if envutil.Default("AI_REVIEW_SWEEPER_ENABLED", "true") == "false" {
 		logger.Info("ai review sweeper disabled")
 		return
 	}
@@ -197,7 +217,7 @@ func startAIReviewSweeper(ctx context.Context, database *gorm.DB, logger *zap.Lo
 }
 
 func aiReviewSweeperInterval() time.Duration {
-	ms, err := strconv.Atoi(envOrDefault("AI_REVIEW_SWEEPER_INTERVAL_MS", "60000"))
+	ms, err := strconv.Atoi(envutil.Default("AI_REVIEW_SWEEPER_INTERVAL_MS", "60000"))
 	if err != nil || ms <= 0 {
 		return time.Minute
 	}
@@ -205,7 +225,7 @@ func aiReviewSweeperInterval() time.Duration {
 }
 
 func aiReviewStallTimeout() time.Duration {
-	ms, err := strconv.Atoi(envOrDefault("AI_REVIEW_STALL_TIMEOUT_MS", "300000"))
+	ms, err := strconv.Atoi(envutil.Default("AI_REVIEW_STALL_TIMEOUT_MS", "300000"))
 	if err != nil || ms <= 0 {
 		return 5 * time.Minute
 	}
@@ -213,7 +233,7 @@ func aiReviewStallTimeout() time.Duration {
 }
 
 func aiReviewSweeperBatch() int {
-	batch, err := strconv.Atoi(envOrDefault("AI_REVIEW_SWEEPER_BATCH", "20"))
+	batch, err := strconv.Atoi(envutil.Default("AI_REVIEW_SWEEPER_BATCH", "20"))
 	if err != nil || batch <= 0 {
 		return 20
 	}
@@ -221,7 +241,7 @@ func aiReviewSweeperBatch() int {
 }
 
 func startOrphanTempFileCleaner(ctx context.Context, database *gorm.DB, logger *zap.Logger) {
-	if envOrDefault("ORPHAN_TEMP_FILE_CLEANER_ENABLED", "true") == "false" {
+	if envutil.Default("ORPHAN_TEMP_FILE_CLEANER_ENABLED", "true") == "false" {
 		logger.Info("orphan temp file cleaner disabled")
 		return
 	}
@@ -241,7 +261,7 @@ func startOrphanTempFileCleaner(ctx context.Context, database *gorm.DB, logger *
 					logger.Warn("failed to query orphan temp files", zap.Error(err))
 					continue
 				}
-				uploadDir := envOrDefault("UPLOAD_DIR", "./data/uploads")
+				uploadDir := envutil.Default("UPLOAD_DIR", "./data/uploads")
 				for _, f := range orphans {
 					dest := filepath.Join(uploadDir, strconv.FormatUint(f.TaskID, 10), f.StorageKey)
 					if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
@@ -287,7 +307,7 @@ func claimOrphanTempFiles(ctx context.Context, database *gorm.DB, cutoff time.Ti
 }
 
 func orphanTempFileCleanerInterval() time.Duration {
-	ms, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_INTERVAL_MS", "3600000"))
+	ms, err := strconv.Atoi(envutil.Default("ORPHAN_TEMP_FILE_CLEANER_INTERVAL_MS", "3600000"))
 	if err != nil || ms <= 0 {
 		return time.Hour
 	}
@@ -295,7 +315,7 @@ func orphanTempFileCleanerInterval() time.Duration {
 }
 
 func orphanTempFileCleanerBatch() int {
-	batch, err := strconv.Atoi(envOrDefault("ORPHAN_TEMP_FILE_CLEANER_BATCH", "100"))
+	batch, err := strconv.Atoi(envutil.Default("ORPHAN_TEMP_FILE_CLEANER_BATCH", "100"))
 	if err != nil || batch <= 0 {
 		return 100
 	}

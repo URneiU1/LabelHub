@@ -4,8 +4,9 @@ import { Toast } from '@douyinfe/semi-ui'
 import { apiGet, apiPostRawJSON } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import StatusBadge from '../../shared/components/StatusBadge'
+import { isSafeURL } from '../../shared/security/url'
 
-type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx'
+type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx' | 'md'
 
 type ExportRecord = {
   id: number
@@ -19,7 +20,7 @@ type ExportListResponse = { exports: ExportRecord[] }
 type CreateExportResponse = { id: number, status: string }
 type DownloadURLResponse = { url: string, expiresIn: number }
 
-const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx']
+const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx', 'md']
 const BASE_COLUMNS = ['submission_id', 'item_id', 'external_id', 'payload', 'answer']
 const REVIEW_COLUMNS = ['ai_review.verdict', 'ai_review.overall_score', 'ai_review.reason', 'human_review.verdict', 'human_review.reason']
 const POLL_INTERVAL_MS = 2000
@@ -93,7 +94,13 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
   async function download(id: number) {
     try {
       const data = await apiGet<DownloadURLResponse>(`/tasks/${taskId}/exports/${id}/download-url`)
-      window.open(data.url, '_blank')
+      // 后端返回的下载地址在打开前必须校验协议(http/https),并加 noopener,noreferrer
+      // 防止 javascript: 等恶意协议执行,以及新标签页反向操纵 opener。
+      if (!isSafeURL(data.url)) {
+        Toast.error('下载链接无效')
+        return
+      }
+      window.open(data.url, '_blank', 'noopener,noreferrer')
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '获取下载链接失败')
     }
@@ -103,6 +110,7 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
     <section style={panelStyle} aria-label="数据导出">
       <h3 style={headingStyle}>数据导出</h3>
 
+      <div id="ex-config">
       <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-md)' }}>
         {FORMATS.map((f) => (
           <button
@@ -152,7 +160,8 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
         {creating ? '导出入队中…' : '开始导出'}
       </button>
 
-      <table style={tableStyle}>
+      </div>
+      <table id="ex-history" style={tableStyle}>
         <thead>
           <tr>
             <th style={thStyle}>ID</th>
@@ -197,21 +206,21 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
 }
 
 const panelStyle: CSSProperties = {
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
+  background: 'var(--lh-bg-card)',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-lg)',
   padding: 'var(--space-lg)',
   marginTop: 'var(--space-lg)',
 }
-const headingStyle: CSSProperties = { fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
-const hintStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }
+const headingStyle: CSSProperties = { fontFamily: 'var(--lh-font-sans)', fontSize: 'var(--text-h2)', margin: 0, marginBottom: 'var(--space-md)' }
+const hintStyle: CSSProperties = { fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }
 const switchRowStyle: CSSProperties = { display: 'flex', gap: 'var(--space-xs)', alignItems: 'center', fontSize: 'var(--text-sm)' }
-const formatStyle: CSSProperties = { padding: '4px 14px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', cursor: 'pointer' }
-const formatActiveStyle: CSSProperties = { ...formatStyle, background: 'var(--color-accent)', color: '#fff', borderColor: 'var(--color-accent)' }
-const renameInputStyle: CSSProperties = { flex: 1, padding: '4px 8px', border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)' }
-const primaryButtonStyle: CSSProperties = { padding: '8px 20px', border: 'none', borderRadius: 'var(--radius-md)', background: 'var(--color-accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }
+const formatStyle: CSSProperties = { padding: '4px 14px', border: '1px solid var(--lh-border)', borderRadius: 'var(--radius-md)', background: 'var(--lh-bg)', cursor: 'pointer' }
+const formatActiveStyle: CSSProperties = { ...formatStyle, background: 'var(--lh-primary)', color: '#fff', borderColor: 'var(--lh-primary)' }
+const renameInputStyle: CSSProperties = { flex: 1, padding: '4px 8px', border: '1px solid var(--lh-border)', borderRadius: 'var(--radius-sm)' }
+const primaryButtonStyle: CSSProperties = { padding: '8px 20px', border: 'none', borderRadius: 'var(--radius-md)', background: 'var(--lh-primary)', color: '#fff', cursor: 'pointer', fontWeight: 600 }
 const tableStyle: CSSProperties = { width: '100%', marginTop: 'var(--space-lg)', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }
-const thStyle: CSSProperties = { textAlign: 'left', padding: '6px 8px', borderBottom: '2px solid var(--color-border-light)', color: 'var(--color-text-secondary)' }
-const tdStyle: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--color-border-light)' }
-const errorTextStyle: CSSProperties = { color: 'var(--color-danger)', fontSize: 'var(--text-xs)' }
-const linkButtonStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', textDecoration: 'underline', padding: 0 }
+const thStyle: CSSProperties = { textAlign: 'left', padding: '6px 8px', borderBottom: '2px solid var(--lh-border)', color: 'var(--lh-text-2)' }
+const tdStyle: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--lh-border)' }
+const errorTextStyle: CSSProperties = { color: 'var(--lh-danger)', fontSize: 'var(--text-xs)' }
+const linkButtonStyle: CSSProperties = { background: 'none', border: 'none', color: 'var(--lh-primary)', cursor: 'pointer', textDecoration: 'underline', padding: 0 }

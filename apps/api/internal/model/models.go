@@ -46,27 +46,32 @@ func (RefreshToken) TableName() string { return "refresh_tokens" }
 // 3. tasks
 // ============================================================
 type Task struct {
-	ID                  uint64     `gorm:"primaryKey" json:"id"`
-	OwnerID             uint64     `json:"ownerId"`
-	Title               string     `gorm:"size:200" json:"title"`
-	Description         NullString `json:"description"`
-	RichDescription     *string    `gorm:"type:json" json:"richDescription"`
-	Tags                *string    `gorm:"type:json" json:"tags"`
-	RewardConfig        *string    `gorm:"type:json" json:"rewardConfig"`
-	BaselineDescription NullString `json:"baselineDescription"`
-	Status              string     `gorm:"default:draft" json:"status"`
-	TemplateID          *uint64    `json:"templateId"`
-	Distribution        string     `gorm:"default:first_come" json:"distribution"`
-	QuotaPerUser        int        `json:"quotaPerUser"`
-	AIReviewEnabled     bool       `gorm:"default:false" json:"aiReviewEnabled"`
-	HumanReviewEnabled  bool       `gorm:"default:true" json:"humanReviewEnabled"`
-	AIPromptID          *uint64    `gorm:"column:ai_prompt_id" json:"aiPromptId"`
-	TotalItems          int        `json:"totalItems"`
-	FinishedItems       int        `json:"finishedItems"`
-	Deadline            NullTime   `json:"deadline"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
-	PublishedAt         NullTime   `json:"publishedAt"`
+	ID                             uint64     `gorm:"primaryKey" json:"id"`
+	OwnerID                        uint64     `json:"ownerId"`
+	Title                          string     `gorm:"size:200" json:"title"`
+	Description                    NullString `json:"description"`
+	RichDescription                *string    `gorm:"type:json" json:"richDescription"`
+	Tags                           *string    `gorm:"type:json" json:"tags"`
+	RewardConfig                   *string    `gorm:"type:json" json:"rewardConfig"`
+	BaselineDescription            NullString `json:"baselineDescription"`
+	Status                         string     `gorm:"default:draft" json:"status"`
+	TemplateID                     *uint64    `json:"templateId"`
+	Distribution                   string     `gorm:"default:first_come" json:"distribution"`
+	QuotaPerUser                   int        `json:"quotaPerUser"`
+	OverlapCount                   int        `gorm:"default:1" json:"overlapCount"`
+	OverlapCoveragePct             int        `json:"overlapCoveragePct"`
+	LeaseTimeoutMinutes            int        `gorm:"default:30" json:"leaseTimeoutMinutes"`
+	ReviewSamplingPct              int        `gorm:"default:100" json:"reviewSamplingPct"`
+	DailySubmissionLimitPerLabeler int        `json:"dailySubmissionLimitPerLabeler"`
+	AIReviewEnabled                bool       `gorm:"default:false" json:"aiReviewEnabled"`
+	HumanReviewEnabled             bool       `json:"humanReviewEnabled"`
+	AIPromptID                     *uint64    `gorm:"column:ai_prompt_id" json:"aiPromptId"`
+	TotalItems                     int        `json:"totalItems"`
+	FinishedItems                  int        `json:"finishedItems"`
+	Deadline                       NullTime   `json:"deadline"`
+	CreatedAt                      time.Time  `json:"createdAt"`
+	UpdatedAt                      time.Time  `json:"updatedAt"`
+	PublishedAt                    NullTime   `json:"publishedAt"`
 }
 
 // ============================================================
@@ -171,6 +176,7 @@ type AIReview struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
 	SubmissionID   uint64     `json:"submissionId"`
 	RevisionID     uint64     `json:"revisionId"`
+	PromptConfigID uint64     `gorm:"column:prompt_config_id" json:"promptConfigId"`
 	IdempotencyKey string     `gorm:"uniqueIndex;size:64" json:"idempotencyKey"`
 	PromptVersion  int        `json:"promptVersion"`
 	Verdict        *string    `json:"verdict"`
@@ -185,6 +191,7 @@ type AIReview struct {
 	RetryCount     int        `json:"retryCount"`
 	ErrorMsg       NullString `json:"errorMsg"`
 	CreatedAt      time.Time  `json:"createdAt"`
+	StartedAt      NullTime   `json:"startedAt"`
 	FinishedAt     NullTime   `json:"finishedAt"`
 }
 
@@ -203,6 +210,8 @@ type HumanReview struct {
 	Reason       NullString `json:"reason"`
 	Patch        *string    `gorm:"type:json" json:"patch"`
 	CreatedAt    time.Time  `json:"createdAt"`
+	// SupersededAt:被数据验收打回(独立重审)时作废本行,使其不再计入 approve 级数。NULL = 仍有效。
+	SupersededAt NullTime `json:"supersededAt"`
 }
 
 func (HumanReview) TableName() string { return "human_reviews" }
@@ -340,3 +349,35 @@ type OutboxEvent struct {
 }
 
 func (OutboxEvent) TableName() string { return "outbox_events" }
+
+// ============================================================
+// 19. acceptance_batches / acceptance_spot_checks
+// ============================================================
+
+// AcceptanceBatch 是一次 Owner 数据验收:对某任务当前已通过数据的快照批次。
+type AcceptanceBatch struct {
+	ID            uint64     `gorm:"primaryKey" json:"id"`
+	TaskID        uint64     `json:"taskId"`
+	Status        string     `gorm:"default:pending" json:"status"`
+	ApprovedCount int        `json:"approvedCount"`
+	Note          NullString `json:"note"`
+	DecidedBy     *uint64    `json:"decidedBy"`
+	DecidedAt     NullTime   `json:"decidedAt"`
+	CreatedBy     uint64     `json:"createdBy"`
+	CreatedAt     time.Time  `json:"createdAt"`
+}
+
+func (AcceptanceBatch) TableName() string { return "acceptance_batches" }
+
+// AcceptanceSpotCheck 是验收批次内对单条已通过提交的抽检记录(ok / flag)。
+type AcceptanceSpotCheck struct {
+	ID           uint64     `gorm:"primaryKey" json:"id"`
+	BatchID      uint64     `json:"batchId"`
+	SubmissionID uint64     `json:"submissionId"`
+	Result       string     `json:"result"`
+	Note         NullString `json:"note"`
+	CheckedBy    uint64     `json:"checkedBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+}
+
+func (AcceptanceSpotCheck) TableName() string { return "acceptance_spot_checks" }

@@ -126,13 +126,9 @@ services:
       - api
 
   asynqmon:
-    build:
-      context: ./asynqmon
+    image: hibiken/asynqmon:latest
     restart: unless-stopped
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
-    entrypoint: ["sh", "-c"]
-    command: ["asynqmon --redis-addr=redis:6379 --redis-password=\"$$REDIS_PASSWORD\" --port=8080"]
+    command: ["--redis-addr=redis:6379", "--redis-password=${REDIS_PASSWORD:?set REDIS_PASSWORD}", "--port=8080"]
     depends_on:
       redis:
         condition: service_healthy

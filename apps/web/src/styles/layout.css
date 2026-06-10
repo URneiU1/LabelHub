@@ -1,0 +1,117 @@
+/* ============================================================
+   多列工作台外壳的响应式收敛。
+   桌面保持各模块原有列宽不变;≤1024px(平板/窄屏)收成单列,
+   避免固定多列在窄视口横向溢出。与 Designer.css 的断点策略一致。
+   ============================================================ */
+
+.lh-app-layout {
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+.lh-app-sider {
+  width: 240px;
+  flex: 0 0 240px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border-light);
+  z-index: 10;
+}
+
+.lh-app-main {
+  min-width: 0;
+}
+
+.lh-app-header {
+  height: 48px;
+  padding: 0 var(--space-xl);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.lh-app-header-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.lh-app-content {
+  padding: var(--space-xl);
+  overflow: auto;
+}
+
+.lh-shell-2col {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+.lh-shell-3col {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 240px;
+  gap: var(--space-sm);
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .lh-shell-2col,
+  .lh-shell-3col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .lh-app-layout {
+    flex-direction: column !important;
+  }
+
+  .lh-app-main {
+    width: 100% !important;
+    flex: 0 0 auto !important;
+  }
+
+  .lh-app-sider {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    flex: 0 0 auto !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--color-border-light);
+  }
+
+  .lh-app-header {
+    height: auto;
+    min-height: 48px;
+    padding: var(--space-sm) var(--space-md);
+    flex-wrap: wrap;
+  }
+
+  .lh-app-header-meta {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .lh-app-content {
+    padding: var(--space-lg) var(--space-md);
+  }
+
+  .lh-page-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: start !important;
+  }
+
+  .lh-page-header-title {
+    min-width: 0;
+  }
+
+  .lh-page-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}

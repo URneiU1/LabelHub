@@ -1,11 +1,8 @@
 package submission
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"gorm.io/gorm"
 
@@ -49,7 +46,7 @@ func buildAIReviewPlan(tx *gorm.DB, task model.Task, sub model.Submission, revis
 	if !llmreview.AllowedModelName(prompt.Model) {
 		return aiReviewPlan{}, ErrInvalidAIPrompt
 	}
-	key := aiReviewIdempotencyKey(sub.ID, revision.ID, prompt.ID, prompt.Version)
+	key := llmreview.AIReviewIdempotencyKey(sub.ID, revision.ID, prompt.ID, prompt.Version)
 	payload, err := json.Marshal(aiReviewTaskPayload{
 		SubmissionID:   sub.ID,
 		RevisionID:     revision.ID,
@@ -76,6 +73,7 @@ func createPendingAIReview(tx *gorm.DB, sub model.Submission, revision model.Sub
 	review := model.AIReview{
 		SubmissionID:   sub.ID,
 		RevisionID:     revision.ID,
+		PromptConfigID: plan.PromptID,
 		IdempotencyKey: plan.IdempotencyKey,
 		PromptVersion:  plan.PromptVersion,
 		Status:         "pending",
@@ -102,9 +100,4 @@ func createAIReviewOutbox(tx *gorm.DB, plan aiReviewPlan) error {
 		Payload: plan.Payload,
 		Status:  "pending",
 	}).Error
-}
-
-func aiReviewIdempotencyKey(submissionID uint64, revisionID uint64, promptID uint64, promptVersion int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d", submissionID, revisionID, promptID, promptVersion)))
-	return hex.EncodeToString(sum[:])
 }

@@ -33,37 +33,79 @@ export default function LLMTriggerWidget({ field, value, answer, payload, readOn
 
   return (
     <FieldFrame label={field.label} required={field.required}>
-      {readOnly ? null : (
-        <button type="button" disabled={loading} style={buttonStyle} onClick={() => void run()}>
-          {loading ? '运行中' : '运行 AI 预审'}
-        </button>
-      )}
-      {error ? <span role="alert" style={errorStyle}>{error}</span> : null}
-      {displayValue ? <pre style={resultStyle}>{String(displayValue)}</pre> : null}
+      <div style={cardStyle}>
+        <div style={headStyle}>
+          <span style={titleStyle}>✦ {field.label || 'AI 建议清洗'}</span>
+          {!readOnly && displayValue ? (
+            <button type="button" disabled={loading} style={regenStyle} onClick={() => void run()}>
+              {loading ? '生成中' : '重新生成'}
+            </button>
+          ) : null}
+        </div>
+        {error ? <span role="alert" style={errorStyle}>{error}</span> : null}
+        {displayValue ? <div style={resultStyle}>{String(displayValue)}</div> : null}
+        {readOnly ? null : (
+          <button type="button" disabled={loading} style={acceptStyle} onClick={() => void run()}>
+            {loading ? '运行中' : '运行 AI 预审'}
+          </button>
+        )}
+      </div>
     </FieldFrame>
   )
 }
 
-const buttonStyle: CSSProperties = {
-  width: 'fit-content',
-  minHeight: 36,
-  padding: '0 var(--space-md)',
-  border: '1px solid var(--color-border)',
-  background: 'var(--color-surface)',
-  fontFamily: 'var(--font-body)',
+const cardStyle: CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  background: 'var(--lh-purple-soft)',
+  border: '1.5px dashed var(--lh-purple)',
+  borderRadius: 'var(--lh-radius-lg)',
+  padding: '16px 18px',
+}
+
+const headStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--space-sm)',
+}
+
+const titleStyle: CSSProperties = {
+  color: 'var(--lh-purple)',
+  fontWeight: 600,
+  fontSize: 'var(--text-base)',
+}
+
+const regenStyle: CSSProperties = {
+  marginLeft: 'auto',
+  background: '#fff',
+  border: '1px solid var(--lh-border)',
+  borderRadius: 'var(--lh-radius)',
+  padding: '4px 12px',
+  fontSize: 12,
+  color: 'var(--lh-text-2)',
   cursor: 'pointer',
 }
 
 const resultStyle: CSSProperties = {
-  margin: 'var(--space-sm) 0 0',
-  padding: 'var(--space-sm)',
-  border: '1px solid var(--color-border-light)',
-  background: 'var(--color-bg)',
+  fontSize: 13,
+  color: 'var(--lh-text-1)',
+  lineHeight: 1.7,
   whiteSpace: 'pre-wrap',
-  lineHeight: 1.6,
+}
+
+const acceptStyle: CSSProperties = {
+  justifySelf: 'start',
+  background: 'var(--lh-purple)',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 'var(--lh-radius)',
+  padding: '9px 18px',
+  fontWeight: 500,
+  fontFamily: 'var(--font-body)',
+  cursor: 'pointer',
 }
 
 const errorStyle: CSSProperties = {
-  color: 'var(--color-danger, #b42318)',
+  color: 'var(--lh-danger)',
   fontSize: 'var(--text-sm)',
 }

@@ -63,7 +63,12 @@ func Run(ctx context.Context, db *sql.DB, exportID uint64, baseDir string) error
 		if errors.Is(runErr, errTransient) {
 			return runErr
 		}
-		markExportFailed(ctx, db, exportID, runErr)
+		if markErr := markExportFailed(ctx, db, exportID, runErr); markErr != nil {
+			// Couldn't record the failure (transient DB issue). Return a retryable error so the
+			// worker retries instead of SkipRetry-ing on ErrTerminal, which would strand the
+			// export in 'running' forever with no download link and no error message.
+			return fmt.Errorf("exporter: mark export %d failed: %w", exportID, markErr)
+		}
 		return fmt.Errorf("%w: %w", ErrTerminal, runErr)
 	}
 
@@ -130,11 +135,17 @@ func encodeToFile(ctx context.Context, db *sql.DB, taskID uint64, format string,
 	return RunResult{FilePath: absPath, FileSize: uint64(info.Size()), RowCount: rowCount}, nil
 }
 
-func markExportFailed(ctx context.Context, db *sql.DB, exportID uint64, cause error) {
-	_, _ = db.ExecContext(ctx,
+// markExportFailed marks the export 'failed' (sanitized error). Returns an error if the status
+// UPDATE itself fails so the caller can fall back to a retryable error instead of stranding the
+// export in 'running'. The audit write stays best-effort.
+func markExportFailed(ctx context.Context, db *sql.DB, exportID uint64, cause error) error {
+	if _, err := db.ExecContext(ctx,
 		`UPDATE exports SET status='failed', error_msg=?, finished_at=NOW() WHERE id = ?`,
-		sanitizeExportError(cause), exportID)
+		sanitizeExportError(cause), exportID); err != nil {
+		return err
+	}
 	writeExportAudit(ctx, db, exportID, "failed", "failed", map[string]any{"error": sanitizeExportError(cause)})
+	return nil
 }
 
 // writeExportAudit 尽力写一条 audit_logs(失败不影响导出结果,best-effort)。

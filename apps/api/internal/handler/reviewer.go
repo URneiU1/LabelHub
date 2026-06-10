@@ -1,12 +1,10 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,12 +33,14 @@ func NewReviewerHandler(db *gorm.DB) ReviewerHandler {
 }
 
 func (h ReviewerHandler) Register(api gin.IRouter) {
-	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerQueue)
-	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerDetail)
-	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewerAIPrompts)
-	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "owner", "admin"), h.RetryAIReview)
-	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "owner", "admin"), h.ReviewSubmission)
-	api.POST("/reviews/batch", middleware.RequireRoles("reviewer", "owner", "admin"), h.BatchReview)
+	api.GET("/reviewer/submissions", middleware.RequireRoles("reviewer", "admin"), h.ReviewerQueue)
+	api.GET("/reviewer/results", middleware.RequireRoles("reviewer", "admin"), h.ReviewerResults)
+	api.GET("/reviewer/ai-reviews", middleware.RequireRoles("reviewer", "admin"), h.AIReviewQueue)
+	api.GET("/reviewer/submissions/:submissionId", middleware.RequireRoles("reviewer", "admin"), h.ReviewerDetail)
+	api.GET("/reviewer/tasks/:taskId/ai-prompts", middleware.RequireRoles("reviewer", "admin"), h.ReviewerAIPrompts)
+	api.POST("/reviewer/submissions/:submissionId/ai-review/retry", middleware.RequireRoles("reviewer", "admin"), h.RetryAIReview)
+	api.POST("/submissions/:submissionId/review", middleware.RequireRoles("reviewer", "admin"), h.ReviewSubmission)
+	api.POST("/reviews/batch", middleware.RequireRoles("reviewer", "admin"), h.BatchReview)
 }
 
 type reviewRequest struct {
@@ -57,6 +57,7 @@ type batchReviewRequest struct {
 type batchReviewResult struct {
 	SubmissionID uint64  `json:"submissionId"`
 	Status       string  `json:"status,omitempty"`
+	Stage        string  `json:"stage,omitempty"`
 	Error        *string `json:"error,omitempty"`
 }
 
@@ -124,7 +125,37 @@ type retryAIReviewResponse struct {
 }
 
 var reviewerQueueAllowedStatuses = map[string]struct{}{
-	statemachine.StateHumanReviewing: {},
+	statemachine.StateHumanReviewing:   {},
+	statemachine.StateManualReview:     {},
+	statemachine.StateNeedsArbitration: {},
+}
+
+// reviewStageInfo 暴露 submission 当前所处的人工审核级别给前端展示初审/复审/终审。
+type reviewStageInfo struct {
+	ReviewStage    string `json:"reviewStage"`    // first / second / final
+	ReviewLevel    int    `json:"reviewLevel"`    // 1 / 2
+	RequiredLevels int    `json:"requiredLevels"` // 固定 2(初审 → 终审)
+}
+
+// reviewerQueueItem:queue 里每条 submission 附带其当前 stage。
+type reviewerQueueItem struct {
+	model.Submission
+	reviewStageInfo
+}
+
+// finalizedReviewStatuses:/reviewer/results 暴露的已定稿状态。
+var finalizedReviewStatuses = []string{statemachine.StateApproved, statemachine.StateRejected}
+
+// reviewerResultItem:review 结果列表的单行。
+type reviewerResultItem struct {
+	ID           uint64    `json:"id"`
+	TaskID       uint64    `json:"taskId"`
+	ItemID       uint64    `json:"itemId"`
+	Status       string    `json:"status"`
+	FinalVerdict *string   `json:"finalVerdict"`
+	ReviewerID   *uint64   `json:"reviewerId"`
+	AIScore      *float64  `json:"aiScore"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 var (
@@ -141,8 +172,8 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 	status := c.DefaultQuery("status", statemachine.StateHumanReviewing)
 	if _, ok := reviewerQueueAllowedStatuses[status]; !ok {
 		httpx.ErrorWithDetails(c, http.StatusForbidden, "FORBIDDEN",
-			"reviewer queue only exposes human_reviewing",
-			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing}})
+			"reviewer queue only exposes reviewable submissions",
+			gin.H{"requested": status, "allowed": []string{statemachine.StateHumanReviewing, statemachine.StateManualReview, statemachine.StateNeedsArbitration}})
 		return
 	}
 	claims, _ := middleware.Claims(c)
@@ -158,7 +189,176 @@ func (h ReviewerHandler) ReviewerQueue(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review queue")
 		return
 	}
-	httpx.PageOK(c, submissions, httpx.Page{})
+	approveCounts, err := h.approveCountsByRevision(submissions)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to compute review stage")
+		return
+	}
+	items := make([]reviewerQueueItem, 0, len(submissions))
+	for _, submission := range submissions {
+		items = append(items, reviewerQueueItem{
+			Submission:      submission,
+			reviewStageInfo: stageInfoFor(submission, approveCounts),
+		})
+	}
+	httpx.PageOK(c, items, httpx.Page{})
+}
+
+// approveCountsByRevision 一次性查出 queue 内所有 submission 当前 revision 的 approve 数,避免 N+1。
+// key = current_revision_id。
+func (h ReviewerHandler) approveCountsByRevision(submissions []model.Submission) (map[uint64]int, error) {
+	revisionIDs := make([]uint64, 0, len(submissions))
+	for _, submission := range submissions {
+		if submission.CurrentRevisionID != nil {
+			revisionIDs = append(revisionIDs, *submission.CurrentRevisionID)
+		}
+	}
+	counts := map[uint64]int{}
+	if len(revisionIDs) == 0 {
+		return counts, nil
+	}
+	type row struct {
+		RevisionID uint64
+		Total      int
+	}
+	var rows []row
+	if err := h.db.Model(&model.HumanReview{}).
+		Select("revision_id, COUNT(*) AS total").
+		Where("revision_id IN ? AND verdict = ? AND superseded_at IS NULL", revisionIDs, "approve").
+		Group("revision_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		counts[r.RevisionID] = r.Total
+	}
+	return counts, nil
+}
+
+// stageInfoFor 由 approve 计数派生 submission 当前所处 stage。无 revision 时退回初审。
+func stageInfoFor(submission model.Submission, approveCounts map[uint64]int) reviewStageInfo {
+	count := 0
+	if submission.CurrentRevisionID != nil {
+		count = approveCounts[*submission.CurrentRevisionID]
+	}
+	stage, level := review.StageForApproveCount(count)
+	return reviewStageInfo{
+		ReviewStage:    stage,
+		ReviewLevel:    level,
+		RequiredLevels: review.RequiredHumanReviewLevels,
+	}
+}
+
+// ReviewerResults 列出已定稿(approved / rejected)的 submission,作为审核结果列表。
+// 可见性与 ReviewerQueue 完全一致(admin 全量;reviewer 仅其被 task_reviewers 授权的 task)。
+// 按 updated_at DESC 排序,id 作为游标键(updated_at 非唯一,以 id 兜底稳定翻页)。
+func (h ReviewerHandler) ReviewerResults(c *gin.Context) {
+	claims, _ := middleware.Claims(c)
+	limit := httpx.CursorLimit(c)
+
+	query := h.db.Model(&model.Submission{}).Where("submissions.status IN ?", finalizedReviewStatuses)
+	var scoped bool
+	query, scoped = applyReviewQueueScope(query, claims)
+	if !scoped {
+		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "review queue access denied")
+		return
+	}
+	if cursor := strings.TrimSpace(c.Query("cursor")); cursor != "" {
+		cursorTs, cursorID, err := parseResultsCursor(cursor)
+		if err != nil {
+			httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid cursor")
+			return
+		}
+		// Composite cursor matched to the (updated_at DESC, id DESC) sort. An id-only cursor would
+		// skip and duplicate rows because finalized submissions' updated_at (finalization order)
+		// diverges from id (creation order).
+		query = query.Where("submissions.updated_at < ? OR (submissions.updated_at = ? AND submissions.id < ?)", cursorTs, cursorTs, cursorID)
+	}
+
+	var submissions []model.Submission
+	// 多取一条用于判定 has_more。
+	if err := query.Order("submissions.updated_at DESC, submissions.id DESC").Limit(limit + 1).Find(&submissions).Error; err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list review results")
+		return
+	}
+	page := httpx.Page{}
+	if len(submissions) > limit {
+		submissions = submissions[:limit]
+		page.HasMore = true
+		last := submissions[len(submissions)-1]
+		page.NextCursor = formatResultsCursor(last.UpdatedAt, last.ID)
+	}
+	finalReviewers, err := h.finalReviewerBySubmission(submissions)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load review results")
+		return
+	}
+	items := make([]reviewerResultItem, 0, len(submissions))
+	for _, submission := range submissions {
+		item := reviewerResultItem{
+			ID:           submission.ID,
+			TaskID:       submission.TaskID,
+			ItemID:       submission.ItemID,
+			Status:       submission.Status,
+			FinalVerdict: submission.HumanVerdict,
+			AIScore:      submission.AIScore,
+			UpdatedAt:    submission.UpdatedAt,
+		}
+		if reviewerID, ok := finalReviewers[submission.ID]; ok {
+			value := reviewerID
+			item.ReviewerID = &value
+		}
+		items = append(items, item)
+	}
+	httpx.PageOK(c, items, page)
+}
+
+// formatResultsCursor / parseResultsCursor encode the (updated_at, id) tuple as an opaque
+// "<unixMillis>_<id>" token so ReviewerResults pagination stays aligned with its sort order.
+func formatResultsCursor(updatedAt time.Time, id uint64) string {
+	return strconv.FormatInt(updatedAt.UnixMilli(), 10) + "_" + strconv.FormatUint(id, 10)
+}
+
+func parseResultsCursor(cursor string) (time.Time, uint64, error) {
+	parts := strings.SplitN(cursor, "_", 2)
+	if len(parts) != 2 {
+		return time.Time{}, 0, errors.New("malformed cursor")
+	}
+	ms, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	id, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return time.Time{}, 0, err
+	}
+	return time.UnixMilli(ms).UTC(), id, nil
+}
+
+// finalReviewerBySubmission 取每条 submission 最近一次 human_review 的 reviewer_id
+// (即作出终态决定的人)。一次查询拉回全部行后在内存里取每个 submission 的首行(已按时间倒序)。
+func (h ReviewerHandler) finalReviewerBySubmission(submissions []model.Submission) (map[uint64]uint64, error) {
+	out := map[uint64]uint64{}
+	if len(submissions) == 0 {
+		return out, nil
+	}
+	submissionIDs := make([]uint64, 0, len(submissions))
+	for _, submission := range submissions {
+		submissionIDs = append(submissionIDs, submission.ID)
+	}
+	var reviews []model.HumanReview
+	if err := h.db.
+		Where("submission_id IN ?", submissionIDs).
+		Order("submission_id ASC, created_at DESC, id DESC").
+		Find(&reviews).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range reviews {
+		if _, seen := out[r.SubmissionID]; !seen {
+			out[r.SubmissionID] = r.ReviewerID
+		}
+	}
+	return out, nil
 }
 
 func (h ReviewerHandler) ReviewerDetail(c *gin.Context) {
@@ -208,8 +408,7 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 		return
 	}
 	var req reviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "verdict is required")
+	if !bindLimitedJSON(c, &req, maxReviewJSONBytes) {
 		return
 	}
 	if (req.Verdict == "reject" || req.Verdict == "revise") && len(strings.TrimSpace(req.Reason)) < 5 {
@@ -237,6 +436,8 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission has no revision")
 		case errors.Is(err, review.ErrForbidden):
 			httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "reviewer is not assigned to this task")
+		case errors.Is(err, review.ErrDuplicateReviewerApproval):
+			httpx.Error(c, http.StatusConflict, "CONFLICT", "this reviewer already approved the current revision; another reviewer is required")
 		case errors.Is(err, review.ErrConcurrentWrite):
 			httpx.Error(c, http.StatusConflict, "CONFLICT", "submission changed during review, please reload")
 		default:
@@ -245,13 +446,16 @@ func (h ReviewerHandler) ReviewSubmission(c *gin.Context) {
 		return
 	}
 
-	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status})
+	httpx.OK(c, gin.H{"submission_id": result.SubmissionID, "status": result.Status, "stage": result.Stage})
 }
 
+// BatchReview 对一批 submission 逐个调用 review.Apply。
+// 多级审核语义:batch approve 每次只把每条 submission advance 一级
+// (初审→复审→终审),要凑满 RequiredHumanReviewLevels 级需要多次调用。
+// reject / revise 仍是一次到终态。每条结果带回 status + stage。
 func (h ReviewerHandler) BatchReview(c *gin.Context) {
 	var req batchReviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "submission_ids and verdict are required")
+	if !bindLimitedJSON(c, &req, maxReviewJSONBytes) {
 		return
 	}
 	submissionIDs, ok := normalizeBatchReviewIDs(c, req.SubmissionIDs)
@@ -279,7 +483,7 @@ func (h ReviewerHandler) BatchReview(c *gin.Context) {
 			summary.Failed++
 			continue
 		}
-		results = append(results, batchReviewResult{SubmissionID: result.SubmissionID, Status: result.Status})
+		results = append(results, batchReviewResult{SubmissionID: result.SubmissionID, Status: result.Status, Stage: result.Stage})
 		summary.Succeeded++
 	}
 	httpx.OK(c, gin.H{"results": results, "summary": summary})
@@ -316,11 +520,13 @@ func batchReviewErrorMessage(err error) string {
 	case errors.Is(err, review.ErrSubmissionNotFound):
 		return "submission not found"
 	case errors.Is(err, review.ErrInvalidTransition):
-		return "submission is not human_reviewing"
+		return "submission is not reviewable"
 	case errors.Is(err, review.ErrNoRevision):
 		return "submission has no revision"
 	case errors.Is(err, review.ErrForbidden):
 		return "reviewer is not assigned to this task"
+	case errors.Is(err, review.ErrDuplicateReviewerApproval):
+		return "this reviewer already approved the current revision; another reviewer is required"
 	case errors.Is(err, review.ErrConcurrentWrite):
 		return "submission changed during review, please reload"
 	default:
@@ -377,40 +583,40 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 			return errAIRetryForbidden
 		}
 
-			var aiReviewRecord model.AIReview
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("submission_id = ? AND revision_id = ?", submission.ID, *submission.CurrentRevisionID).
-				Order("created_at DESC, id DESC").
-				First(&aiReviewRecord).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return errAIRetryNoReview
-				}
-				return err
+		var aiReviewRecord model.AIReview
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("submission_id = ? AND revision_id = ?", submission.ID, *submission.CurrentRevisionID).
+			Order("created_at DESC, id DESC").
+			First(&aiReviewRecord).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAIRetryNoReview
 			}
-			if aiReviewRecord.Status != "failed" && aiReviewRecord.Status != "dead" {
-				return errAIRetryReviewState
-			}
+			return err
+		}
+		if aiReviewRecord.Status != "failed" && aiReviewRecord.Status != "dead" {
+			return errAIRetryReviewState
+		}
 
-			var prompt model.AIPromptConfig
-			if err := tx.Where("task_id = ? AND version = ?", task.ID, aiReviewRecord.PromptVersion).First(&prompt).Error; err != nil {
-				return errAIRetryPromptInvalid
-			}
-			if !llmreview.AllowedModelName(prompt.Model) {
-				return errAIRetryPromptInvalid
-			}
-			key := reviewerAIReviewIdempotencyKey(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version)
-			if key != aiReviewRecord.IdempotencyKey {
-				return errAIRetryKeyMismatch
-			}
-			payload, err := reviewerAIReviewTaskPayload(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version, key)
-			if err != nil {
-				return err
-			}
+		var prompt model.AIPromptConfig
+		if err := tx.Where("task_id = ? AND version = ?", task.ID, aiReviewRecord.PromptVersion).First(&prompt).Error; err != nil {
+			return errAIRetryPromptInvalid
+		}
+		if !llmreview.AllowedModelName(prompt.Model) {
+			return errAIRetryPromptInvalid
+		}
+		key := llmreview.AIReviewIdempotencyKey(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version)
+		if key != aiReviewRecord.IdempotencyKey {
+			return errAIRetryKeyMismatch
+		}
+		payload, err := reviewerAIReviewTaskPayload(submission.ID, *submission.CurrentRevisionID, prompt.ID, prompt.Version, key)
+		if err != nil {
+			return err
+		}
 
-			if err := tx.Model(&model.AIReview{}).
-				Where("id = ? AND status IN ?", aiReviewRecord.ID, []string{"failed", "dead"}).
-				Updates(map[string]any{
-					"status":        "pending",
+		if err := tx.Model(&model.AIReview{}).
+			Where("id = ? AND status IN ?", aiReviewRecord.ID, []string{"failed", "dead"}).
+			Updates(map[string]any{
+				"status":        "pending",
 				"verdict":       nil,
 				"overall_score": nil,
 				"dimensions":    nil,
@@ -425,19 +631,19 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 			}).Error; err != nil {
 			return err
 		}
-			result := tx.Model(&model.Submission{}).
-				Where("id = ? AND status = ? AND current_revision_id = ?", submission.ID, statemachine.StateHumanReviewing, *submission.CurrentRevisionID).
-				Updates(map[string]any{
-					"status":     statemachine.StateAIReviewing,
-					"ai_verdict": nil,
-					"ai_score":   nil,
-				})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return review.ErrConcurrentWrite
-			}
+		result := tx.Model(&model.Submission{}).
+			Where("id = ? AND status = ? AND current_revision_id = ?", submission.ID, statemachine.StateHumanReviewing, *submission.CurrentRevisionID).
+			Updates(map[string]any{
+				"status":     statemachine.StateAIReviewing,
+				"ai_verdict": nil,
+				"ai_score":   nil,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return review.ErrConcurrentWrite
+		}
 		if err := tx.Create(&model.OutboxEvent{
 			Topic:   "ai:review",
 			Payload: payload,
@@ -453,28 +659,28 @@ func (h ReviewerHandler) retryAIReview(submissionID uint64, claims *auth.Claims)
 			ActorType:  "user",
 			ActorID:    &claims.UserID,
 			Event:      "ai_retry",
-				Payload: map[string]any{
-					"ai_review_id":    aiReviewRecord.ID,
-					"idempotency_key": key,
-					"prompt_version":  prompt.Version,
-				},
+			Payload: map[string]any{
+				"ai_review_id":    aiReviewRecord.ID,
+				"idempotency_key": key,
+				"prompt_version":  prompt.Version,
+			},
 		}); err != nil {
 			return err
 		}
 
-			aiReviewRecord.Status = "pending"
-			aiReviewRecord.Verdict = nil
-			aiReviewRecord.OverallScore = nil
-			aiReviewRecord.Dimensions = nil
-			aiReviewRecord.Reason = model.NullString{}
-			aiReviewRecord.RawResponse = nil
-			aiReviewRecord.TokensInput = 0
-			aiReviewRecord.TokensOutput = 0
-			aiReviewRecord.LatencyMS = 0
-			aiReviewRecord.RetryCount = 0
-			aiReviewRecord.ErrorMsg = model.NullString{}
-			aiReviewRecord.FinishedAt = model.NullTime{}
-			aiReview, err := reviewerAIReviewResponseFromModel(aiReviewRecord, &prompt)
+		aiReviewRecord.Status = "pending"
+		aiReviewRecord.Verdict = nil
+		aiReviewRecord.OverallScore = nil
+		aiReviewRecord.Dimensions = nil
+		aiReviewRecord.Reason = model.NullString{}
+		aiReviewRecord.RawResponse = nil
+		aiReviewRecord.TokensInput = 0
+		aiReviewRecord.TokensOutput = 0
+		aiReviewRecord.LatencyMS = 0
+		aiReviewRecord.RetryCount = 0
+		aiReviewRecord.ErrorMsg = model.NullString{}
+		aiReviewRecord.FinishedAt = model.NullTime{}
+		aiReview, err := reviewerAIReviewResponseFromModel(aiReviewRecord, &prompt)
 		if err != nil {
 			return err
 		}
@@ -495,7 +701,8 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 		httpx.Error(c, http.StatusNotFound, "NOT_FOUND", "submission not found")
 		return nil, false
 	}
-	if !policy.CanReviewSubmissionStatus(submission.Status) {
+	// manual_review(AI 可疑转人工复核)是 reviewer 的初审入口,与 policy 白名单里的状态一样可在详情查看。
+	if !policy.CanReviewSubmissionStatus(submission.Status) && submission.Status != statemachine.StateManualReview {
 		httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "submission is not visible in reviewer detail")
 		return nil, false
 	}
@@ -538,6 +745,11 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 			revision = &current
 		}
 	}
+	revisionHistory, err := h.loadRevisionHistory(submission.ID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load revision history")
+		return nil, false
+	}
 
 	aiReview, ok, err := h.loadLatestAIReviewDetail(submission, task.ID)
 	if err != nil {
@@ -555,7 +767,15 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 		return nil, false
 	}
 
-	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision, "auditLogs": auditLogs}
+	approveCounts, err := h.approveCountsByRevision([]model.Submission{submission})
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to compute review stage")
+		return nil, false
+	}
+	stage := stageInfoFor(submission, approveCounts)
+
+	payload := gin.H{"task": task, "item": item, "template": template, "submission": submission, "revision": revision, "revisionHistory": revisionHistory, "auditLogs": auditLogs,
+		"reviewStage": stage.ReviewStage, "reviewLevel": stage.ReviewLevel, "requiredLevels": stage.RequiredLevels}
 	if ok {
 		payload["aiReview"] = aiReview
 	} else {
@@ -568,6 +788,15 @@ func (h ReviewerHandler) loadReviewBundle(c *gin.Context, submissionID uint64) (
 		payload["warnings"] = []string{"template_missing"}
 	}
 	return payload, true
+}
+
+func (h ReviewerHandler) loadRevisionHistory(submissionID uint64) ([]model.SubmissionRevision, error) {
+	var revisions []model.SubmissionRevision
+	err := h.db.
+		Where("submission_id = ? AND draft = ?", submissionID, false).
+		Order("revision_no ASC, id ASC").
+		Find(&revisions).Error
+	return revisions, err
 }
 
 func (h ReviewerHandler) loadLatestHumanReview(submissionID uint64) (humanReviewSummaryResponse, bool, error) {
@@ -750,11 +979,6 @@ func reviewerAIReviewTaskPayload(submissionID uint64, revisionID uint64, promptI
 		return "", err
 	}
 	return string(raw), nil
-}
-
-func reviewerAIReviewIdempotencyKey(submissionID uint64, revisionID uint64, promptID uint64, promptVersion int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%d:%d", submissionID, revisionID, promptID, promptVersion)))
-	return hex.EncodeToString(sum[:])
 }
 
 func nullableStringPointer(value model.NullString) *string {

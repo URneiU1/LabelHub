@@ -21,6 +21,10 @@ const (
 	StatusFailed     = "failed"
 
 	processingTimeout = 5 * time.Minute
+	// failedRetryBackoff:失败事件冷却多久后自动重新入 pending。enqueue 失败几乎都是
+	// Redis 短时不可用这类瞬时故障,不应被视为不可恢复终态;冷却后重试既能在 Redis 恢复后
+	// 自动放行(尤其异步导出没有独立 sweeper 兜底),又以"最后失败时间"为锚点避免热循环。
+	failedRetryBackoff = 30 * time.Second
 )
 
 type enqueuer interface {
@@ -68,6 +72,9 @@ func (p Publisher) PublishOnce(ctx context.Context) error {
 	if err := p.resetStaleProcessing(ctx, now); err != nil {
 		return err
 	}
+	if err := p.recoverFailedEvents(ctx, now); err != nil {
+		return err
+	}
 	events, err := p.claimPending(ctx, now)
 	if err != nil {
 		return err
@@ -83,6 +90,23 @@ func (p Publisher) resetStaleProcessing(ctx context.Context, now time.Time) erro
 	return p.db.WithContext(ctx).Model(&model.OutboxEvent{}).
 		Where("status = ? AND published_at < ?", StatusProcessing, now.Add(-processingTimeout)).
 		Updates(map[string]any{"status": StatusPending, "published_at": nil}).Error
+}
+
+// recoverFailedEvents 把已冷却 failedRetryBackoff 的 failed 事件重新置为 pending,
+// 给 Redis 抖动导致的瞬时入队失败一条自动恢复路径(见 H-04)。退避以最后一次失败时间
+// (published_at,失败时写入)为锚点;历史遗留的 published_at 为空的 failed 事件也一并恢复。
+func (p Publisher) recoverFailedEvents(ctx context.Context, now time.Time) error {
+	cutoff := now.Add(-failedRetryBackoff)
+	res := p.db.WithContext(ctx).Model(&model.OutboxEvent{}).
+		Where("status = ? AND (published_at IS NULL OR published_at < ?)", StatusFailed, cutoff).
+		Updates(map[string]any{"status": StatusPending, "published_at": nil})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		p.warn("recovered failed outbox events for retry", zap.Int64("count", res.RowsAffected))
+	}
+	return nil
 }
 
 func (p Publisher) claimPending(ctx context.Context, now time.Time) ([]model.OutboxEvent, error) {
@@ -126,9 +150,11 @@ func (p Publisher) publishEvent(ctx context.Context, event model.OutboxEvent) {
 		if retryCount >= 5 {
 			newStatus = StatusFailed
 		}
+		// published_at 记为本次失败时间:作为 failed 事件冷却退避恢复的锚点(见 recoverFailedEvents)。
+		// pending 分支也带上无妨——claimPending 只按 status 领取,下一拍照常重试。
 		if err := p.db.WithContext(ctx).Model(&model.OutboxEvent{}).
 			Where("id = ? AND status = ?", event.ID, StatusProcessing).
-			Updates(map[string]any{"status": newStatus, "retry_count": gorm.Expr("retry_count + 1"), "published_at": nil}).Error; err != nil {
+			Updates(map[string]any{"status": newStatus, "retry_count": gorm.Expr("retry_count + 1"), "published_at": time.Now().UTC()}).Error; err != nil {
 			p.warn("failed to mark outbox event failed", zap.Uint64("id", event.ID), zap.Error(err))
 		}
 		return

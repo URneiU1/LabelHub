@@ -1,13 +1,25 @@
 // Package review 封装 reviewer 审批(approve / reject / revise)的事务编排。
 //
-// Apply() 在单一事务内必须发生 5 件事(approve 路径):
-//  1. INSERT human_reviews
-//  2. UPDATE submissions(status + human_verdict + approved_at)
-//  3. UPDATE task_items(status=finished + finished_at)— approve/reject 都做
-//  4. UPDATE tasks(finished_items += 1)— 仅 approve
-//  5. INSERT audit_logs
+// 多级人工审核:approve 需要 RequiredHumanReviewLevels(=2)次,
+// 依次落到 first(初审)/ final(终审)两个 stage。
+// 当前 stage 由"当前 revision 已记录的 approve 数"派生,不依赖额外的列:
+// 0 → first,1 → final。revise 让 labeler 重提产生新 revision,
+// approve 计数随之归零(per current revision),故 stage 自动重置。
 //
-// reject 路径少 task.finished_items 那一步;revise 路径不动 task_items / tasks。
+// 入口态:human_reviewing(AI 通过待初审)、manual_review(AI 可疑转人工复核,独立初审入口)、
+// needs_arbitration(重叠仲裁)。manual_review 的 approve 等价初审通过,推进到 human_reviewing
+// 等终审(对齐状态机 {manual_review, approve} -> human_reviewing),计入 first-level,不终结 item。
+//
+// Apply() 在单一事务内:
+//   - manual_review 初审通过:INSERT human_reviews(first)+ UPDATE submissions(human_reviewing)+ INSERT audit_logs,
+//     跨状态推进但不终结 item。
+//   - 中间级 approve(第 1 次,human_reviewing 内部):INSERT human_reviews(stage)+ INSERT audit_logs,
+//     submission 停留在 human_reviewing(乐观锁确认未被抢先终态化)。
+//   - 终审 approve(凑满级数):INSERT human_reviews + UPDATE submissions(approved + approved_at)
+//   - UPDATE task_items(finished)+ UPDATE tasks(finished_items += 1)+ INSERT audit_logs。
+//   - reject(任意 stage):同终态路径,落到 rejected。
+//   - revise(任意 stage):INSERT human_reviews + UPDATE submissions(revising)+ INSERT audit_logs,
+//     不动 task_items / tasks。
 package review
 
 import (
@@ -26,9 +38,46 @@ import (
 
 // task_items.status 字面值。review service 自带一份避免反向依赖 handler 包。
 const (
-	itemStatusClaimed  = "claimed"
-	itemStatusFinished = "finished"
+	itemStatusClaimed          = "claimed"
+	itemStatusFinished         = "finished"
+	itemStatusNeedsArbitration = "needs_arbitration"
 )
+
+// RequiredHumanReviewLevels 人工审核的总级数:初审 → 终审(对齐审核流程图,两级)。
+// 只有第 RequiredHumanReviewLevels 次 approve 才把 submission 推到 approved;
+// 前面的 approve 只记录 human_reviews 行并停留在 human_reviewing。
+const RequiredHumanReviewLevels = 2
+
+// stage 字面值。HumanReview.Stage 列存其一。StageSecond(复审)在两级流程下不会产生,
+// 仅保留常量以兼容历史数据与可能的配置扩展。
+const (
+	StageFirst  = "first"  // 初审
+	StageSecond = "second" // 复审(两级流程下不使用)
+	StageFinal  = "final"  // 终审
+)
+
+// stageByApproveCount 把"当前 revision 已有的 approve 数"映射到本次 approve 落到的 stage 与 level。
+// 0 → first(初审,level 1);1 及以上 → final(终审,level 2)。
+var stageByApproveCount = []struct {
+	stage string
+	level int
+}{
+	{StageFirst, 1},
+	{StageFinal, 2},
+}
+
+// StageForApproveCount 暴露 approveCount → (stage, level) 给 handler 与单测复用。
+// approveCount 是当前 revision 已记录的 approve 数(即下一次 approve 将落到的级别)。
+func StageForApproveCount(approveCount int) (stage string, level int) {
+	if approveCount < 0 {
+		approveCount = 0
+	}
+	if approveCount >= len(stageByApproveCount) {
+		approveCount = len(stageByApproveCount) - 1
+	}
+	entry := stageByApproveCount[approveCount]
+	return entry.stage, entry.level
+}
 
 var (
 	// ErrSubmissionNotFound:submission_id 不存在。handler 映射 404。
@@ -41,6 +90,8 @@ var (
 	ErrInvalidVerdict = errors.New("review: verdict must be approve, reject, or revise")
 	// ErrForbidden:当前 reviewer 未被授权审核该 submission。handler 映射 403。
 	ErrForbidden = errors.New("review: reviewer is not allowed for this task")
+	// ErrDuplicateReviewerApproval:同一 reviewer 不能在同一 revision 上重复 approve 推进多级审核。
+	ErrDuplicateReviewerApproval = errors.New("review: reviewer already approved this revision")
 	// ErrConcurrentWrite:并发写导致 RowsAffected != 1。handler 映射 409。
 	ErrConcurrentWrite = errors.New("review: concurrent write detected")
 )
@@ -60,7 +111,8 @@ type ApplyInput struct {
 // ApplyResult:Apply 成功时返回给 handler 的快照(只含响应用得到的字段)。
 type ApplyResult struct {
 	SubmissionID uint64
-	Status       string // 写入后的最终态:approved / rejected / revising
+	Status       string // 写入后的最终态:approved / rejected / revising / human_reviewing(中间级 approve)
+	Stage        string // 本次 review 落到的 stage:first / second / final
 }
 
 // Apply 跑完整事务。所有错误都是 sentinel error,handler 用 errors.Is 分类。
@@ -91,10 +143,10 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			}
 			return err
 		}
-		if submission.Status != statemachine.StateHumanReviewing {
-			return ErrInvalidTransition
-		}
-		if err := statemachine.Apply(submission.Status, event, to); err != nil {
+		isArbitration := submission.Status == statemachine.StateNeedsArbitration
+		// manual_review(AI 可疑转人工复核)是独立的初审入口,与 human_reviewing 同样可审。
+		isManualReview := submission.Status == statemachine.StateManualReview
+		if submission.Status != statemachine.StateHumanReviewing && !isArbitration && !isManualReview {
 			return ErrInvalidTransition
 		}
 		if submission.CurrentRevisionID == nil {
@@ -106,11 +158,60 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			return ErrForbidden
 		}
 
+		// manual_review 的 approve 等价"初审通过":推进到 human_reviewing 等终审,
+		// 目标态由 approved 改写为 human_reviewing(对齐状态机 {manual_review, approve} -> human_reviewing)。
+		if isManualReview && humanVerdict == "approve" {
+			to = statemachine.StateHumanReviewing
+		}
+
+		// 本次 review 落到哪个 stage 由"当前 revision 已有的 approve 数"决定。
+		// approve 路径下,前 RequiredHumanReviewLevels-1 次只记录 human_reviews 并停在 human_reviewing,
+		// 第 RequiredHumanReviewLevels 次才真正推到 approved。manual_review 的 approve 计入 first-level。
+		var approveCount int64
+		if !isArbitration {
+			if err := tx.Model(&model.HumanReview{}).
+				Where("submission_id = ? AND revision_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, "approve").
+				Where("superseded_at IS NULL").
+				Count(&approveCount).Error; err != nil {
+				return err
+			}
+			if humanVerdict == "approve" {
+				var reviewerApproveCount int64
+				if err := tx.Model(&model.HumanReview{}).
+					Where("submission_id = ? AND revision_id = ? AND reviewer_id = ? AND verdict = ?", submission.ID, *submission.CurrentRevisionID, input.ReviewerID, "approve").
+					Where("superseded_at IS NULL").
+					Count(&reviewerApproveCount).Error; err != nil {
+					return err
+				}
+				if reviewerApproveCount > 0 {
+					return ErrDuplicateReviewerApproval
+				}
+			}
+		}
+		stage, _ := StageForApproveCount(int(approveCount))
+		if isArbitration {
+			stage = StageFinal
+		}
+
+		// manual_review 初审通过:跨状态推进到 human_reviewing,记一次 first-level approve,
+		// 但不终结 item(尚未终审)。它既不是"停留原状态的中间级 approve",也不是"终态 approve"。
+		isManualReviewApprove := isManualReview && humanVerdict == "approve"
+		// 中间级 approve(仅 human_reviewing 内部):advance 一级,不变更 submission 状态。
+		isFinalApprove := humanVerdict == "approve" && !isManualReviewApprove && (isArbitration || int(approveCount) >= RequiredHumanReviewLevels-1)
+		isIntermediateApprove := humanVerdict == "approve" && !isManualReviewApprove && !isFinalApprove
+
+		// 只有真正发生状态变更的路径才校验状态机(中间级 approve 不变状态,跳过)。
+		if !isIntermediateApprove {
+			if err := statemachine.Apply(submission.Status, event, to); err != nil {
+				return ErrInvalidTransition
+			}
+		}
+
 		human := model.HumanReview{
 			SubmissionID: submission.ID,
 			RevisionID:   *submission.CurrentRevisionID,
 			ReviewerID:   input.ReviewerID,
-			Stage:        "first",
+			Stage:        stage,
 			Verdict:      humanVerdict,
 			Reason:       model.StringFrom(input.Reason),
 		}
@@ -118,9 +219,42 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			return err
 		}
 		now := NowUTC()
+		actorID := input.ReviewerID
+
+		if isIntermediateApprove {
+			// 中间级 approve:只 advance stage,submission 停留在 human_reviewing。
+			// 用乐观锁 WHERE status 保证并发安全(虽然此处不改 status,仍需确认未被其他 reviewer 抢先终态化)。
+			res := tx.Model(&model.Submission{}).
+				Where("id = ? AND status = ?", submission.ID, submission.Status).
+				Update("updated_at", now)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return ErrConcurrentWrite
+			}
+			if err := audit.Write(tx, audit.LogEntry{
+				EntityType: "submission",
+				EntityID:   submission.ID,
+				FromState:  submission.Status,
+				ToState:    submission.Status,
+				ActorType:  "user",
+				ActorID:    &actorID,
+				Event:      "human_approve_stage",
+				Payload: map[string]any{
+					"reason": input.Reason,
+					"stage":  stage,
+				},
+			}); err != nil {
+				return err
+			}
+			result = ApplyResult{SubmissionID: submission.ID, Status: submission.Status, Stage: stage}
+			return nil
+		}
+
 		updates := UpdatesFor(to, humanVerdict, now)
 		res := tx.Model(&model.Submission{}).
-			Where("id = ? AND status = ?", submission.ID, statemachine.StateHumanReviewing).
+			Where("id = ? AND status = ?", submission.ID, submission.Status).
 			Updates(updates)
 		if res.Error != nil {
 			return res.Error
@@ -129,7 +263,43 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			return ErrConcurrentWrite
 		}
 		if to == statemachine.StateApproved || to == statemachine.StateRejected {
-			res := tx.Model(&model.TaskItem{}).Where("id = ? AND status = ?", submission.ItemID, itemStatusClaimed).Updates(map[string]any{
+			expectedItemStatus := itemStatusClaimed
+			if isArbitration {
+				expectedItemStatus = itemStatusNeedsArbitration
+				var siblingIDs []uint64
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.Submission{}).
+					Where("item_id = ? AND id <> ? AND status = ?", submission.ItemID, submission.ID, statemachine.StateNeedsArbitration).
+					Order("id ASC").
+					Pluck("id", &siblingIDs).Error; err != nil {
+					return err
+				}
+				if len(siblingIDs) > 0 {
+					res := tx.Model(&model.Submission{}).
+						Where("id IN ? AND status = ?", siblingIDs, statemachine.StateNeedsArbitration).
+						Updates(map[string]any{"status": statemachine.StateRejected, "human_verdict": "reject"})
+					if res.Error != nil {
+						return res.Error
+					}
+					if res.RowsAffected != int64(len(siblingIDs)) {
+						return ErrConcurrentWrite
+					}
+					for _, siblingID := range siblingIDs {
+						if err := audit.Write(tx, audit.LogEntry{
+							EntityType: "submission",
+							EntityID:   siblingID,
+							FromState:  statemachine.StateNeedsArbitration,
+							ToState:    statemachine.StateRejected,
+							ActorType:  "user",
+							ActorID:    &actorID,
+							Event:      "arbitration_sibling_rejected",
+							Payload:    map[string]any{"winner_submission_id": submission.ID},
+						}); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			res := tx.Model(&model.TaskItem{}).Where("id = ? AND status = ?", submission.ItemID, expectedItemStatus).Updates(map[string]any{
 				"status":      itemStatusFinished,
 				"finished_at": now,
 			})
@@ -139,17 +309,14 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			if res.RowsAffected != 1 {
 				return ErrConcurrentWrite
 			}
-			if to == statemachine.StateApproved {
-				res := tx.Model(&model.Task{}).Where("id = ?", submission.TaskID).Update("finished_items", gorm.Expr("finished_items + 1"))
-				if res.Error != nil {
-					return res.Error
-				}
-				if res.RowsAffected != 1 {
-					return ErrConcurrentWrite
-				}
+			res = tx.Model(&model.Task{}).Where("id = ?", submission.TaskID).Update("finished_items", gorm.Expr("finished_items + 1"))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return ErrConcurrentWrite
 			}
 		}
-		actorID := input.ReviewerID
 		if err := audit.Write(tx, audit.LogEntry{
 			EntityType: "submission",
 			EntityID:   submission.ID,
@@ -158,11 +325,11 @@ func Apply(db *gorm.DB, input ApplyInput) (ApplyResult, error) {
 			ActorType:  "user",
 			ActorID:    &actorID,
 			Event:      event,
-			Payload:    map[string]any{"reason": input.Reason},
+			Payload:    map[string]any{"reason": input.Reason, "stage": stage},
 		}); err != nil {
 			return err
 		}
-		result = ApplyResult{SubmissionID: submission.ID, Status: to}
+		result = ApplyResult{SubmissionID: submission.ID, Status: to, Stage: stage}
 		return nil
 	})
 	if err != nil {

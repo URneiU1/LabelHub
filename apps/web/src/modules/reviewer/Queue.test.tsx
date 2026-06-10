@@ -3,12 +3,17 @@ import userEvent from '@testing-library/user-event'
 import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ReviewerQueue from './Queue'
-import { apiGet, apiPost } from '../../shared/api/client'
+import { apiGet, apiPost, listReviewResults } from '../../shared/api/client'
 
-vi.mock('../../shared/api/client', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
-}))
+vi.mock('../../shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../shared/api/client')>('../../shared/api/client')
+  return {
+    ...actual,
+    apiGet: vi.fn(),
+    apiPost: vi.fn(),
+    listReviewResults: vi.fn(),
+  }
+})
 
 vi.mock('@douyinfe/semi-ui', () => ({
   Button: ({ children, loading, theme, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean, theme?: string }) => {
@@ -24,6 +29,7 @@ vi.mock('@douyinfe/semi-ui', () => ({
 
 const mockApiGet = vi.mocked(apiGet)
 const mockApiPost = vi.mocked(apiPost)
+const mockListReviewResults = vi.mocked(listReviewResults)
 
 const submission = {
   id: 501,
@@ -33,6 +39,9 @@ const submission = {
   aiVerdict: 'pass',
   aiScore: 92.5,
   currentRevisionId: 901,
+  reviewStage: 'second' as const,
+  reviewLevel: 2,
+  requiredLevels: 3,
 }
 
 const task = {
@@ -57,7 +66,11 @@ describe('ReviewerQueue schema runtime flow', () => {
   beforeEach(() => {
     mockApiGet.mockReset()
     mockApiPost.mockReset()
-    mockApiPost.mockResolvedValue({ submission_id: 501, status: 'approved' })
+    mockListReviewResults.mockReset()
+    mockListReviewResults.mockResolvedValue({ results: [], nextCursor: '', hasMore: false })
+    mockApiPost.mockResolvedValue({ submission_id: 501, status: 'approved', stage: 'final' })
+    // M-10:demo 仅在显式 ?demo=1 下启用,默认清掉 URL 上的 demo 开关。
+    window.history.replaceState(null, '', '/reviewer')
   })
 
   it('batch approves selected submissions through the real batch endpoint', async () => {
@@ -90,6 +103,93 @@ describe('ReviewerQueue schema runtime flow', () => {
         reason: '',
       })
     })
+  })
+
+  it('loads the manual_review branch and exposes a dedicated 转人工复核 partition', async () => {
+    const user = userEvent.setup()
+    const manualSubmission = { ...submission, id: 777, itemId: 17, status: 'manual_review', aiVerdict: 'uncertain', currentRevisionId: 977 }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions?status=manual_review') {
+        return [manualSubmission]
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<ReviewerQueue />)
+
+    // 两条独立分支都被拉取。
+    await waitFor(() => {
+      expect(mockApiGet).toHaveBeenCalledWith('/reviewer/submissions')
+      expect(mockApiGet).toHaveBeenCalledWith('/reviewer/submissions?status=manual_review')
+    })
+
+    // 「转人工复核」分区 tab 存在;两条 submission 默认都在「全部」分区可见。
+    await screen.findByLabelText('选择 Submission #501')
+    await screen.findByLabelText('选择 Submission #777')
+    const manualTab = screen.getByRole('tab', { name: /转人工复核/ })
+
+    // 切到「转人工复核」分区后,只剩 manual_review 那条。
+    await user.click(manualTab)
+    await waitFor(() => {
+      expect(screen.queryByLabelText('选择 Submission #501')).toBeNull()
+    })
+    expect(screen.getByLabelText('选择 Submission #777')).toBeTruthy()
+  })
+
+  it('switches demo detail content when selecting different demo submissions (explicit ?demo=1)', async () => {
+    const user = userEvent.setup()
+    // M-10:demo 数据只在显式 ?demo=1 下出现,并带醒目「演示数据 · DEMO」标识。
+    window.history.replaceState(null, '', '/reviewer?demo=1')
+    mockApiGet.mockResolvedValue([])
+
+    render(<ReviewerQueue />)
+
+    expect(await screen.findByText('AI 自动预审队列')).toBeInTheDocument()
+    expect(screen.getByText('演示数据 · DEMO')).toBeInTheDocument()
+    expect(screen.getAllByText('重跑 86 分 → 建议通过').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByText('真无线主动降噪耳机 Pro Max 2026 款'))
+
+    expect(screen.getAllByText('预审 88 分 → 建议通过').length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('重跑 86 分 → 建议通过')).toHaveLength(0)
+    expect(screen.getByText(/AI 预审 · 本轮重跑结果/)).toBeInTheDocument()
+  })
+
+  it('shows an empty state instead of fake demo when the queue is empty and demo is off (M-10)', async () => {
+    mockApiGet.mockResolvedValue([])
+
+    render(<ReviewerQueue />)
+
+    // 默认(无 ?demo=1):空队列展示空状态,绝不顶替成假 demo。
+    expect(await screen.findByText('队列为空')).toBeInTheDocument()
+    expect(screen.queryByText('AI 自动预审队列')).not.toBeInTheDocument()
+    expect(screen.queryByText('演示数据 · DEMO')).not.toBeInTheDocument()
+    expect(screen.queryByText('真无线主动降噪耳机 Pro Max 2026 款')).not.toBeInTheDocument()
+  })
+
+  it('switches reviewer views from the keyboard', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockResolvedValue([])
+
+    render(<ReviewerQueue />)
+
+    await screen.findByText('队列为空')
+    const arbitrationTab = screen.getByRole('tab', { name: '仲裁' })
+    arbitrationTab.focus()
+    await user.keyboard('{Enter}')
+
+    expect(arbitrationTab).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText('仲裁队列')).toBeInTheDocument()
+
+    const timelineTab = screen.getByRole('tab', { name: '审计时间线' })
+    timelineTab.focus()
+    await user.keyboard('{Enter}')
+
+    expect(timelineTab).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText('暂无审计记录')).toBeInTheDocument()
   })
 
   it('opens submission detail and renders historical template as read-only', async () => {
@@ -152,6 +252,9 @@ describe('ReviewerQueue schema runtime flow', () => {
             payload: { score: 92.5 },
             createdAt: '2026-05-26T13:00:00Z',
           }],
+          reviewStage: 'second',
+          reviewLevel: 2,
+          requiredLevels: 3,
         }
       }
       throw new Error(`unexpected GET ${path}`)
@@ -164,12 +267,129 @@ describe('ReviewerQueue schema runtime flow', () => {
     const input = await screen.findByLabelText('历史字段')
     expect(input).toHaveValue('旧答案')
     expect(input).toBeDisabled()
-    expect(screen.getByText('AI pass · 92.5')).toBeInTheDocument()
-    expect(screen.getByText('verdict: pass')).toBeInTheDocument()
-    expect(screen.getByText('score: 92.5')).toBeInTheDocument()
+    expect(screen.getByText('AI 判定：建议通过 · 92.5')).toBeInTheDocument()
+    expect(screen.getByText('判定：建议通过')).toBeInTheDocument()
+    expect(screen.getByText('综合分：92.5')).toBeInTheDocument()
     expect(screen.getByText('关键词覆盖充分，建议通过。')).toBeInTheDocument()
     expect(screen.getByText('请审核商品标题')).toBeInTheDocument()
-    expect(screen.getAllByText('ai_done').length).toBeGreaterThan(0)
+    expect(screen.queryByText('审计时间线（SUB-501）')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: '审计时间线' }))
+    expect(await screen.findByText('审计时间线（SUB-501）')).toBeInTheDocument()
+    // 审计行 body 把「事件标签 · 状态流转」合在一个 <p>,actor 单独在时间行的 <strong> 里。
+    expect(screen.getAllByText('AI 预审通过 · AI 预审中 → 人工审核中').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('AI Agent').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/^\d{2}:\d{2}:\d{2}$/).length).toBeGreaterThan(0)
+    expect(screen.queryByText('ai_done')).not.toBeInTheDocument()
+    expect(screen.queryByText('ai_reviewing → human_reviewing')).not.toBeInTheDocument()
+  })
+
+  it('shows the review stage (复审 / 审核进度 2/3) in the detail and labels the approve action with the stage', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions/501') {
+        return {
+          task,
+          item,
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission,
+          revision: { id: 901, answer: JSON.stringify({ summary: '旧答案' }), draft: false },
+          aiReview: null,
+          auditLogs: [],
+          reviewStage: 'second',
+          reviewLevel: 2,
+          requiredLevels: 3,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<ReviewerQueue />)
+
+    // 队列行先带阶段小徽标(进入详情前只有 1 个)。
+    expect(await screen.findByLabelText('审核阶段 复审')).toBeInTheDocument()
+
+    await user.click(await screen.findByText('Submission #501'))
+
+    // 进入详情后,详情头部也显示当前阶段 + 审核进度(队列 + 详情共 2 个徽标)。
+    const stageBadges = await screen.findAllByLabelText('审核阶段 复审')
+    expect(stageBadges.length).toBeGreaterThanOrEqual(2)
+    expect(stageBadges.some((node) => node.textContent === '复审 · 审核进度 2/3')).toBe(true)
+    // 通过决策按钮标注当前阶段,体现「approve 推进一级」。
+    expect(screen.getByText('✓ 通过(复审)')).toBeInTheDocument()
+    expect(screen.getByText('推进一级 · 审核进度 2/3')).toBeInTheDocument()
+  })
+
+  it('lists finalized review results and opens one read-only', async () => {
+    const user = userEvent.setup()
+    window.history.replaceState(null, '', '/reviewer/results')
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/reviewer/submissions') {
+        return [submission]
+      }
+      if (path === '/reviewer/submissions/777') {
+        return {
+          task,
+          item: { ...item, id: 22 },
+          template: {
+            id: 101,
+            schemaJson: JSON.stringify({
+              title: 'historical_v1',
+              layout: 'single_page',
+              fields: [{ name: 'summary', widget: 'Input', label: '历史字段' }],
+            }),
+          },
+          submission: { ...submission, id: 777, itemId: 22, status: 'approved' },
+          revision: { id: 902, answer: JSON.stringify({ summary: '已定稿' }), draft: false },
+          aiReview: null,
+          auditLogs: [],
+          reviewStage: 'final',
+          reviewLevel: 3,
+          requiredLevels: 3,
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockListReviewResults.mockResolvedValue({
+      results: [{
+        id: 777,
+        taskId: 1,
+        itemId: 22,
+        status: 'approved',
+        finalVerdict: 'approve',
+        reviewerId: 9,
+        aiScore: 88,
+        updatedAt: '2026-05-28T10:00:00Z',
+      }],
+      nextCursor: '',
+      hasMore: false,
+    })
+
+    render(<ReviewerQueue />)
+
+    expect(screen.queryByRole('tab', { name: '审核结果' })).not.toBeInTheDocument()
+    const resultRow = await screen.findByLabelText('查看 Submission #777 审核结果')
+    expect(resultRow).toHaveTextContent('SUB-777')
+    expect(resultRow).toHaveTextContent('决定 通过')
+    expect(mockListReviewResults).toHaveBeenCalled()
+
+    await user.click(resultRow)
+
+    // 点击结果行后切回工作台并加载只读详情。
+    const input = await screen.findByLabelText('历史字段')
+    expect(input).toHaveValue('已定稿')
+    expect(input).toBeDisabled()
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/reviewer/submissions/777'))
   })
 
   it('shows an empty AI review state when no AI verdict exists', async () => {
@@ -235,9 +455,10 @@ describe('ReviewerQueue schema runtime flow', () => {
     await user.click(await screen.findByText('Submission #501'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('fields[0].options')
-    expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+    // 决策按钮带图标前缀(↩/✎/✓),与侧栏批量按钮(批量通过/批量打回)区分开,避免 /通过/ /打回/ 命中多个。
+    expect(screen.getByRole('button', { name: /↩ 打回/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /✎ 拒绝/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /✓ 通过/ })).toBeDisabled()
   })
 
   it('disables review actions while a review request is pending', async () => {
@@ -272,12 +493,12 @@ describe('ReviewerQueue schema runtime flow', () => {
     render(<ReviewerQueue />)
 
     await user.click(await screen.findByText('Submission #501'))
-    await user.click(screen.getByRole('button', { name: '通过' }))
+    await user.click(screen.getByRole('button', { name: /✓ 通过/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '打回修改' })).toBeDisabled()
-      expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
-      expect(screen.getByRole('button', { name: '通过' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /↩ 打回/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /✎ 拒绝/ })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /✓ 通过/ })).toBeDisabled()
     })
 
     await act(async () => {
@@ -286,7 +507,7 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
   })
 
-  it('opens real rule selector and links to owner prompt editing', async () => {
+  it('opens real rule selector and keeps prompt config read-only', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/reviewer/submissions') {
@@ -374,8 +595,8 @@ describe('ReviewerQueue schema runtime flow', () => {
 
     expect(await screen.findByText('历史规则模板')).toBeInTheDocument()
     expect(await screen.findByText('active #41')).toBeInTheDocument()
-    expect(screen.getByText('规则切换请在 Owner 配置页完成。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '跳转 Owner 编辑' })).toHaveAttribute('href', '/owner?taskId=1&aiPromptId=40#ai-prompts')
+    expect(screen.getByText('规则仅供查看。')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '跳转 Owner 编辑' })).not.toBeInTheDocument()
     expect(mockApiGet).toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts')
     expect(mockApiPost).not.toHaveBeenCalledWith('/reviewer/tasks/1/ai-prompts/40/activate', {})
   })
@@ -484,7 +705,8 @@ describe('ReviewerQueue schema runtime flow', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: '跳转 Owner 编辑' })).toHaveAttribute('href', '/owner?taskId=2&aiPromptId=51#ai-prompts')
+      expect(screen.getByText('规则仅供查看。')).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: '跳转 Owner 编辑' })).not.toBeInTheDocument()
     })
     expect(screen.queryByText('任务一晚到规则')).not.toBeInTheDocument()
   })

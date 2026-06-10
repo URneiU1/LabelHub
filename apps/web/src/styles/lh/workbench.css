@@ -1,0 +1,581 @@
+.wb-shell {
+  display: flex;
+  min-height: calc(100vh - var(--lh-topnav-h));
+}
+
+.wb-side {
+  flex: 0 0 240px;
+  background: #fff;
+  border-right: 1px solid var(--lh-border);
+  padding: 20px 12px;
+  /* 头部(返回/切换/进度)常驻,题目列表在 .wb-side__list 内独立虚拟滚动 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 虚拟滚动容器:固定题目行高(见 ITEM_ROW_HEIGHT),只渲染视口内行 */
+.wb-side__list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.wb-side__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lh-text-1);
+  padding: 0 8px;
+  margin-bottom: 4px;
+}
+
+.wb-side__meta {
+  font-size: 12px;
+  color: var(--lh-text-3);
+  padding: 0 8px 12px;
+  border-bottom: 1px solid var(--lh-divider);
+  margin-bottom: 8px;
+}
+
+.wb-side__item {
+  /* 重置原生 <button> 默认样式(否则未激活项会露出浏览器默认灰底 + 斜角边框),改成白底卡 + 柔和浅边框 */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  background: #fff;
+  border: 1px solid var(--lh-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--lh-radius);
+  font-size: 13px;
+  color: var(--lh-text-1);
+  cursor: pointer;
+  margin-bottom: 2px;
+  /* 固定行高 = 虚拟滚动按 ITEM_ROW_HEIGHT(38 + 2 margin = 40)切片的前提 */
+  height: 38px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.wb-side__item:hover {
+  background: var(--lh-bg-elev);
+}
+
+/* 待标 / 他人的题不可直接打开(导航只在自己的题间跳转,领新题走页脚「下一题 / 跳过」),禁用并弱化 */
+.wb-side__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: var(--lh-bg-elev);
+}
+
+.wb-side__item:disabled:hover {
+  background: var(--lh-bg-elev);
+}
+
+.wb-side__item--active {
+  background: var(--lh-primary-soft);
+  border-color: var(--lh-primary);
+}
+
+/* 大任务切换器:作答页侧栏在多个已领取任务间切换 */
+.wb-side__task {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.wb-side__task-label {
+  display: block;
+  font-size: 11px;
+  color: var(--lh-text-3);
+  margin-bottom: 4px;
+}
+
+.wb-side__task-select {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 8px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  background: #fff;
+  color: var(--lh-text-1);
+  cursor: pointer;
+}
+
+.wb-side__task-select:focus {
+  outline: none;
+  border-color: var(--lh-primary);
+}
+
+.wb-side__no {
+  color: var(--lh-text-3);
+  font-family: var(--lh-font-mono);
+  flex: 0 0 auto;
+}
+
+.wb-side__name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wb-side__status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-side__status::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.wb-side__status--done {
+  color: var(--lh-success);
+  background: var(--lh-success-soft);
+}
+
+.wb-side__status--draft {
+  color: var(--lh-warning);
+  background: var(--lh-warning-soft);
+}
+
+.wb-side__status--rejected {
+  color: var(--lh-warning);
+  background: var(--lh-warning-soft);
+}
+
+.wb-side__status--active {
+  color: var(--lh-primary);
+  background: #d9e8ff;
+}
+
+.wb-side__status--idle {
+  color: var(--lh-text-3);
+  background: var(--lh-bg-elev);
+}
+
+.wb-side__more {
+  text-align: center;
+  color: var(--lh-text-3);
+  font-size: 12px;
+  margin-top: 10px;
+  padding: 8px 0;
+}
+
+/* Main */
+.wb-main {
+  flex: 1 1 auto;
+  padding: 24px 32px;
+  padding-bottom: calc(24px + var(--lh-demo-nav-safe-bottom));
+  overflow-y: auto;
+}
+
+.wb-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.wb-head__title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.wb-head__meta {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--lh-text-3);
+}
+
+.wb-head__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.wb-banner {
+  background: #fff7e8;
+  border: 1px solid #ffe1a8;
+  border-radius: var(--lh-radius);
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--lh-text-1);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.wb-banner strong {
+  color: var(--lh-warning);
+  font-weight: 600;
+}
+
+.wb-readonly {
+  background: var(--lh-bg-elev);
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.wb-readonly__head {
+  font-size: 13px;
+  color: var(--lh-text-3);
+  margin-bottom: 6px;
+}
+
+.wb-readonly__text {
+  font-size: 14px;
+  color: var(--lh-text-1);
+}
+
+.wb-field {
+  margin-bottom: 18px;
+}
+
+.wb-field__label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lh-text-1);
+  margin-bottom: 4px;
+}
+
+.wb-field__hint {
+  font-size: 12px;
+  color: var(--lh-text-3);
+  margin-bottom: 8px;
+}
+
+.wb-field__count {
+  text-align: right;
+  font-size: 12px;
+  color: var(--lh-text-3);
+  margin-top: 4px;
+}
+
+.wb-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wb-option {
+  padding: 7px 18px;
+  border: 1px solid var(--lh-border);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wb-option--active {
+  background: var(--lh-primary);
+  color: #fff;
+  border-color: var(--lh-primary);
+  font-weight: 500;
+}
+
+.wb-option--multi-on {
+  background: var(--lh-primary-soft);
+  color: var(--lh-primary);
+  border-color: #c3dafe;
+}
+
+.wb-llm {
+  background: #faf5ff;
+  border: 1.5px solid var(--lh-purple);
+  border-radius: var(--lh-radius-lg);
+  padding: 16px 18px;
+  margin-top: 6px;
+  margin-bottom: 22px;
+  position: relative;
+}
+
+.wb-llm__head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.wb-llm__title {
+  color: var(--lh-purple);
+  font-weight: 600;
+}
+
+.wb-llm__regen {
+  margin-left: auto;
+  background: #fff;
+  border: 1px solid var(--lh-border);
+  padding: 4px 12px;
+  border-radius: var(--lh-radius);
+  font-size: 12px;
+  color: var(--lh-text-2);
+  cursor: pointer;
+}
+
+.wb-llm__body {
+  font-size: 13px;
+  color: var(--lh-text-1);
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+
+.wb-llm__body em {
+  color: var(--lh-text-1);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.wb-llm__accept {
+  background: var(--lh-purple);
+  color: #fff;
+  border: none;
+  border-radius: var(--lh-radius);
+  padding: 9px 18px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* 作答页常驻 AI 求助面板:沿用 wb-llm 紫卡视觉,叠加 loading/error/说明态。 */
+.wb-assist {
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+
+.wb-assist__loading {
+  color: var(--lh-purple);
+}
+
+.wb-assist__error {
+  color: var(--lh-danger);
+}
+
+.wb-assist__note {
+  font-size: 12px;
+  color: var(--lh-text-3);
+}
+
+.wb-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  border-top: 1px solid var(--lh-divider);
+  margin-top: 24px;
+}
+
+.wb-footer__shortcuts {
+  margin: 0 auto;
+  font-size: 12px;
+  color: var(--lh-text-3);
+}
+
+/* P3 离线草稿:工具栏旁的紧凑连接/草稿状态指示。 */
+.wb-draft-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-draft-state__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff7e8;
+  border: 1px solid #ffe1a8;
+  color: var(--lh-warning);
+  font-size: 12px;
+}
+
+.wb-draft-state__discard {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--lh-text-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wb-draft-state__discard:hover {
+  color: var(--lh-text-1);
+}
+
+/* P3 本地草稿恢复横幅:沿用 wb-banner 视觉,右侧叠加恢复/丢弃操作。 */
+.wb-draft-recover {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-draft-recover__text {
+  flex: 1 1 auto;
+}
+
+.wb-draft-recover__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Right panel —— 作答页隐藏「我的贡献」侧栏,把宽度让给标注主区(wb-main flex:1 自动撑满)。 */
+.wb-right {
+  display: none;
+}
+
+.wb-right__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.wb-stats-card {
+  background: var(--lh-bg-elev);
+  border-radius: var(--lh-radius);
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  text-align: left;
+  margin-bottom: 18px;
+}
+
+.wb-stats-cell__label {
+  font-size: 12px;
+  color: var(--lh-text-3);
+}
+
+.wb-stats-cell__value {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.wb-stats-cell__value--success {
+  color: var(--lh-success);
+}
+
+.wb-stats-cell__value--danger {
+  color: var(--lh-danger);
+}
+
+.wb-history {
+  margin-top: 6px;
+}
+
+.wb-history__head {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.wb-history__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--lh-divider);
+  font-size: 13px;
+}
+
+.wb-history__who {
+  color: var(--lh-text-1);
+}
+
+.wb-history__action {
+  color: var(--lh-text-2);
+}
+
+.wb-history__action--reject {
+  color: var(--lh-danger);
+}
+
+.wb-history__action--current {
+  color: var(--lh-primary);
+  font-weight: 500;
+}
+
+.wb-history__date {
+  color: var(--lh-text-3);
+  font-size: 12px;
+}
+
+.wb-shortcuts {
+  margin-top: 22px;
+}
+
+.wb-shortcuts__title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.wb-shortcuts__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--lh-text-2);
+  margin-bottom: 6px;
+}
+
+.wb-kbd {
+  font-family: var(--lh-font-mono);
+  background: var(--lh-bg-elev);
+  border: 1px solid var(--lh-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+/* 移动端(≤768px,加分项):桌面版 wb-shell 是 240px 侧栏 + 主区 + 280px 右栏的
+   三列 flex,在窄屏会横向溢出。这里把三列纵向堆叠、侧栏改为整宽,并收紧内边距。
+   仅在 ≤768px 生效,桌面布局不受影响。Designer 同样复用 wb-shell:堆叠后可用但
+   偏窄,属可接受的「桌面优先」降级(见 docs/ARCHITECTURE.md 的移动端说明)。 */
+@media (max-width: 768px) {
+  .wb-shell {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .wb-side,
+  .wb-right {
+    flex: 1 1 auto;
+    width: 100%;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--lh-border);
+  }
+
+  .wb-main {
+    padding: 16px;
+    padding-bottom: calc(16px + var(--lh-demo-nav-safe-bottom));
+  }
+
+  .wb-head {
+    flex-wrap: wrap;
+  }
+
+  .wb-head__actions {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}

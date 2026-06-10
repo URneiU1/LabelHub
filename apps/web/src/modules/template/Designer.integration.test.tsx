@@ -25,6 +25,37 @@ vi.mock('@douyinfe/semi-ui', () => ({
   },
 }))
 
+// @dnd-kit 在 jsdom 下无法靠 getBoundingClientRect 驱动(rect 全为 0),
+// 故 mock DndContext 捕获 onDragEnd,测试直接派发拖拽结束事件来精确驱动重排/插入,
+// 仍走真实组件的 handleDragEnd → setFields → buildTemplatePayload → 保存全链路。
+const dndState = vi.hoisted(() => ({ onDragEnd: undefined as ((event: unknown) => void) | undefined }))
+
+vi.mock('@dnd-kit/core', () => ({
+  DndContext: ({ children, onDragEnd }: { children: React.ReactNode, onDragEnd?: (event: unknown) => void }) => {
+    dndState.onDragEnd = onDragEnd
+    return children
+  },
+  DragOverlay: ({ children }: { children?: React.ReactNode }) => children ?? null,
+  PointerSensor: function PointerSensor() {},
+  KeyboardSensor: function KeyboardSensor() {},
+  useSensor: () => ({}),
+  useSensors: () => [],
+  useDraggable: () => ({ attributes: {}, listeners: {}, setNodeRef: () => {}, transform: null, isDragging: false }),
+  useDroppable: () => ({ setNodeRef: () => {}, isOver: false }),
+  closestCenter: () => [],
+}))
+
+vi.mock('@dnd-kit/sortable', () => ({
+  SortableContext: ({ children }: { children?: React.ReactNode }) => children ?? null,
+  verticalListSortingStrategy: {},
+  sortableKeyboardCoordinates: () => {},
+  useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: () => {}, setActivatorNodeRef: () => {}, transform: null, transition: undefined, isDragging: false }),
+}))
+
+vi.mock('@dnd-kit/utilities', () => ({
+  CSS: { Transform: { toString: () => '' }, Translate: { toString: () => '' } },
+}))
+
 const mockApiGet = vi.mocked(apiGet)
 const mockApiPost = vi.mocked(apiPost)
 
@@ -77,7 +108,7 @@ describe('TemplateDesigner', () => {
 
     renderDesigner('/owner/tasks/1/templates/10')
 
-    await screen.findByText('Template Designer')
+    await screen.findByRole('heading', { name: '模板搭建器（Designer）' })
     await user.click(screen.getByRole('button', { name: 'Add Radio' }))
     await user.click(screen.getByRole('button', { name: 'Add Radio' }))
     expect(screen.getByRole('button', { name: /select radio_1/ })).toBeInTheDocument()
@@ -107,6 +138,35 @@ describe('TemplateDesigner', () => {
       ],
       export_fields: ['summary', 'fluency_score'],
     })
+  })
+
+  it('renders the org-style toolbar and creates a real Tabs layout from the canvas sub-nav', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    expect(await screen.findByRole('heading', { name: '模板搭建器（Designer）' })).toBeInTheDocument()
+    expect(screen.getByText('任务负责人后台')).toBeInTheDocument()
+    expect(screen.getByText('当前版本 r2')).toBeInTheDocument()
+    expect(screen.getByText('绑定任务 T-1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览 Schema' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出 Schema JSON' })).toBeInTheDocument()
+    expect(screen.getByText('物料')).toBeInTheDocument()
+    expect(screen.getByText('布局')).toBeInTheDocument()
+
+    const canvasTabs = screen.getByRole('tablist', { name: 'canvas tabs' })
+    expect(within(canvasTabs).getByRole('tab', { name: '基础信息' })).toHaveAttribute('aria-selected', 'true')
+
+    await user.click(within(canvasTabs).getByRole('button', { name: '新增画布 Tab' }))
+
+    expect(screen.getByRole('button', { name: /select tabs_1/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('tablist', { name: 'canvas tabs' })).getByRole('tab', { name: 'Tab 1' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('copies and reorders fields before saving a new version', async () => {
@@ -170,7 +230,7 @@ describe('TemplateDesigner', () => {
         return templateDetail(13, {
           ...baseSchema,
           fields: [
-            { name: 'tags_1', widget: 'Tags', label: '标签多选', required: false, options: ['pass', 'reject', 'uncertain'] },
+            { name: 'tags_1', widget: 'Tags', label: '标签选择', required: false, options: ['pass', 'reject', 'uncertain'] },
             baseSchema.fields[0],
             { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
           ],
@@ -192,10 +252,14 @@ describe('TemplateDesigner', () => {
     await user.click(screen.getByRole('button', { name: 'Add Tags' }))
     expect(screen.getByLabelText('field_name')).toHaveValue('tags_1')
 
-    const dataTransfer = dragDataTransfer()
-    fireEvent.dragStart(screen.getByRole('button', { name: 'drag tags_1' }), { dataTransfer })
-    fireEvent.dragOver(screen.getByLabelText('canvas field summary'), { dataTransfer })
-    fireEvent.drop(screen.getByLabelText('canvas field summary'), { dataTransfer })
+    // 把 tags_1 拖到 summary 之前(canvas 重排,保留「插到目标前」语义)。
+    const tagsDraftId = draftIdOf('tags_1')
+    await act(async () => {
+      dndState.onDragEnd?.({
+        active: { id: tagsDraftId, data: { current: { source: 'canvas', draftId: tagsDraftId } } },
+        over: { id: draftIdOf('summary') },
+      })
+    })
 
     expect(screen.getByLabelText('field_name')).toHaveValue('tags_1')
 
@@ -209,7 +273,7 @@ describe('TemplateDesigner', () => {
     const [, body] = mockApiPost.mock.calls[0]
     expect(body).toMatchObject({
       fields: [
-        { name: 'tags_1', widget: 'Tags', label: '标签多选', required: false, options: ['pass', 'reject', 'uncertain'] },
+        { name: 'tags_1', widget: 'Tags', label: '标签选择', required: false, options: ['pass', 'reject', 'uncertain'] },
         { name: 'summary', widget: 'Input', label: 'Summary', required: true },
         { name: 'radio_1', widget: 'Radio', label: '单选', required: false, options: ['pass', 'reject', 'uncertain'] },
       ],
@@ -349,7 +413,12 @@ describe('TemplateDesigner', () => {
 
     expect(screen.getByLabelText('validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
     expect(screen.getByLabelText('selected validation radio_1')).toHaveTextContent('fields[1].options: options must be non-empty')
-    expect(screen.getByRole('button', { name: 'Save as new version' })).toBeDisabled()
+    // 新行为:校验未通过时保存按钮不再禁用,点击会被 focusFirstError 拦截并定位到出错字段,而不保存。
+    const saveButton = screen.getByRole('button', { name: 'Save as new version' })
+    expect(saveButton).not.toBeDisabled()
+    await user.click(saveButton)
+    expect(mockApiPost).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('selected validation radio_1')).toBeInTheDocument()
   })
 
   it('renders ShowItem preview from a real task item payload without saving preview data', async () => {
@@ -460,7 +529,7 @@ describe('TemplateDesigner', () => {
 
     renderDesigner('/owner/tasks/1/templates/9')
 
-    await screen.findByText('Template Designer')
+    await screen.findByRole('heading', { name: '模板搭建器（Designer）' })
     expect(screen.getByRole('button', { name: 'Add Radio' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'drag summary' })).toBeDisabled()
     expect(screen.getByLabelText('field_name')).toBeDisabled()
@@ -657,6 +726,152 @@ describe('TemplateDesigner', () => {
     expect(mockApiGet).not.toHaveBeenCalledWith('/templates/11')
   })
 
+  it('configures visibleWhen and customRule and round-trips them through the saved schema', async () => {
+    const user = userEvent.setup()
+    const decisionSchema = {
+      title: 'QA template',
+      layout: 'single_page',
+      fields: [
+        { name: 'decision', widget: 'Radio', label: 'Decision', required: true, options: ['pass', 'reject'] },
+        { name: 'reason', widget: 'TextArea', label: 'Reason', required: false },
+      ],
+    }
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/40') {
+        return templateDetail(40, decisionSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 41, taskId: 1, version: 2, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/1/templates/40')
+
+    await screen.findByRole('button', { name: /select reason/ })
+    await user.click(screen.getByRole('button', { name: /select reason/ }))
+
+    // 联动 tab: only show "reason" when decision == reject.
+    await user.click(screen.getByLabelText('property_tab_logic'))
+    fireEvent.change(screen.getByLabelText('visible_when_field'), { target: { value: 'decision' } })
+    fireEvent.change(screen.getByLabelText('visible_when_equals'), { target: { value: 'reject' } })
+
+    // 校验 tab: reason must be at most 35 chars.
+    await user.click(screen.getByLabelText('property_tab_validation'))
+    fireEvent.change(screen.getByLabelText('custom_rule_expr'), { target: { value: 'len(value) <= 35' } })
+    fireEvent.change(screen.getByLabelText('custom_rule_message'), { target: { value: '不能超过 35 个字符' } })
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.any(Object))
+    })
+    const [, body] = mockApiPost.mock.calls[0]
+    expect(body).toMatchObject({
+      fields: [
+        { name: 'decision', widget: 'Radio' },
+        {
+          name: 'reason',
+          widget: 'TextArea',
+          visibleWhen: { field: 'decision', equals: 'reject' },
+          customRule: { expr: 'len(value) <= 35', message: '不能超过 35 个字符' },
+        },
+      ],
+    })
+    expect(JSON.stringify(body)).not.toContain('_draftId')
+
+    const parsed = parseTemplateSchema(body)
+    if (!parsed.ok) {
+      throw new Error(parsed.error.message)
+    }
+    const reasonField = parsed.value.fields.find((item) => item.name === 'reason')
+    expect(reasonField?.visibleWhen).toEqual({ field: 'decision', equals: 'reject' })
+    expect(reasonField?.customRule).toEqual({ expr: 'len(value) <= 35', message: '不能超过 35 个字符' })
+  })
+
+  it('inserts a palette widget at the drop position via drag-to-place', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/templates/10') {
+        return templateDetail(10, baseSchema, true)
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 11, taskId: 1, version: 2, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/1/templates/10')
+
+    await screen.findByRole('button', { name: /select summary/ })
+
+    // 把 Radio 物料拖到已有的 summary 字段上 => 插到它之前。
+    await act(async () => {
+      dndState.onDragEnd?.({
+        active: { id: 'palette-Radio', data: { current: { source: 'palette', widget: 'Radio' } } },
+        over: { id: draftIdOf('summary') },
+      })
+    })
+
+    expect(screen.getByRole('button', { name: /select radio_1/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        export_fields: ['radio_1', 'summary'],
+      }))
+    })
+  })
+
+  it('creates a brand-new template from the /new route without loading an existing one', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      // 新建阶段不应拉取 /templates/new;navigate 到新建版本后才加载 /templates/21。
+      if (path === '/templates/21') return templateDetail(21, baseSchema, true)
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 21, taskId: 1, version: 1, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/1/templates/new')
+
+    // 新建态:空白可编辑画布,显示「新建模板」而非某个版本号。
+    await screen.findByText('新建模板')
+    await user.click(screen.getByRole('button', { name: 'Add Input' }))
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/templates', expect.objectContaining({
+        fields: expect.arrayContaining([expect.objectContaining({ widget: 'Input' })]),
+      }))
+    })
+    // 新建阶段没有以 'new' 拉取任何模板。
+    expect(mockApiGet).not.toHaveBeenCalledWith('/templates/new')
+  })
+
+  it('seeds a new template by cloning the source task latest template via copyFrom', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      // copyFrom=9:克隆源任务 9 的最新模板 schema;不拉取 /templates/new。
+      if (path === '/tasks/9/templates') {
+        return [{ id: 77, taskId: 9, version: 3, schemaJson: JSON.stringify(baseSchema), createdAt: '2026-06-03T00:00:00Z' }]
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({ id: 30, taskId: 2, version: 1, schemaJson: '' })
+
+    renderDesigner('/owner/tasks/2/templates/new?copyFrom=9')
+
+    // 仍是新建态(显示「新建模板」),但画布已带源任务字段(baseSchema 的 summary)。
+    await screen.findByText('新建模板')
+    expect(await screen.findByRole('button', { name: /select summary/ })).toBeInTheDocument()
+
+    // 保存 → POST 到本任务 /tasks/2/templates,克隆字段一并带上。
+    await user.click(screen.getByRole('button', { name: 'Save as new version' }))
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/2/templates', expect.objectContaining({
+        fields: expect.arrayContaining([expect.objectContaining({ name: 'summary' })]),
+      }))
+    })
+    expect(mockApiGet).not.toHaveBeenCalledWith('/templates/new')
+  })
+
   it('fails closed for historical templates whose task does not match the route', async () => {
     const user = userEvent.setup()
     mockApiGet.mockImplementation(async (path) => {
@@ -721,14 +936,13 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function dragDataTransfer() {
-  const data = new Map<string, string>()
-  return {
-    dropEffect: '',
-    effectAllowed: '',
-    getData: vi.fn((type: string) => data.get(type) ?? ''),
-    setData: vi.fn((type: string, value: string) => data.set(type, value)),
-  }
+// 从画布上某字段的「select <name>」按钮回溯到它所在卡片的 data-draft-id,
+// 用作 @dnd-kit 拖拽事件里的稳定 id(组件内部生成,测试无法预知)。
+function draftIdOf(name: string): string {
+  const selectButton = screen.getByRole('button', { name: `select ${name}` })
+  const card = selectButton.closest('[data-draft-id]')
+  if (!card) throw new Error(`no canvas card found for field "${name}"`)
+  return card.getAttribute('data-draft-id') as string
 }
 
 function templateDetail(id: number, schema: unknown, isLatest: boolean, templateTaskId = 1) {

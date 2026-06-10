@@ -121,6 +121,7 @@ func TestCanReadItem(t *testing.T) {
 	subApproved := &model.Submission{ID: 2, ItemID: 102, Status: "approved"}
 	subDraft := &model.Submission{ID: 3, ItemID: 103, Status: "draft"}
 	subAIReviewing := &model.Submission{ID: 4, ItemID: 104, Status: "ai_reviewing"}
+	subNeedsArbitration := &model.Submission{ID: 5, ItemID: 105, Status: "needs_arbitration"}
 
 	cases := []struct {
 		name       string
@@ -139,6 +140,7 @@ func TestCanReadItem(t *testing.T) {
 		{"reviewer sees approved", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, itemClaimedBy8, subApproved, true},
 		{"reviewer blocked from draft submission", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, itemClaimedBy7, subDraft, false},
 		{"reviewer blocked from ai_reviewing", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, itemClaimedBy7, subAIReviewing, false},
+		{"reviewer sees needs_arbitration", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, itemClaimedBy7, subNeedsArbitration, true},
 		{"reviewer blocked when no submission", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, itemUnclaimed, nil, false},
 		{"owner+reviewer (own task) sees via owner path", &auth.Claims{UserID: 10, Roles: []string{"owner", "reviewer"}}, itemUnclaimed, nil, true},
 	}
@@ -160,7 +162,7 @@ func TestCanReviewTask(t *testing.T) {
 		want             bool
 	}{
 		{"admin always", &auth.Claims{UserID: 1, Roles: []string{"admin"}}, false, true},
-		{"owner own task", &auth.Claims{UserID: 10, Roles: []string{"owner"}}, false, true},
+		{"owner blocked", &auth.Claims{UserID: 10, Roles: []string{"owner"}}, false, false},
 		{"owner other task blocked", &auth.Claims{UserID: 11, Roles: []string{"owner"}}, false, false},
 		{"reviewer assigned", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, true, true},
 		{"reviewer unassigned blocked", &auth.Claims{UserID: 5, Roles: []string{"reviewer"}}, false, false},

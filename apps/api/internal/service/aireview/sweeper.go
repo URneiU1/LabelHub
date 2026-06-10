@@ -123,11 +123,13 @@ FROM ai_reviews ar
 JOIN submissions s ON s.id = ar.submission_id
 WHERE s.status = ?
   AND s.current_revision_id = ar.revision_id
-  AND ar.status IN (?, ?)
-  AND ar.created_at < ?
+  AND (
+    (ar.status = ? AND ar.created_at < ?)
+    OR (ar.status = ? AND COALESCE(ar.started_at, ar.created_at) < ?)
+  )
 ORDER BY ar.id ASC
 LIMIT ? FOR UPDATE SKIP LOCKED`,
-		statemachine.StateAIReviewing, reviewStatusPending, reviewStatusRunning, cutoff, batch,
+		statemachine.StateAIReviewing, reviewStatusPending, cutoff, reviewStatusRunning, cutoff, batch,
 	).Rows()
 	if err != nil {
 		return nil, err

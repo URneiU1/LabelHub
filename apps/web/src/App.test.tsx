@@ -41,9 +41,14 @@ vi.mock('./modules/template/TemplateList', () => ({
   default: () => <div>template list page</div>,
 }))
 
-vi.mock('./modules/template/Designer', () => ({
-  default: () => <div>template designer page</div>,
-}))
+vi.mock('./modules/template/Designer', async () => {
+  const { useParams } = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  function MockDesigner() {
+    const { templateId } = useParams()
+    return <div>template designer page · templateId={String(templateId)}</div>
+  }
+  return { default: MockDesigner }
+})
 
 vi.mock('./modules/styleguide/StyleGuide', () => ({
   default: () => <div>style guide page</div>,
@@ -95,5 +100,53 @@ describe('App role routing', () => {
 
     expect(await screen.findByText('labeler page')).toBeInTheDocument()
     expect(screen.queryByText('login page')).not.toBeInTheDocument()
+  })
+
+  it('keeps owner users out of the reviewer workspace', async () => {
+    localStorage.setItem('labelhub_access_token', 'owner-token')
+    localStorage.setItem('labelhub_current_user', JSON.stringify({
+      id: 1,
+      username: 'owner1',
+      displayName: '任务负责人一号',
+      roles: ['owner'],
+    }))
+    window.history.pushState({}, '', '/reviewer')
+
+    render(<App />)
+
+    expect(await screen.findByText('login page')).toBeInTheDocument()
+    expect(screen.queryByText('reviewer page')).not.toBeInTheDocument()
+  })
+
+  it('keeps reviewer users out of the owner workspace', async () => {
+    localStorage.setItem('labelhub_access_token', 'reviewer-token')
+    localStorage.setItem('labelhub_current_user', JSON.stringify({
+      id: 3,
+      username: 'reviewer1',
+      displayName: '审核员一号',
+      roles: ['reviewer'],
+    }))
+    window.history.pushState({}, '', '/owner')
+
+    render(<App />)
+
+    expect(await screen.findByText('login page')).toBeInTheDocument()
+    expect(screen.queryByText('owner page')).not.toBeInTheDocument()
+  })
+
+  it('routes /templates/new to the Designer with templateId="new" (not a literal /new route)', async () => {
+    localStorage.setItem('labelhub_access_token', 'owner-token')
+    localStorage.setItem('labelhub_current_user', JSON.stringify({
+      id: 1,
+      username: 'owner1',
+      displayName: '任务负责人一号',
+      roles: ['owner'],
+    }))
+    window.history.pushState({}, '', '/owner/tasks/4/templates/new')
+
+    render(<App />)
+
+    // 字面 /new 路由会让 templateId=undefined → Designer 误判 isNew=false;:templateId 捕获 'new' 才正确。
+    expect(await screen.findByText(/template designer page · templateId=new/)).toBeInTheDocument()
   })
 })

@@ -26,21 +26,10 @@ func applyReviewQueueScope(query *gorm.DB, claims *auth.Claims) (*gorm.DB, bool)
 	if policy.HasRole(claims, policy.RoleAdmin) {
 		return query, true
 	}
-	if !policy.HasRole(claims, policy.RoleOwner) && !policy.HasRole(claims, policy.RoleReviewer) {
+	if !policy.HasRole(claims, policy.RoleReviewer) {
 		return query, false
 	}
 
-	query = query.Joins("JOIN tasks ON tasks.id = submissions.task_id")
-	if policy.HasRole(claims, policy.RoleReviewer) {
-		query = query.Joins("LEFT JOIN task_reviewers ON task_reviewers.task_id = submissions.task_id AND task_reviewers.user_id = ?", claims.UserID)
-	}
-
-	switch {
-	case policy.HasRole(claims, policy.RoleOwner) && policy.HasRole(claims, policy.RoleReviewer):
-		return query.Where("(tasks.owner_id = ? OR task_reviewers.user_id IS NOT NULL)", claims.UserID), true
-	case policy.HasRole(claims, policy.RoleOwner):
-		return query.Where("tasks.owner_id = ?", claims.UserID), true
-	default:
-		return query.Where("task_reviewers.user_id IS NOT NULL"), true
-	}
+	query = query.Joins("LEFT JOIN task_reviewers ON task_reviewers.task_id = submissions.task_id AND task_reviewers.user_id = ?", claims.UserID)
+	return query.Where("task_reviewers.user_id IS NOT NULL"), true
 }

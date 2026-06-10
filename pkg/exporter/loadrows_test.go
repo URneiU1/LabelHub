@@ -40,9 +40,9 @@ func TestLoadApprovedRows_WithReviews(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"sid", "iid", "external_id", "payload", "answer"}).
 			AddRow(1, 11, "Q1", `{"x":1}`, `{"label":"cat"}`).
 			AddRow(2, 12, nil, `{}`, `{}`))
-	mock.ExpectQuery(`(?is)^SELECT submission_id, verdict, overall_score, dimensions, reason, prompt_version, created_at\s+FROM ai_reviews WHERE submission_id IN`).
-		WillReturnRows(sqlmock.NewRows([]string{"submission_id", "verdict", "overall_score", "dimensions", "reason", "prompt_version", "created_at"}).
-			AddRow(1, "pass", 8.5, `[{"name":"相关性","score":9}]`, "looks good", 3, now))
+	mock.ExpectQuery(`(?is)^SELECT submission_id, verdict, overall_score, dimensions, reason, prompt_config_id, prompt_version, created_at\s+FROM ai_reviews WHERE submission_id IN`).
+		WillReturnRows(sqlmock.NewRows([]string{"submission_id", "verdict", "overall_score", "dimensions", "reason", "prompt_config_id", "prompt_version", "created_at"}).
+			AddRow(1, "pass", 8.5, `[{"name":"相关性","score":9}]`, "looks good", 33, 3, now))
 	mock.ExpectQuery(`(?is)^SELECT submission_id, verdict, reason, stage, reviewer_id, created_at\s+FROM human_reviews WHERE submission_id IN`).
 		WillReturnRows(sqlmock.NewRows([]string{"submission_id", "verdict", "reason", "stage", "reviewer_id", "created_at"}).
 			AddRow(1, "approve", "ok", "first", 2, now))
@@ -57,6 +57,9 @@ func TestLoadApprovedRows_WithReviews(t *testing.T) {
 	// sub 1 有 ai/human review
 	if pick(rows[0], "ai_review.verdict") != "pass" {
 		t.Fatalf("ai_review.verdict = %v", pick(rows[0], "ai_review.verdict"))
+	}
+	if pick(rows[0], "ai_review.prompt_config_id") != int64(33) {
+		t.Fatalf("ai_review.prompt_config_id = %v", pick(rows[0], "ai_review.prompt_config_id"))
 	}
 	if pick(rows[0], "human_review.verdict") != "approve" {
 		t.Fatalf("human_review.verdict = %v", pick(rows[0], "human_review.verdict"))

@@ -1,0 +1,479 @@
+.tasks-filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tasks-filters__search,
+.tasks-filters__select {
+  height: 38px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  background: #fff;
+  color: var(--lh-text-1);
+  font: inherit;
+  font-size: 14px;
+  padding: 0 12px;
+}
+
+.tasks-filters__search {
+  width: 280px;
+  max-width: 100%;
+}
+
+.tasks-filters__search::placeholder {
+  color: var(--lh-text-3);
+}
+
+.tasks-filters__select {
+  width: 160px;
+  cursor: pointer;
+}
+
+.tasks-filters__search:focus,
+.tasks-filters__select:focus {
+  outline: none;
+  border-color: var(--lh-primary);
+  box-shadow: 0 0 0 3px rgba(var(--lh-primary-rgb), 0.12);
+}
+
+.tasks-table {
+  background: #fff;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius-lg);
+  overflow: hidden;
+}
+
+.tasks-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tasks-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--lh-text-2);
+  padding: 14px 20px;
+  background: var(--lh-bg-elev);
+  border-bottom: 1px solid var(--lh-border);
+}
+
+.tasks-table td {
+  padding: 18px 20px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--lh-divider);
+  font-size: 13px;
+  color: var(--lh-text-2);
+}
+
+.tasks-table tr:last-child td {
+  border-bottom: none;
+}
+
+.tasks-table__title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lh-text-1);
+  margin-bottom: 4px;
+}
+
+.tasks-table__meta {
+  display: block;
+  font-size: 12px;
+  color: var(--lh-text-3);
+}
+
+.tasks-table__select {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.tasks-progress {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.tasks-progress__bar {
+  height: 4px;
+  background: var(--lh-divider);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.tasks-progress__fill {
+  height: 100%;
+  background: var(--lh-primary);
+  border-radius: 999px;
+}
+
+.tasks-progress__fill--success {
+  background: var(--lh-success);
+}
+
+.tasks-progress__fill--warning {
+  background: var(--lh-warning);
+}
+
+/* Drawer */
+.tasks-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 440px;
+  background: #fff;
+  box-shadow: var(--lh-shadow-lg);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.tasks-drawer__head {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--lh-divider);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tasks-drawer__head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  flex: 1 1 auto;
+}
+
+.tasks-drawer__close {
+  border: none;
+  background: transparent;
+  color: var(--lh-text-3);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--lh-radius);
+}
+
+.tasks-drawer__close:hover {
+  background: var(--lh-bg-elev);
+  color: var(--lh-text-1);
+}
+
+.lh-stat {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  border-width: 1px;
+  transition: all 120ms ease;
+}
+
+.lh-stat:hover {
+  border-color: var(--lh-primary);
+}
+
+.lh-stat--active {
+  border-color: var(--lh-primary);
+  background: var(--lh-primary-soft);
+}
+
+/* Phase 1 · 任务管理 stat 卡对齐 demo:纯平卡(去主色左描边),数字用展示字体 + 等宽数位。
+   scope 到 .lh-task-manage,不影响 labeler/MyData 的 .lh-stat。 */
+.lh-task-manage .lh-stat {
+  cursor: default;
+  border-left: 1px solid var(--lh-border);
+}
+
+.lh-task-manage .lh-stat:has(.lh-stat__value--success),
+.lh-task-manage .lh-stat:has(.lh-stat__value--warning) {
+  border-left-color: var(--lh-border);
+}
+
+.lh-task-manage .lh-stat__value {
+  font-family: var(--font-heading);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* 整行可点(不只标题列),光标提示可点击;配合 tr 上的 onClick。 */
+.tasks-table tbody tr {
+  cursor: pointer;
+}
+
+.tasks-table tbody tr:hover td {
+  background: var(--lh-bg-elev);
+}
+
+/* 即时按下反馈:点击瞬间(mousedown)就高亮,不必等 React 重渲染更新选中态,避免"点了没反应"的错觉。 */
+.tasks-table tbody tr:active td {
+  background: var(--lh-primary-soft);
+}
+
+.tasks-table__row--active td {
+  background: var(--lh-primary-soft) !important;
+}
+
+.tasks-drawer__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 24px 100px;
+}
+
+.tasks-drawer__banner {
+  background: var(--lh-primary-soft);
+  border: 1px solid #c3dafe;
+  color: #1c4ed8;
+  padding: 12px 14px;
+  border-radius: var(--lh-radius);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+
+.tasks-drawer__field {
+  margin-bottom: 16px;
+}
+
+.tasks-drawer__label {
+  font-size: 13px;
+  color: var(--lh-text-1);
+  margin-bottom: 6px;
+  font-weight: 500;
+  display: block;
+}
+
+.tasks-drawer__label .req {
+  color: var(--lh-danger);
+  margin-left: 2px;
+}
+
+.tasks-drawer__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tasks-drawer__strategy {
+  display: flex;
+  gap: 8px;
+}
+
+.tasks-drawer__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tasks-drawer__template {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.tasks-drawer__template .arco-input-inner-wrapper {
+  flex: 1;
+}
+
+.tasks-drawer__template .lh-btn {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  padding: 6px 12px;
+}
+
+.tasks-drawer__footer {
+  position: absolute;
+  bottom: calc(var(--lh-demo-nav-safe-bottom) - 32px);
+  left: 0;
+  right: 0;
+  padding: 14px 24px;
+  background: #fff;
+  border-top: 1px solid var(--lh-divider);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ---------- 4.1 任务管理后台 ---------- */
+.lh-task-manage {
+  margin-bottom: var(--space-2xl, 48px);
+}
+
+.lh-task-manage__actions {
+  margin-top: 16px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lh-task-manage__status {
+  display: inline-flex;
+}
+
+.tasks-drawer__scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 99;
+}
+
+.tasks-drawer__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 24px 0;
+  border-bottom: 1px solid var(--lh-divider);
+}
+
+.tasks-drawer__tab {
+  border: none;
+  background: transparent;
+  color: var(--lh-text-2);
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tasks-drawer__tab--active {
+  color: var(--lh-primary);
+  border-bottom-color: var(--lh-primary);
+  font-weight: 600;
+}
+
+.taskform__field {
+  display: flex;
+  flex-direction: column;
+}
+
+.taskform__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  background: var(--lh-bg-elev);
+}
+
+.taskform__section-title {
+  margin: 0;
+  color: var(--lh-text-1);
+  font-size: 14px;
+}
+
+.taskform__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--lh-text-1);
+  font-size: 13px;
+}
+
+.taskform__label {
+  font-size: 13px;
+  color: var(--lh-text-1);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.taskform__label .req {
+  color: var(--lh-danger);
+  margin-left: 2px;
+}
+
+.taskform__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.taskform__input,
+.taskform__textarea {
+  width: 100%;
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+  color: var(--lh-text-1);
+  box-sizing: border-box;
+}
+
+.taskform__input:focus,
+.taskform__textarea:focus {
+  outline: none;
+  border-color: var(--lh-primary);
+}
+
+.taskform__textarea {
+  min-height: 88px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.taskform__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.taskform__tag {
+  gap: 4px;
+}
+
+.taskform__tag-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+}
+
+.taskform__strategy {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.taskform__error {
+  background: var(--lh-danger-soft);
+  border: 1px solid var(--lh-danger);
+  color: var(--lh-danger);
+  padding: 10px 12px;
+  border-radius: var(--lh-radius);
+  font-size: 13px;
+}
+
+.taskform__preview,
+.taskform__batch-row textarea {
+  font-family: var(--lh-font-mono);
+}
+
+.taskform__preview {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  background: var(--lh-bg-elev);
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  font-size: 12px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--lh-text-2);
+}
+
+.taskform__batch-row {
+  border: 1px solid var(--lh-border);
+  border-radius: var(--lh-radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

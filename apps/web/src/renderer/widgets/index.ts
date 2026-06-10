@@ -19,9 +19,11 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
   Input: InputWidget,
   TextArea: TextAreaWidget,
   Radio: RadioWidget,
+  MultiSelect: TagsWidget,
   Tags: TagsWidget,
   RichText: RichTextWidget,
   JSONEditor: JSONEditorWidget,
   FileUpload: FileUploadWidget,
+  ImageUpload: FileUploadWidget,
   LLMTrigger: LLMTriggerWidget,
 }

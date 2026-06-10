@@ -33,7 +33,7 @@ func TestSweeperMovesStalledAIReviewToHumanReview(t *testing.T) {
 	defer sqlDB.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`(?is)^SELECT ar.id, ar.submission_id, ar.revision_id, ar.idempotency_key.+FOR UPDATE SKIP LOCKED`).
+	mock.ExpectQuery(`(?is)^SELECT ar.id, ar.submission_id, ar.revision_id, ar.idempotency_key.+ar.status = \? AND ar.created_at < \?.+ar.status = \? AND COALESCE\(ar.started_at, ar.created_at\) < \?.+FOR UPDATE SKIP LOCKED`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "submission_id", "revision_id", "idempotency_key"}).
 			AddRow(9, 42, 901, "idem"))
 	mock.ExpectExec(`(?is)^UPDATE ai_reviews SET status = 'dead'.+status IN`).

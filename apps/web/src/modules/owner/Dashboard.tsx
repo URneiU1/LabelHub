@@ -1,18 +1,19 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { Fragment, lazy, Suspense, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { Button, Modal, Toast } from '@douyinfe/semi-ui'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON, type Task } from '../../shared/api/client'
 import EmptyState from '../../shared/components/EmptyState'
 import LoadingBlock from '../../shared/components/LoadingBlock'
 import StatusBadge from '../../shared/components/StatusBadge'
 import ExportPanel from './ExportPanel'
+import ImportPanel from './ImportPanel'
+import ReviewResultsPanel from './ReviewResultsPanel'
+import AcceptancePanel from './AcceptancePanel'
+import TaskManagePanel from './TaskManagePanel'
+import { useOwnerSection, useOwnerSubView } from '../../shared/state/ownerSection'
 // StatsBoard 依赖 VChart(体积大),懒加载切出独立 chunk,选中任务时才拉。
 const StatsBoard = lazy(() => import('./StatsBoard'))
 
 type TaskListResponse = Task[]
-type ExportResponse = {
-  task: Task
-  rows: Array<Record<string, unknown>>
-}
 type AIPromptConfig = {
   id: number
   version: number
@@ -31,6 +32,21 @@ type AIReviewSettingsResponse = {
   aiReviewEnabled: boolean
   activePromptId: number | null
 }
+// 稳定性 dry-run 聚合指标(repeat_count > 1 时由 worker 写入 result.stability)。
+// rate 类字段均为 0~1 的比例,UI 渲染时换算成百分比。
+type AIDryRunStability = {
+  repeat_count: number
+  success_count: number
+  error_count: number
+  error_rate: number
+  verdict_agreement: number
+  score_stddev: number
+  expected_match_rate?: number
+  dimension_stddev?: Record<string, number>
+  verdict_counts: Record<string, number>
+  runs: Array<{ verdict: string, score: number }>
+  errors?: string[]
+}
 type AIDryRunResult = {
   provider: string
   dryRunId?: number
@@ -43,7 +59,7 @@ type AIDryRunResult = {
     model?: string
   }
 }
-type AIDryRunHistoryResult = AIDryRunResult['result'] & { provider?: string }
+type AIDryRunHistoryResult = AIDryRunResult['result'] & { provider?: string, stability?: AIDryRunStability }
 type QueuedDryRunResponse = {
   dryRunId: number
   status: 'queued' | 'running'
@@ -130,7 +146,11 @@ type DimensionRow = {
 export default function OwnerDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [selected, setSelected] = useState<Task | null>(null)
-  const [exportRows, setExportRows] = useState<Array<Record<string, unknown>>>([])
+  // 任务详情区的当前视图。把原来一长条拆成左栏可切换的几节,主区一次只显示一节。
+  // 默认 'ai'(AI 预审是本项目的核心能力,也保证选中任务后直接看到预审配置)。
+  // 分节由全局「工作区」侧栏(AppLayout)驱动,经共享 store 桥接。
+  const detailSection = useOwnerSection()
+  const subView = useOwnerSubView()
   const [prompts, setPrompts] = useState<AIPromptConfig[]>([])
   const [activePromptId, setActivePromptId] = useState<number | null>(null)
   const [aiReviewEnabled, setAIReviewEnabled] = useState(false)
@@ -150,6 +170,8 @@ export default function OwnerDashboard() {
   const [goldenExpectedVerdict, setGoldenExpectedVerdict] = useState(defaultGoldenExpectedVerdict)
   const [goldenNotes, setGoldenNotes] = useState('')
   const [goldenPromptChoice, setGoldenPromptChoice] = useState('active')
+  // 稳定性 dry-run 的重复次数,保守默认 1(单次烟测);3/5 用于稳定性检查。
+  const [dryRunRepeatCount, setDryRunRepeatCount] = useState(1)
   const [goldenSampleError, setGoldenSampleError] = useState('')
   const [goldenSampleLoading, setGoldenSampleLoading] = useState(false)
   const [goldenSampleLoadFailed, setGoldenSampleLoadFailed] = useState(false)
@@ -192,11 +214,17 @@ export default function OwnerDashboard() {
     try {
       const data = await apiGet<TaskListResponse>('/tasks')
       const requestedTaskId = requestedNumberParam('taskId')
-      const initialTask = data.find((item) => item.id === requestedTaskId) ?? data[0] ?? null
+      // 默认任务优先级:URL 指定 → 上次选中 → 首个非草稿(有数据的发布/暂停/结束任务) → 列表首位。
+      const initialTask =
+        data.find((item) => item.id === requestedTaskId) ??
+        data.find((item) => item.id === readLastOwnerTaskId()) ??
+        data.find((item) => item.status !== 'draft') ??
+        data[0] ?? null
       setTasks(data)
       setSelected(initialTask)
       setBaselineDraft(initialTask?.baselineDescription ?? '')
       selectedTaskIdRef.current = initialTask?.id ?? null
+      writeLastOwnerTaskId(initialTask?.id ?? null)
       resetGoldenSampleFormToDefaults()
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : '加载任务失败')
@@ -325,20 +353,23 @@ export default function OwnerDashboard() {
   }, [selected?.id])
 
   useEffect(() => {
-    if (selected) {
-      selectedTaskIdRef.current = selected.id
+    if (!selected) return
+    selectedTaskIdRef.current = selected.id
+    // 任务管理页(detailSection==='tasks')看不到 AI 配置 / 指标条,选任务时跳过这 3 个 AI 加载,
+    // 避免每次点任务都打 prompts/golden/dryrun 三个接口 + 触发额外重渲染,拖慢"点任务"的响应。
+    if (detailSection !== 'tasks') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadPrompts(selected.id)
       void loadGoldenSamples(selected.id)
     }
-  }, [loadGoldenSamples, loadPrompts, selected])
+  }, [loadGoldenSamples, loadPrompts, selected, detailSection])
 
   useEffect(() => {
-    if (selected) {
+    if (selected && detailSection !== 'tasks') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadDryRunHistory(selected.id, dryRunHistorySampleID(dryRunHistorySampleFilter))
     }
-  }, [dryRunHistorySampleFilter, loadDryRunHistory, selected])
+  }, [dryRunHistorySampleFilter, loadDryRunHistory, selected, detailSection])
 
   function beginTaskAction(taskId: number, seqRef: MutableRefObject<number>) {
     seqRef.current += 1
@@ -349,11 +380,44 @@ export default function OwnerDashboard() {
     return selectedTaskIdRef.current === guard.taskId && taskActionGeneration.current === guard.generation && seqRef.current === guard.seq
   }
 
+  // 任务创建/编辑/状态迁移后:把 saved task 合并进列表并保持/切换选中。
+  // 不调 selectTask 的全量重置(那会清掉 AI/golden 面板状态);只在确实换了任务时才走 selectTask。
+  function applyTaskSaved(saved: Task, created: boolean) {
+    setTasks((current) => {
+      if (current.some((task) => task.id === saved.id)) {
+        return current.map((task) => task.id === saved.id ? saved : task)
+      }
+      return [saved, ...current]
+    })
+    if (created) {
+      selectTask(saved)
+      return
+    }
+    if (saved.id === selectedTaskIdRef.current) {
+      setSelected(saved)
+      setBaselineDraft(saved.baselineDescription ?? '')
+    }
+  }
+
+  // 数据集导入/批量编辑后任务的 total_items 会变,重新拉列表但保持当前选中。
+  async function reloadTasksKeepSelection() {
+    try {
+      const data = await apiGet<TaskListResponse>('/tasks')
+      setTasks(data)
+      const current = data.find((task) => task.id === selectedTaskIdRef.current)
+      if (current) {
+        setSelected(current)
+      }
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '刷新任务失败')
+    }
+  }
+
   function selectTask(task: Task) {
     if (task.id === selectedTaskIdRef.current) return
     selectedTaskIdRef.current = task.id
+    writeLastOwnerTaskId(task.id)
     taskActionGeneration.current += 1
-    setExportRows([])
     setPrompts([])
     setActivePromptId(null)
     setAIReviewEnabled(false)
@@ -379,16 +443,6 @@ export default function OwnerDashboard() {
     resetGoldenSampleFormToDefaults()
     setBaselineDraft(task.baselineDescription ?? '')
     setSelected(task)
-  }
-
-  async function exportJSON(taskId: number) {
-    try {
-      const data = await apiGet<ExportResponse>(`/tasks/${taskId}/export/json`)
-      setExportRows(data.rows)
-      Toast.success(`导出 ${data.rows.length} 条 approved 数据`)
-    } catch (error) {
-      Toast.error(error instanceof Error ? error.message : '导出失败')
-    }
   }
 
   async function savePrompt() {
@@ -585,6 +639,7 @@ export default function OwnerDashboard() {
     try {
       const data = await apiPost<GoldenSampleBatchDryRunResponse>(`/tasks/${selected.id}/golden-samples/dry-runs`, {
         sample_ids: samples.map((sample) => sample.id),
+        repeat_count: dryRunRepeatCount,
       })
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       const sampleById = new Map(samples.map((sample) => [sample.id, sample]))
@@ -656,7 +711,7 @@ export default function OwnerDashboard() {
       },
     }))
     try {
-      const data = await apiPost<QueuedDryRunResponse & Partial<AIDryRunResult>>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, {})
+      const data = await apiPost<QueuedDryRunResponse & Partial<AIDryRunResult>>(`/tasks/${taskId}/golden-samples/${sample.id}/dry-run`, { repeat_count: dryRunRepeatCount })
       if (!isCurrentTaskAction(guard, goldenSampleRunSeq)) return
       if (data.result) {
         setDryRun(data as AIDryRunResult)
@@ -665,6 +720,16 @@ export default function OwnerDashboard() {
           [sample.id]: goldenSampleResultToRunRow(sample, data as AIDryRunResult),
         }))
         void loadDryRunHistory(taskId, dryRunHistorySampleID(dryRunHistorySampleFilter))
+        return
+      }
+      if (typeof data.dryRunId !== 'number') {
+        // 入队响应缺少 dryRunId 则无可轮询的目标,直接置为失败而不是空转。
+        const message = 'dry-run 入队异常:响应缺少 dryRunId'
+        setGoldenRunRows((current) => ({
+          ...current,
+          [sample.id]: { sampleId: sample.id, expectedVerdict: sample.expectedVerdict, status: 'failed', error: message },
+        }))
+        setGoldenSampleError(message)
         return
       }
       setGoldenRunRows((current) => ({
@@ -776,47 +841,42 @@ export default function OwnerDashboard() {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--space-xl)' }}>
-        <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', margin: 0, fontWeight: 700 }}>Owner 任务负责人</h1>
-        <p style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-xs)' }}>任务发布 · 模板搭建 · 审核配置 · 数据导出</p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: 'var(--space-xl)', alignItems: 'start' }}>
-        <section style={panelStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
-            <h2 style={headingStyle}>任务列表</h2>
-          </div>
-          <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
-            {tasks.map((task) => (
-              <button key={task.id} onClick={() => selectTask(task)} style={task.id === selected?.id ? activeListButtonStyle : listButtonStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <strong style={{ fontSize: 'var(--text-base)' }}>{task.title}</strong>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>ID: {task.id}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-xs)' }}>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>进度: {task.finishedItems}/{task.totalItems}</span>
-                  <StatusBadge status={task.status} />
-                </div>
-              </button>
-            ))}
-            {tasks.length === 0 ? (
-              <EmptyState title="暂无任务" body="当前账号还没有可管理的任务。" variant="empty" />
-            ) : null}
-          </div>
-        </section>
-
+      <div>
         <section style={{ ...panelStyle, minHeight: 600 }}>
-          {selected ? (
+          {detailSection === 'tasks' && (
+            <TaskManagePanel
+              tasks={tasks}
+              selected={selected}
+              onSelect={selectTask}
+              onTaskSaved={applyTaskSaved}
+              onTasksChanged={() => void reloadTasksKeepSelection()}
+            />
+          )}
+          {detailSection !== 'tasks' && tasks.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-lg)' }}>
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>当前任务</span>
+              {tasks.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => selectTask(task)}
+                  style={task.id === selected?.id ? activeTaskChipStyle : taskChipStyle}
+                >
+                  {task.title}
+                </button>
+              ))}
+            </div>
+          )}
+          {detailSection !== 'tasks' && selected ? (
             <>
-              <div style={{ borderBottom: '1px solid var(--color-border-light)', paddingBottom: 'var(--space-md)', marginBottom: 'var(--space-lg)' }}>
+              <div style={{ borderBottom: '1px solid var(--lh-border)', paddingBottom: 'var(--space-md)', marginBottom: 'var(--space-lg)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h2 style={{ ...headingStyle, fontSize: 'var(--text-h1)' }}>{selected.title}</h2>
                   <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-                    <Button onClick={() => void exportJSON(selected.id)} theme="light">导出数据</Button>
                     <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>模板 Designer</a>
                   </div>
                 </div>
-                <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--space-sm)', fontSize: 'var(--text-base)' }}>
+                <p style={{ color: 'var(--lh-text-2)', marginTop: 'var(--space-sm)', fontSize: 'var(--text-base)' }}>
                   {selected.description ?? '配置标注模板与 AI 预审参数。'}
                 </p>
               </div>
@@ -829,14 +889,57 @@ export default function OwnerDashboard() {
                 <MetricCell label="HISTORY" value={String(dryRunHistorySummary.total)} detail={`${formatPercent(dryRunHistorySummary.matchRate)} match / avg ${formatOptionalNumber(dryRunHistorySummary.averageScore)}`} />
               </div>
 
-              <Suspense fallback={<LoadingBlock title="看板加载中" rows={3} />}>
-                <StatsBoard taskId={selected.id} />
-              </Suspense>
-              <ExportPanel taskId={selected.id} />
+              {detailSection === 'template' && (
+                <section style={aiPromptSectionStyle} aria-label="模板搭建">
+                  <h3 style={subHeadingStyle}>模板搭建</h3>
+                  <p style={mutedStyle}>用可视化 Designer 拖拽物料、配置 visibleWhen / customRule 的显隐与校验规则。</p>
+                  <a href={`/owner/tasks/${selected.id}/templates`} style={templateDesignerLinkStyle}>打开 Designer</a>
+                </section>
+              )}
+              {detailSection === 'dataset' && (
+                <ImportPanel taskId={selected.id} onImported={() => void reloadTasksKeepSelection()} />
+              )}
 
-              <div style={{ background: 'var(--color-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--color-border-light)' }}>
+              {detailSection === 'review' && (
+                <section style={aiPromptSectionStyle} aria-label="审核质检">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+                    <h3 style={subHeadingStyle}>审核质检(只读)</h3>
+                    <StatusBadge status="draft" label="只读视图" />
+                  </div>
+                  <p style={mutedStyle}>
+                    人工审核的初审 / 终审「动作」在 Reviewer 工作台完成,Owner 这里只读审核汇总结果,不做审核操作。
+                  </p>
+                  <div style={controlStripStyle}>
+                    <MetricCell label="PROGRESS" value={`${selected.finishedItems}/${selected.totalItems}`} detail="已完成 / 总题数" tone="teal" />
+                    <MetricCell label="AI REVIEW" value={aiReviewEnabled ? 'ON' : 'OFF'} detail={aiReviewEnabled ? 'AI 预审已启用' : 'AI 预审未启用'} tone={aiReviewEnabled ? 'success' : 'muted'} />
+                  </div>
+                  <p style={mutedStyle}>
+                    通过率、AI vs 人工差异、两级审核进度等汇总图表见左侧「生产看板」;下方是逐条质检结果,用于回看 AI 预审标准。
+                  </p>
+                  <ReviewResultsPanel taskId={selected.id} />
+                </section>
+              )}
+
+              {detailSection === 'acceptance' && (
+                <AcceptancePanel taskId={selected.id} />
+              )}
+
+              {detailSection === 'stats' && (
+                <Suspense fallback={<LoadingBlock title="看板加载中" rows={3} />}>
+                  <StatsBoard taskId={selected.id} />
+                </Suspense>
+              )}
+              {detailSection === 'export' && (
+                <div className="lh-sub-views" data-sub={subView ?? 'all'}>
+                  <ExportPanel taskId={selected.id} />
+                </div>
+              )}
+
+              {detailSection === 'ai' && (
+                <div className="lh-sub-views" data-sub={subView ?? 'all'}>
+              <div id="ai-baseline" style={{ background: 'var(--lh-bg)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', marginBottom: 'var(--space-lg)', border: '1px solid var(--lh-border)' }}>
                 <div style={aiSettingsRowStyle}>
-                  <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Baseline 说明</div>
+                  <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)', textTransform: 'uppercase' }}>Baseline 说明</div>
                   <Button aria-label="保存 baseline" disabled={savingBaseline} loading={savingBaseline} onClick={() => void saveBaseline()} theme="light">保存 baseline</Button>
                 </div>
                 <textarea
@@ -849,14 +952,15 @@ export default function OwnerDashboard() {
               </div>
 
               <section id="ai-prompts" style={aiPromptSectionStyle}>
+                <div id="ai-config">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
                   <h3 style={subHeadingStyle}>AI 自动预审配置</h3>
                   <StatusBadge status={aiReviewEnabled ? 'running' : 'draft'} label={aiReviewEnabled ? 'AI review: 已启用' : 'AI review: 已关闭'} />
                 </div>
 
-                <div style={{ ...aiSettingsRowStyle, background: 'var(--color-surface)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-light)', marginBottom: 'var(--space-lg)' }}>
+                <div style={{ ...aiSettingsRowStyle, background: 'var(--lh-bg-card)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)', border: '1px solid var(--lh-border)', marginBottom: 'var(--space-lg)' }}>
                   <div>
-                    <div style={{ color: 'var(--color-text)', fontWeight: 600 }}>启用 AI review</div>
+                    <div style={{ color: 'var(--lh-text-1)', fontWeight: 600 }}>启用 AI review</div>
                     <div style={{ fontSize: 'var(--text-sm)' }}>开启后，系统将对标注结果进行实时质量评估</div>
                   </div>
                   {aiReviewEnabled ? (
@@ -904,7 +1008,8 @@ export default function OwnerDashboard() {
                   保存配置
                 </Button>
 
-                <div style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
+                </div>
+                <div id="ai-dryrun" style={{ ...dryRunPanelStyle, marginTop: 'var(--space-2xl)', background: '#fafafa', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)' }}>
                   <h4 style={{ ...subHeadingStyle, marginBottom: 'var(--space-md)' }}>AI Dry-run 测试</h4>
                   <div style={dryRunGridStyle}>
                     <label style={fieldStyle}>
@@ -920,18 +1025,18 @@ export default function OwnerDashboard() {
                     执行测试
                   </Button>
                   {dryRun && (
-                    <div style={{ ...dryRunResultStyle, background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-border-light)' }}>
+                    <div style={{ ...dryRunResultStyle, background: 'var(--lh-bg-card)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--lh-border)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
-                        <strong style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{dryRun.provider}</strong>
-                        <span style={{ ...verdictPillStyle, color: dryRun.result.verdict === 'pass' ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                        <strong style={{ fontFamily: 'var(--lh-font-mono)', fontSize: 'var(--text-sm)' }}>{dryRun.provider}</strong>
+                        <span style={{ ...verdictPillStyle, color: dryRun.result.verdict === 'pass' ? 'var(--lh-success)' : 'var(--lh-danger)' }}>
                           {dryRun.result.verdict} ({dryRun.result.overall_score})
                         </span>
                       </div>
                       <div style={{ fontSize: 'var(--text-base)', marginBottom: 'var(--space-md)' }}>{dryRun.result.reason}</div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--space-sm)' }}>
                         {dryRun.result.dimensions.map((dimension) => (
-                          <div key={dimension.name} style={{ padding: 'var(--space-sm)', background: 'var(--color-bg)', borderRadius: 'var(--radius-sm)' }}>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{dimension.name}</div>
+                          <div key={dimension.name} style={{ padding: 'var(--space-sm)', background: 'var(--lh-bg)', borderRadius: 'var(--radius-sm)' }}>
+                            <div style={{ fontSize: 11, color: 'var(--lh-text-3)' }}>{dimension.name}</div>
                             <div style={{ fontWeight: 600 }}>{dimension.score}</div>
                             <div style={{ fontSize: 12, marginTop: 4 }}>{dimension.reason}</div>
                           </div>
@@ -941,12 +1046,22 @@ export default function OwnerDashboard() {
                   )}
                 </div>
 
-                <div style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
+                <div id="ai-golden" style={{ ...goldenSampleSectionStyle, marginTop: 'var(--space-2xl)' }}>
                   <div style={aiSettingsRowStyle}>
                     <h3 style={subHeadingStyle}>Golden Samples (评测集)</h3>
-                    <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
-                      批量运行评测
-                    </Button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>
+                        <span>稳定性重复次数 / Runs</span>
+                        <select aria-label="dry_run_repeat_count" value={String(dryRunRepeatCount)} onChange={(event) => setDryRunRepeatCount(Number(event.target.value))} style={{ ...inputStyle, width: 72 }}>
+                          <option value="1">1</option>
+                          <option value="3">3</option>
+                          <option value="5">5</option>
+                        </select>
+                      </label>
+                      <Button aria-label="Run all visible samples" disabled={goldenActionDisabled || goldenSamples.length === 0 || anyGoldenRunRunning} onClick={() => void runAllGoldenSamples()} theme="light">
+                        批量运行评测
+                      </Button>
+                    </div>
                   </div>
                   {goldenSampleError ? <div role="alert" style={{ ...alertStyle, marginTop: 'var(--space-md)' }}>{goldenSampleError}</div> : null}
 
@@ -1000,14 +1115,14 @@ export default function OwnerDashboard() {
                         {goldenSamples.map((sample) => {
                           const runRow = goldenRunRows[sample.id]
                           return (
-                            <div key={sample.id} style={{ ...goldenSampleItemStyle, background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: 'var(--space-md)', border: '1px solid var(--color-border-light)' }}>
+                            <div key={sample.id} style={{ ...goldenSampleItemStyle, background: 'var(--lh-bg-card)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', padding: 'var(--space-md)', border: '1px solid var(--lh-border)' }}>
                               <div style={goldenSampleHeaderStyle}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
                                   <strong style={{ fontSize: 'var(--text-base)' }}>#{sample.id} · {sample.expectedVerdict}</strong>
                                   <StatusBadge status={verdictStatus(sample.expectedVerdict)} label={sample.expectedVerdict} />
                                 </div>
-                                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{promptVersionLabel(sample.aiPromptId)}</span>
-                                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{formatDateTime(sample.createdAt)}</span>
+                                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>{promptVersionLabel(sample.aiPromptId)}</span>
+                                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>{formatDateTime(sample.createdAt)}</span>
                               </div>
                               {sample.notes ? <div style={{ ...mutedStyle, marginTop: 'var(--space-sm)' }}>{sample.notes}</div> : null}
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--space-sm)', marginTop: 'var(--space-md)' }}>
@@ -1059,7 +1174,7 @@ export default function OwnerDashboard() {
                     </div>
                   ) : null}
 
-                  <div style={historyPanelStyle}>
+                  <div id="ai-history" style={historyPanelStyle}>
                     <div style={aiSettingsRowStyle}>
                       <h3 style={subHeadingStyle}>Dry-run 历史记录</h3>
                       <Button disabled={!selected || dryRunHistoryLoading} loading={dryRunHistoryLoading} onClick={() => selected && void loadDryRunHistory(selected.id, selectedHistorySampleID)} theme="light">
@@ -1077,18 +1192,18 @@ export default function OwnerDashboard() {
                     </label>
                     {dryRunHistoryError ? <p style={errorTextStyle}>{dryRunHistoryError}</p> : null}
                     {dryRunHistory.length > 0 && (
-                      <div style={{ ...historySummaryStyle, background: 'var(--color-bg)', padding: 'var(--space-sm) var(--space-md)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border-light)' }}>
+                      <div style={{ ...historySummaryStyle, background: 'var(--lh-bg)', padding: 'var(--space-sm) var(--space-md)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--lh-border)' }}>
                         <span style={{ fontWeight: 600 }}>统计:</span>
                         <span>总计 {dryRunHistorySummary.total}</span>
-                        <span style={{ color: 'var(--color-success)' }}>匹配 {dryRunHistorySummary.matched}</span>
-                        <span style={{ color: 'var(--color-danger)' }}>不匹配 {dryRunHistorySummary.mismatch}</span>
-                        <span style={{ color: 'var(--color-text-muted)' }}>失败 {dryRunHistorySummary.failed}</span>
+                        <span style={{ color: 'var(--lh-success)' }}>匹配 {dryRunHistorySummary.matched}</span>
+                        <span style={{ color: 'var(--lh-danger)' }}>不匹配 {dryRunHistorySummary.mismatch}</span>
+                        <span style={{ color: 'var(--lh-text-3)' }}>失败 {dryRunHistorySummary.failed}</span>
                         <span>匹配率 {formatPercent(dryRunHistorySummary.matchRate)}</span>
                         <span>均分 {formatOptionalNumber(dryRunHistorySummary.averageScore)}</span>
                       </div>
                     )}
                     {dryRunGuard ? (
-                      <div style={{ ...historySummaryStyle, background: 'var(--color-surface)', padding: 'var(--space-sm) var(--space-md)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border-light)' }}>
+                      <div style={{ ...historySummaryStyle, background: 'var(--lh-bg-card)', padding: 'var(--space-sm) var(--space-md)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--lh-border)' }}>
                         <span style={{ fontWeight: 600 }}>Guard:</span>
                         <span>{formatDryRunGuardState(dryRunGuard)}</span>
                         <span>{dryRunGuard.windowMinutes}m window</span>
@@ -1117,23 +1232,32 @@ export default function OwnerDashboard() {
                           </thead>
                           <tbody>
                             {dryRunHistory.map((run) => (
-                              <tr key={run.id}>
-                                <td style={resultCellStyle}>#{run.id}</td>
-                                <td style={resultCellStyle}>{run.goldenSampleId ? `#${run.goldenSampleId}` : '-'}</td>
-                                <td style={resultCellStyle}>{run.expectedVerdict || '-'}</td>
-                                <td style={resultCellStyle}>{run.actualVerdict || '-'}</td>
-                                <td style={resultCellStyle}>
-                                  <span style={{ color: run.matchedExpected ? 'var(--color-success)' : run.matchedExpected === false ? 'var(--color-danger)' : 'inherit', fontWeight: 600 }}>
-                                    {formatMatched(run.matchedExpected)}
-                                  </span>
-                                </td>
-                                <td style={resultCellStyle}>
-                                  <StatusBadge status={run.status} />
-                                  {run.errorMsg ? <span style={errorTextStyle}> {run.errorMsg}</span> : null}
-                                </td>
-                                <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
-                                <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
-                              </tr>
+                              <Fragment key={run.id}>
+                                <tr>
+                                  <td style={resultCellStyle}>#{run.id}</td>
+                                  <td style={resultCellStyle}>{run.goldenSampleId ? `#${run.goldenSampleId}` : '-'}</td>
+                                  <td style={resultCellStyle}>{run.expectedVerdict || '-'}</td>
+                                  <td style={resultCellStyle}>{run.actualVerdict || '-'}</td>
+                                  <td style={resultCellStyle}>
+                                    <span style={{ color: run.matchedExpected ? 'var(--lh-success)' : run.matchedExpected === false ? 'var(--lh-danger)' : 'inherit', fontWeight: 600 }}>
+                                      {formatMatched(run.matchedExpected)}
+                                    </span>
+                                  </td>
+                                  <td style={resultCellStyle}>
+                                    <StatusBadge status={run.status} />
+                                    {run.errorMsg ? <span style={errorTextStyle}> {run.errorMsg}</span> : null}
+                                  </td>
+                                  <td style={resultCellStyle}>v{run.promptVersion} #{run.aiPromptId}</td>
+                                  <td style={resultCellStyle}>{formatDateTime(run.finishedAt || run.createdAt)}</td>
+                                </tr>
+                                {run.result?.stability ? (
+                                  <tr>
+                                    <td style={resultCellStyle} colSpan={8}>
+                                      <DryRunStabilityPanel stability={run.result.stability} />
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -1142,15 +1266,13 @@ export default function OwnerDashboard() {
                   </div>
                 </div>
               </section>
-              {exportRows.length > 0 ? (
-                <pre style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: 'var(--color-bg)', overflow: 'auto', maxHeight: 260, borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border-light)' }}>
-                  {JSON.stringify(exportRows.slice(0, 3), null, 2)}
-                </pre>
-              ) : null}
+                </div>
+              )}
             </>
-          ) : (
-            <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
-              请在左侧选择一个标注任务进行管理
+          ) : null}
+          {detailSection !== 'tasks' && !selected && (
+            <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--lh-text-3)' }}>
+              请在「任务管理」中选择一个任务进行配置
             </div>
           )}
         </section>
@@ -1159,8 +1281,48 @@ export default function OwnerDashboard() {
   )
 }
 
+// 稳定性 dry-run(repeat_count > 1)指标面板:展示一致率 / 期望匹配率 / 分数标准差 / 错误率,
+// 并附说明性文案——低一致率代表 prompt 需要调整或人工复核,而不是系统故障。
+function DryRunStabilityPanel({ stability }: { stability: AIDryRunStability }) {
+  const lowAgreement = stability.verdict_agreement < 1
+  return (
+    <div style={stabilityPanelStyle}>
+      <div style={stabilityMetricsRowStyle}>
+        <StabilityMetric label="结论一致率 / Agreement" value={formatRateAsPercent(stability.verdict_agreement)} tone={lowAgreement ? 'warn' : 'success'} />
+        <StabilityMetric label="期望匹配率 / Match rate" value={formatOptionalRatePercent(stability.expected_match_rate)} />
+        <StabilityMetric label="分数标准差 / Score stddev" value={stability.score_stddev.toFixed(2)} />
+        <StabilityMetric label="错误率 / Error rate" value={formatRateAsPercent(stability.error_rate)} tone={stability.error_rate > 0 ? 'warn' : 'success'} />
+        <StabilityMetric label="重复次数 / Runs" value={`${stability.success_count}/${stability.repeat_count}`} />
+      </div>
+      {stability.runs.length > 0 ? (
+        <div style={stabilityRunsStyle}>
+          <span style={{ color: 'var(--lh-text-3)' }}>逐次结论 / Per-run:</span>
+          {stability.runs.map((attempt, index) => (
+            <span key={index} style={stabilityRunChipStyle}>{attempt.verdict} · {attempt.score}</span>
+          ))}
+        </div>
+      ) : null}
+      {lowAgreement ? (
+        <div style={stabilityHintStyle}>
+          一致率偏低说明 prompt 需要调整或人工复核,并非系统故障 / Low agreement means the prompt needs adjustment or manual review, not a system failure.
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function StabilityMetric({ label, value, tone = 'muted' }: { label: string, value: string, tone?: 'success' | 'warn' | 'muted' }) {
+  const accent = tone === 'success' ? 'var(--lh-success)' : tone === 'warn' ? 'var(--lh-danger)' : 'var(--lh-text-1)'
+  return (
+    <div style={stabilityMetricStyle}>
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--lh-text-3)' }}>{label}</div>
+      <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: accent }}>{value}</div>
+    </div>
+  )
+}
+
 function MetricCell({ label, value, detail, tone = 'muted' }: { label: string, value: string, detail: string, tone?: 'success' | 'teal' | 'muted' }) {
-  const accent = tone === 'success' ? 'var(--color-success)' : tone === 'teal' ? 'var(--color-teal)' : 'var(--color-text)'
+  const accent = tone === 'success' ? 'var(--lh-success)' : tone === 'teal' ? 'var(--lh-cyan)' : 'var(--lh-text-1)'
   return (
     <div style={metricCellStyle}>
       <div style={metricLabelStyle}>{label}</div>
@@ -1217,6 +1379,21 @@ const defaultModel = ''
 const defaultGoldenPayload = '{"prompt":"示例题目"}'
 const defaultGoldenExpectedAnswer = '{"summary":"示例答案"}'
 const defaultGoldenExpectedVerdict = 'pass'
+
+// 记住 owner 上次选中的任务,跨 owner 子页导航 / 刷新沿用,避免每次重置回列表首位(常是空草稿)。
+const LAST_OWNER_TASK_KEY = 'labelhub_owner_last_task_id'
+
+function readLastOwnerTaskId(): number | null {
+  const raw = localStorage.getItem(LAST_OWNER_TASK_KEY)
+  const id = raw ? Number(raw) : NaN
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function writeLastOwnerTaskId(id: number | null) {
+  if (id != null) {
+    localStorage.setItem(LAST_OWNER_TASK_KEY, String(id))
+  }
+}
 
 const defaultDimensionsJSON = JSON.stringify([
   { name: '相关性', description: '是否相关', weight: 1 },
@@ -1377,6 +1554,15 @@ function formatPercent(value: number | null) {
   return value === null ? '-%' : `${value}%`
 }
 
+// 把 0~1 的比例换算成百分比展示(稳定性指标)。
+function formatRateAsPercent(value: number) {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatOptionalRatePercent(value: number | undefined) {
+  return value === undefined ? '-' : formatRateAsPercent(value)
+}
+
 function formatOptionalNumber(value: number | null) {
   return value === null ? '-' : String(value)
 }
@@ -1399,26 +1585,26 @@ function requestedNumberParam(key: string) {
 }
 
 const panelStyle: React.CSSProperties = {
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
+  background: 'var(--lh-bg-card)',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-lg)',
   padding: 'var(--space-xl)',
   boxShadow: 'var(--shadow-md)',
 }
 
 const headingStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-heading)',
+  fontFamily: 'var(--lh-font-sans)',
   fontSize: 'var(--text-h2)',
   margin: 0,
-  color: 'var(--color-text)',
+  color: 'var(--lh-text-1)',
   fontWeight: 600,
 }
 
 const subHeadingStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-heading)',
+  fontFamily: 'var(--lh-font-sans)',
   fontSize: '1.1rem',
   margin: 0,
-  color: 'var(--color-text)',
+  color: 'var(--lh-text-1)',
   fontWeight: 600,
 }
 
@@ -1430,36 +1616,39 @@ const controlStripStyle: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
   gap: 'var(--space-sm)',
-  marginBottom: 'var(--space-lg)',
-  padding: 'var(--space-sm)',
-  border: '1px solid var(--color-border-light)',
+  marginBottom: 'var(--space-md)',
+  padding: '6px',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-lg)',
-  background: 'var(--color-canvas)',
+  background: 'var(--lh-bg-elev)',
 }
 
 const metricCellStyle: React.CSSProperties = {
   minWidth: 0,
-  padding: 'var(--space-md)',
-  border: '1px solid var(--color-border-light)',
+  padding: '10px 12px',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-md)',
-  background: 'var(--color-surface)',
+  background: 'var(--lh-bg-card)',
+  boxShadow: 'var(--lh-shadow-sm)',
 }
 
 const metricLabelStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
+  fontFamily: 'var(--lh-font-mono)',
   fontSize: 10,
-  color: 'var(--color-text-muted)',
+  color: 'var(--lh-text-3)',
 }
 
 const metricValueStyle: React.CSSProperties = {
   marginTop: 4,
   fontWeight: 700,
   fontSize: 'var(--text-h2)',
+  fontFamily: 'var(--lh-font-display)',
+  fontVariantNumeric: 'tabular-nums',
 }
 
 const metricDetailStyle: React.CSSProperties = {
   marginTop: 2,
-  color: 'var(--color-text-secondary)',
+  color: 'var(--lh-text-2)',
   fontSize: 'var(--text-sm)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -1494,7 +1683,7 @@ const dryRunGridStyle: React.CSSProperties = {
 const fieldStyle: React.CSSProperties = {
   display: 'grid',
   gap: 8,
-  color: 'var(--color-text-secondary)',
+  color: 'var(--lh-text-2)',
   fontSize: 'var(--text-sm)',
 }
 
@@ -1507,9 +1696,9 @@ const dimensionPanelStyle: React.CSSProperties = {
   display: 'grid',
   gap: 'var(--space-md)',
   padding: 'var(--space-md)',
-  border: '1px solid var(--color-border-light)',
+  border: '1px solid var(--lh-border)',
   borderRadius: 'var(--radius-md)',
-  background: 'var(--color-bg)',
+  background: 'var(--lh-bg)',
 }
 
 const dimensionRowStyle: React.CSSProperties = {
@@ -1522,7 +1711,7 @@ const dimensionRowStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: '100%',
   minHeight: 40,
-  border: '1px solid var(--color-border)',
+  border: '1px solid var(--lh-border-strong)',
   borderRadius: 'var(--radius-sm)',
   padding: '0 var(--space-md)',
   boxSizing: 'border-box',
@@ -1535,7 +1724,7 @@ const textareaStyle: React.CSSProperties = {
   minHeight: 100,
   padding: 'var(--space-sm) var(--space-md)',
   resize: 'vertical',
-  fontFamily: 'var(--font-body)',
+  fontFamily: 'var(--lh-font-sans)',
   lineHeight: 1.5,
 }
 
@@ -1551,9 +1740,9 @@ const dryRunResultStyle: React.CSSProperties = {
 const verdictPillStyle: React.CSSProperties = {
   padding: '2px 8px',
   borderRadius: 'var(--radius-sm)',
-  background: 'var(--color-code-bg)',
-  border: '1px solid var(--color-border-light)',
-  fontFamily: 'var(--font-mono)',
+  background: 'var(--lh-bg-elev)',
+  border: '1px solid var(--lh-border)',
+  fontFamily: 'var(--lh-font-mono)',
   fontSize: 'var(--text-sm)',
   fontWeight: 700,
 }
@@ -1588,20 +1777,20 @@ const goldenSampleActionsStyle: React.CSSProperties = {
 const compactPreviewStyle: React.CSSProperties = {
   margin: 0,
   padding: 'var(--space-sm)',
-  background: 'var(--color-bg)',
+  background: 'var(--lh-bg)',
   borderRadius: 'var(--radius-sm)',
-  border: '1px solid var(--color-border-light)',
+  border: '1px solid var(--lh-border)',
   maxHeight: 120,
   overflow: 'auto',
   whiteSpace: 'pre-wrap',
-  color: 'var(--color-text-secondary)',
+  color: 'var(--lh-text-2)',
 }
 
 const resultTableWrapStyle: React.CSSProperties = {
   marginTop: 'var(--space-lg)',
   overflowX: 'auto',
   borderRadius: 'var(--radius-md)',
-  border: '1px solid var(--color-border-light)',
+  border: '1px solid var(--lh-border)',
 }
 
 const resultTableStyle: React.CSSProperties = {
@@ -1612,7 +1801,7 @@ const resultTableStyle: React.CSSProperties = {
 }
 
 const resultCellStyle: React.CSSProperties = {
-  borderBottom: '1px solid var(--color-border-light)',
+  borderBottom: '1px solid var(--lh-border)',
   padding: 'var(--space-md)',
   textAlign: 'left',
   verticalAlign: 'top',
@@ -1627,46 +1816,84 @@ const historySummaryStyle: React.CSSProperties = {
   flexWrap: 'wrap',
   gap: 'var(--space-md)',
   marginTop: 'var(--space-md)',
-  color: 'var(--color-text-secondary)',
+  color: 'var(--lh-text-2)',
   fontSize: 'var(--text-sm)',
+}
+
+const stabilityPanelStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 'var(--space-sm)',
+  padding: 'var(--space-sm) var(--space-md)',
+  background: 'var(--lh-bg)',
+  borderRadius: 'var(--radius-sm)',
+}
+
+const stabilityMetricsRowStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-lg)',
+}
+
+const stabilityMetricStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 2,
+}
+
+const stabilityRunsStyle: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: 'var(--space-xs)',
+  fontSize: 'var(--text-sm)',
+}
+
+const stabilityRunChipStyle: React.CSSProperties = {
+  padding: '2px var(--space-sm)',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--lh-border)',
+  background: 'var(--lh-bg-card)',
+  color: 'var(--lh-text-2)',
+}
+
+const stabilityHintStyle: React.CSSProperties = {
+  fontSize: 'var(--text-sm)',
+  color: 'var(--lh-text-3)',
 }
 
 const alertStyle: React.CSSProperties = {
   padding: 'var(--space-md)',
   borderRadius: 'var(--radius-md)',
-  border: '1px solid var(--color-danger)',
+  border: '1px solid var(--lh-danger)',
   background: '#fff1f0',
-  color: 'var(--color-danger)',
+  color: 'var(--lh-danger)',
 }
 
 const errorTextStyle: React.CSSProperties = {
-  color: 'var(--color-danger)',
+  color: 'var(--lh-danger)',
   margin: 'var(--space-sm) 0 0',
 }
 
 const mutedStyle: React.CSSProperties = {
-  color: 'var(--color-text-muted)',
+  color: 'var(--lh-text-3)',
   fontSize: 'var(--text-sm)',
 }
 
-const listButtonStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 4,
-  width: '100%',
-  padding: 'var(--space-md)',
-  textAlign: 'left',
-  background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-light)',
+const taskChipStyle: React.CSSProperties = {
+  padding: 'var(--space-xs) var(--space-md)',
   borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--lh-border)',
+  background: 'var(--lh-bg-card)',
+  color: 'var(--lh-text-2)',
+  fontSize: 'var(--text-sm)',
   cursor: 'pointer',
-  transition: 'all var(--duration-fast)',
 }
 
-const activeListButtonStyle: React.CSSProperties = {
-  ...listButtonStyle,
-  borderColor: 'var(--color-accent)',
-  background: 'var(--color-surface-hover)',
-  boxShadow: 'var(--shadow-sm)',
+const activeTaskChipStyle: React.CSSProperties = {
+  ...taskChipStyle,
+  borderColor: 'var(--lh-primary)',
+  background: 'var(--lh-primary-soft)',
+  color: 'var(--lh-primary)',
+  fontWeight: 600,
 }
 
 const templateDesignerLinkStyle: React.CSSProperties = {
@@ -1676,9 +1903,9 @@ const templateDesignerLinkStyle: React.CSSProperties = {
   minHeight: 32,
   padding: '0 var(--space-md)',
   borderRadius: 'var(--radius-sm)',
-  background: 'var(--color-accent)',
+  background: 'var(--lh-primary)',
   color: '#fff',
-  fontFamily: 'var(--font-body)',
+  fontFamily: 'var(--lh-font-sans)',
   fontSize: 'var(--text-sm)',
   fontWeight: 600,
   textDecoration: 'none',

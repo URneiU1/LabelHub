@@ -86,6 +86,9 @@ func TestClaimItem_HappyPath(t *testing.T) {
 			AddRow(11, 1, itemStatusAvailable))
 	mock.ExpectExec(`(?is)^UPDATE .task_items. SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// findOrCreateSubmission 先查 (item,labeler) 既有 submission(无)→ 再按冻结模板版本新建。
+	mock.ExpectQuery(`(?is)^SELECT.+FROM .submissions. WHERE item_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_templates.`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version", "schema_json"}).
 			AddRow(101, 1, 2, `{}`))
@@ -142,6 +145,8 @@ func TestReviewApprove_TransactionFullSequence(t *testing.T) {
 			AddRow(42, 1, 11, "human_reviewing", revisionID))
 	mock.ExpectQuery(`(?is)^SELECT count\(\*\) FROM .task_reviewers.`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 已有 2 条 approve → 本次是终审(第 3 次),推到 approved。
+	expectReviewApproveCounts(mock, 2, 0)
 	mock.ExpectExec(`(?is)^INSERT INTO .human_reviews.`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`(?is)^UPDATE .submissions. SET`).
@@ -191,8 +196,8 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 	claims := &auth.Claims{UserID: 7, Username: "labeler1", Roles: []string{"labeler"}}
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled"}).
-			AddRow(1, 1, "published", false, true))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled", "review_sampling_pct"}).
+			AddRow(1, 1, "published", false, true, 100))
 
 	claimedBy := uint64(7)
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.`).
@@ -202,8 +207,8 @@ func TestSubmitFromRevising_WritesTwoAuditLogs(t *testing.T) {
 	mock.ExpectBegin()
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.+FOR UPDATE`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled"}).
-			AddRow(1, 1, "published", false, true))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "owner_id", "status", "ai_review_enabled", "human_review_enabled", "review_sampling_pct"}).
+			AddRow(1, 1, "published", false, true, 100))
 
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .task_items.+FOR UPDATE`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "claimed_by", "status"}).

@@ -13,9 +13,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@douyinfe/semi-ui": "^2.98.0",
     "@visactor/react-vchart": "^2.0.22",
     "@visactor/vchart": "^2.0.22",
+    "expr-eval": "^2.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
@@ -34,6 +38,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "happy-dom": "^20.10.2",
     "jsdom": "^29.1.1",
     "openapi-typescript": "^7.13.0",
     "typescript": "~6.0.2",

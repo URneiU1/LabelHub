@@ -16,6 +16,7 @@ import (
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
 	"labelhub-api/internal/policy"
+	"labelhub-api/internal/statemachine"
 )
 
 type humanReviewSummaryResponse struct {
@@ -48,6 +49,19 @@ func loadOwnedTask(db *gorm.DB, c *gin.Context) (model.Task, bool) {
 	}
 	httpx.Error(c, http.StatusForbidden, "FORBIDDEN", "task does not belong to current owner")
 	return model.Task{}, false
+}
+
+// ensureTaskDraft 拦截"发布后修改题集"。题集(task_items 的 payload 与条目集合)只在
+// draft 阶段可变;一旦发布,提交只保存 answer revision,而 AI 审核 join 的是 task_items.payload
+// 的当前值,此时覆盖 payload 会让同一 submission 的 AI 输入在提交后被改写,人审与审计也无法
+// 还原提交时事实;发布后追加条目还会改变题集规模、打乱完成度统计(见 H-02)。
+// 与任务策略冻结同源:draft 之后即冻结。
+func ensureTaskDraft(c *gin.Context, task model.Task) bool {
+	if task.Status == statemachine.TaskDraft {
+		return true
+	}
+	httpx.Error(c, http.StatusConflict, "TASK_NOT_DRAFT", "task items can only be changed while the task is in draft")
+	return false
 }
 
 // enforceCanReadTask:policy 判可见 + 不可见时写 403。
@@ -96,7 +110,7 @@ func templateForBundle(db *gorm.DB, task model.Task, submission model.Submission
 // labeler 的 ClaimItem / GetItem 两条路径都收敛到这里,保持 HTTP 响应结构一致。
 func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskItem) {
 	var submission model.Submission
-	submissionErr := db.Where("item_id = ?", item.ID).First(&submission).Error
+	submissionErr := submissionQueryForItem(db, c, item.ID).First(&submission).Error
 	if submissionErr != nil && !errors.Is(submissionErr, gorm.ErrRecordNotFound) {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load submission")
 		return
@@ -140,6 +154,17 @@ func respondItem(db *gorm.DB, c *gin.Context, task model.Task, item model.TaskIt
 		payload["warnings"] = []string{"template_missing"}
 	}
 	httpx.OK(c, payload)
+}
+
+func submissionQueryForItem(db *gorm.DB, c *gin.Context, itemID uint64) *gorm.DB {
+	query := db.Where("item_id = ?", itemID)
+	claims, _ := middleware.Claims(c)
+	if policy.HasRole(claims, policy.RoleLabeler) &&
+		!policy.HasRole(claims, policy.RoleReviewer) &&
+		!policy.HasRole(claims, policy.RoleAdmin) {
+		query = query.Where("labeler_id = ?", claims.UserID)
+	}
+	return query
 }
 
 func parseIDParam(c *gin.Context, name string) (uint64, bool) {

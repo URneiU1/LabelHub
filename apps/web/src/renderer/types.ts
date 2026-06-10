@@ -5,10 +5,12 @@ export const widgetTypes = [
   'Input',
   'TextArea',
   'Radio',
+  'MultiSelect',
   'Tags',
   'RichText',
   'JSONEditor',
   'FileUpload',
+  'ImageUpload',
   'LLMTrigger',
 ] as const
 
@@ -32,6 +34,17 @@ export type RequiredWhen = {
   notEmpty?: boolean
 }
 
+export type VisibleWhen = {
+  field: string
+  equals?: unknown
+  notEmpty?: boolean
+}
+
+export type CustomRule = {
+  expr: string
+  message: string
+}
+
 export type FieldSchema = {
   _draftId?: string
   name: string
@@ -39,6 +52,8 @@ export type FieldSchema = {
   label: string
   required?: boolean
   requiredWhen?: RequiredWhen
+  visibleWhen?: VisibleWhen
+  customRule?: CustomRule
   regex?: string
   fields?: FieldSchema[]
   tabs?: TabSchema[]

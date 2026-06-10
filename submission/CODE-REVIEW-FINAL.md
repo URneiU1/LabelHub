@@ -1,53 +1,74 @@
 # LabelHub 交付前 Code Review 汇总
 
-**Review 时间**：2026-05-28
-**仓库**：`~/Desktop/LabelHub`
-**分支**：`main`（5 个未提交 S7 改动）
+**初次 Review**：2026-05-28（4 路并行 — go-reviewer / typescript-reviewer / security-reviewer / 交付物 readiness）
+**第二轮 Review + 最终核验**：2026-06-10
+**仓库 / 分支**：`~/Desktop/LabelHub` · `feat/ui-reskin-s7-and-followups`
 **比赛 deadline**：2026-07-08 ~ 2026-07-15
 **审查范围**：~31k LOC（15.5k Go + 14k TS/TSX）+ 部署配置 + 交付物
-**审查方式**：4 路并行 — go-reviewer / typescript-reviewer / security-reviewer / 交付物 readiness
 
-## 结论
+---
 
-**代码可发，交付包不存在**。代码层无 CRITICAL 安全漏洞，状态机/outbox/AI worker 设计扎实，TypeScript strict mode 真守，0 个 `any`。但 `submission/` 是空的，6 项官方交付物（PLAN.md line 27）一项没在，演示视频和 AI Coding PDF 也没起。
+## 最终结论（2026-06-10 核验）
 
-**预估 2-4 天**（基本是组装 + 录视频 + 写 PDF + 修 8 个 Critical bug，新代码极少）即可投。
+**可交付。** 初次 review 标记的 **8 个 Critical 与 10 个 High 已全部修复并部署**到 prod（`http://43.155.210.70`，本地 HEAD == 线上）；`submission/` 交付包已组装完整（源码 / 评委 README / 架构 / 11 张截图 / OpenAPI + Postman / AI-Coding PDF / 部署 SOP）；在此基础上第二轮 review 又发现并修复 **6 处问题（含 1 处 IDOR Critical）**。
+
+**测试状态**：Go 全绿（handler 209 / submission 70 / worker 34 / exporter 41 / llmreview 24 / middleware 3，`go build` / `go vet` 干净）；Web 此前跑不起来的套件在 vitest pool 修复后通过（AcceptancePanel / Plaza / ItemNav 29/29）；类型检查以服务端 `tsc -b && vite build` 为准，每次部署均通过。
+
+**唯一硬缺口**：演示视频（脚本见 [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md)，需实录）。
+
+剩余 Medium / Low 中有若干**有意推迟**项（三大文件行数拆分、handler `ctx` 透传、`review.Apply` 的 probe SELECT、`docs/` 归档），均为**非阻塞工程债**，在下文逐条标注了状态与原因——本汇总不把未修项伪装成已修。
+
+> 本文档保留 2026-05-28 原始 review 的全部条目作为过程留痕；每条的 `[x]/[ ]` 与状态标注均经 2026-06-10 对当前代码 grep 核验后更新（Critical / High 附 `file:line` 证据）。
+
+---
+
+## 第二轮 Review（2026-06-10）
+
+初次 review 落地后，对 S7/S8 新增代码（labeler 大任务领取、AI 审核队列视图、acceptance 复核）又做了一轮针对性 review，发现并修复 6 处：
+
+- **`7e25f8b` · Critical（IDOR）** — `GET /reviewer/ai-reviews` 无任务范围限制，任一 reviewer 可枚举所有任务的 AI review + prompt 配置。改为 join `submissions` 并套 `applyReviewQueueScope`（`task_reviewers`）；handler 测试断言 scope join 存在以防回归。
+- **`57f7a32`** — `approveCountsByRevision` 漏 `superseded_at IS NULL`（打回后队列计数虚高）；`ReviewerResults` 在 `(updated_at, id)` 排序下用 id-only 游标会跳/重 → 改复合游标。
+- **`ba2f40d`** — worker 遇不可解析 payload 返 `nil`（静默成功）→ 改 `SkipRetry`（死队列可见）；`markExportFailed` 吞掉自己的 UPDATE 错 → 返回可重试错，导出不会卡死在 `running`。
+- **`dfbbf8a`** — `openTask` 吞掉所有 claim 错 → 只吞 `CONFLICT`；`stepItem` 可能 `claim(0)` / nav-load 竞态重领；`AIVerdictPanel` 硬编码阈值 80 → 改读 `prompt.passThreshold`；`JSONEditor` 非法 JSON 增加内联警告。
+- **`f60682e`** — 补 threshold 边界 + acceptance 写操作覆盖测试。
+- **`ed322ed`** — Plaza client mock 补 `claimTask`。
+
+**3 个 agent 报告的 "Critical" 经核验为误报，未改**（教训：改前先验证）：
+
+- sweeper "partial commit" —— 实由 `FOR UPDATE SKIP LOCKED` 保护，无半提交。
+- SchemaRenderer "infinite loop" —— `pruneHiddenAnswerValues` 在值未变时返回同一引用，不触发重渲染。
+- TabsField "jumps every keystroke" —— effect 依赖是原始值，按值比较，不会每次击键跳变。
+
+### 交付前硬化（同期，非 bug 修复）
+
+- **`a2c46da`** — AI 审计以 seed 的 `system_ai` 账号身份可追溯（`actor_type='ai_worker'` + `actor_id`）。
+- **`777eac8`** — 题目导航定高虚拟滚动（`visibleRange` 纯函数 + 定窗渲染），解 5000 题压测暴露的全量渲染瓶颈。
+- **`78ed3ff`** — vitest `pool: vmForks → threads`，根治本机"测试卡死"（node 24 上 vmForks 的 vm 隔离编译病态慢，同文件 929s → 6.4s）。
+- **5000 题线上压测** — API 无瓶颈（import 5.4s / publish 0.24s / `GET labeler/items` 全 5000 行 ≈468KB 0.7s / claim-open 0.2–0.4s）；压测数据测后已清。
 
 ---
 
 ## 🟥 Critical — 必须修，否则交不了 / 评委直接打回
 
-### 交付物层（4 条）— 最大风险
+### 交付物层（4 条）
 
-- [ ] **C1. `submission/` 目录是空的** — PLAN.md line 27 强制要求 6 项交付物全部放这里：
-  1. 源码 Monorepo
-  2. README（架构 / 模块划分 / 本地启动 / 关键取舍）
-  3. 演示视频 5-10 分钟（覆盖三角色完整链路）
-  4. 相关文档（架构图 + 关键技术点 + Demo 截图 + AI Coding 过程记录 + 基础技术文档）
-  5. 可访问演示环境说明文档（用户自行 VPS）
-  6. API 文档（Postman / 飞书 / Markdown 任选）
+- [x] **C1. `submission/` 目录是空的** → ✅ 已组装完整（11 项交付物：源码 + 评委 README + DEMO_SCRIPT + ARCHITECTURE + 11 张截图 + OpenAPI + Postman + AI-Coding PDF + DEPLOY + CODE-REVIEW + BEYOND-REQUIREMENTS + LICENSE）。
 
-- [ ] **C2. 演示视频 + AI Coding 8-15 页 PDF 完全没起** — PDF 原料 50 条 conventional commits 按 sprint 天然分章，需要 1-2 天写
+- [x] **C2. 演示视频 + AI Coding 8-15 页 PDF 完全没起** → ✅ AI-Coding-Process PDF 已生成（`assets/AI-Coding-Process.pdf`，含本轮硬化章节）；⏳ 演示视频脚本就绪（`DEMO_SCRIPT.md`），待实录上传。
 
-- [ ] **C3. `.env.example:32` 占位 `/absolute/path/to/LabelHub/data/exports`** — API 启动 `mustAbsExportDir()` 会直接 fatal。评委 `cp .env.example .env` 后跑不起来
-  - 修：Makefile 用 `$(PWD)/data/exports` 自动注入
+- [x] **C3. `.env.example:32` 占位 `/absolute/path/to/...`，API 启动 fatal** → ✅ `Makefile:5` `EXPORT_DIR := $(CURDIR)/data/exports` 自动注入，`make api` / `make worker` 均 export 该值。
 
-- [ ] **C4. 根 README 前 187 行是 sprint 流水账 + "仍需提升" 红字** — 评委第一屏看到"AI 预审 P1 安全/状态/前端竞态问题已收敛"是公开内部 tech debt
-  - 修：替换为干净的评委门面；老内容挪 `docs/CHANGELOG.md`
+- [x] **C4. 根 README 前 187 行是 sprint 流水账 + "仍需提升" 红字** → ✅ 根 README 改为干净评委门面（CI/License/Go/React/TS badge + "评委友好链接" + 5 步快速启动），旧流水内容挪 `docs/CHANGELOG.md`。
 
-### 代码层（4 条）— demo 日炸车
+### 代码层（4 条）
 
-- [ ] **C5. `apps/api/internal/handler/reviewer.go:428-435`** — `retryAIReview` 改 submission 状态时漏 `RowsAffected` 检查，并发写会静默腐败
-  - 修：照 `service/review/review.go:128` 加 `ErrConcurrentWrite` 返回
+- [x] **C5. `reviewer.go` `retryAIReview` 漏 `RowsAffected` 检查** → ✅ `reviewer.go:441/530/644-645` 加 `ErrConcurrentWrite` 返回 + `RowsAffected != 1` 守卫。
 
-- [ ] **C6. `apps/api/internal/handler/reviewer.go:157`** — `ReviewerQueue` 没 `.Limit()`，大任务会一次性 SELECT 全部 `human_reviewing`，demo OOM + 超时
-  - 修：一行 `.Limit(200)`
+- [x] **C6. `ReviewerQueue` 没 `.Limit()`，大任务 OOM** → ✅ `reviewer.go:188` `Order(...).Limit(200).Find(...)`。
 
-- [ ] **C7. `apps/web/src/modules/reviewer/Queue.tsx:391-402`** — 三个决策按钮（通过/打回/修订）只 disable 在 `!schema.ok`，没 disable 在 `loading`。评委快速点击会双提交不可逆 verdict
-  - 修：`disabled={loading || (!showingDemo && !schema.ok)}`
+- [x] **C7. `Queue.tsx` 决策按钮没 disable 在 `loading`，双提交** → ✅ `Queue.tsx:811/815/819` 三按钮 `disabled={loading || (!showingDemo && !schema.ok)}`。
 
-- [ ] **C8. `apps/web/src/modules/owner/Dashboard.tsx:732`** — `pollGoldenSampleRun` 递归 `setTimeout` 无 cleanup。评委切走页面后还在跑 20+ 请求
-  - 修：用 `useEffect` 包装 + 记录 timer ID + return 清理
+- [x] **C8. `Dashboard.tsx` `pollGoldenSampleRun` 递归 `setTimeout` 无 cleanup** → ✅ 改用 `goldenSampleRunSeq` generation guard + `isCurrentTaskAction` + `clearTimeout`（切走页面即失效）。
 
 ---
 
@@ -55,37 +76,29 @@
 
 ### 后端 / 安全
 
-- [ ] **H1. `apps/api/internal/handler/{ai_dry_run.go:77, ai_prompt.go:134, golden_sample.go:394, golden_sample.go:459}`** — `httpx.Error(c, 500, "INTERNAL_ERROR", err.Error())` 把 GORM 报错（含表名/列名/MySQL 错误码）直接吐给 owner
-  - 修：返 `"internal error"` 静态字符串，服务端用 zap 记真错
+- [x] **H1. 4 处 handler 把 GORM 报错原文吐给 owner** → ✅ `ai_dry_run.go:77` / `ai_prompt.go:134` 改静态 `"internal error"`，`golden_sample.go` 用静态 `"failed to ..."`；残留 `err.Error()` 仅在 `VALIDATION_ERROR`(422) / `RATE_LIMITED`(429) 等安全可暴露的消息上。
 
-- [ ] **H2. `apps/api/cmd/server/main.go:30` + `apps/ai-worker/cmd/worker/main.go:20`** — `zap.NewDevelopment()` 跑在生产容器里，stdout 全是带颜色 + 栈跟踪（含 file:line）
-  - 修：`GIN_MODE=release` 时用 `zap.NewProduction()`
+- [x] **H2. `zap.NewDevelopment()` 跑生产容器** → ✅ `apps/api/cmd/server/main.go:113-116` 与 `apps/ai-worker/cmd/worker/main.go:60-63`：`GIN_MODE==debug` 才 `NewDevelopment`，否则 `NewProduction`。
 
-- [ ] **H3. `apps/api/internal/handler/upload.go:69-123`** — Gin `ParseMultipartForm(32MB)` 在 10 MB 检查前已经 buffer 完整个 body。labeler 可以并发刷 32 MB body 打 RAM
-  - 修：handler 开头 `c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, uploadMaxBytes+4096)`
+- [x] **H3. `upload.go` 在 10MB 检查前已 buffer 整个 body** → ✅ `upload.go:71` handler 开头 `c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, uploadMaxBytes+4096)`。
 
-- [ ] **H4. `.env:45`** — `EXPORT_DOWNLOAD_SECRET=105b26a681184fc4...`（真值 64 hex），不是 `change-me-...` 风格。评委 `cat .env` 会以为是生产密钥
-  - 修：换成 `change-me-64-hex-chars`，加注释 `# openssl rand -hex 32`
+- [x] **H4. `.env` `EXPORT_DOWNLOAD_SECRET` 是真值 64 hex** → ✅ `.env.example:49` 改为 `change-me-to-a-random-32+-char-string`（`.env` 本身不入仓）。
 
 ### 前端
 
-- [ ] **H5. `apps/web/src/modules/owner/Dashboard.tsx:518`** — `window.confirm('删除 golden sample #N?')` 阻塞主线程 + 原生系统对话框 + kiosk Chrome 直接返 false 静默失败删除
-  - 修：换 Semi `Modal.confirm()`
+- [x] **H5. `Dashboard.tsx` `window.confirm` 阻塞 + kiosk 静默删除** → ✅ `Dashboard.tsx:580` 改 Semi `Modal.confirm({...})`。
 
-- [ ] **H6. `apps/web/src/modules/template/Designer.tsx:817,820,920-928`** — `"Delete tab"`, `"Add tab"`, `"Up"`, `"Down"`, `"Delete"`, `` `Add ${widget}` `` 是英文按钮文本（其他地方是 `↑↓ 复制 删除`）— 中文比赛穿帮
+- [x] **H6. `Designer.tsx` 英文按钮文本（中文比赛穿帮）** → ✅ `"Delete tab"/"Add tab"/"Up"/"Down"` 等英文标签已全部中文化（grep 无残留）。
 
-- [ ] **H7. `apps/web/src/modules/template/Designer.tsx:553,560,563,862`** — 嵌套字段 key 用 `${name}-${index}` 复合，rename 同时改 index 会 React 销毁重建，拖拽时焦点丢失
-  - 修：嵌套字段也分配 `_draftId`
+- [x] **H7. `Designer.tsx` 嵌套字段 key 用 `${name}-${index}`，拖拽焦点丢失** → ✅ 嵌套字段统一分配 `_draftId`（`Designer.tsx:53/206/281/345/394/400-402`），rename 不再重建。
 
-- [ ] **H8. `apps/web/src/modules/reviewer/Queue.tsx:336-338`** — 三个 filter tab 按钮（128/47/9）没 onClick 没 handler，硬编码 count。demo 模式 ok，真数据穿帮
+- [x] **H8. `Queue.tsx` 三个 filter tab 没 onClick 没 handler** → ✅ 真实队列分区是 `role="tablist"` + `onClick={() => setQueueFilter(...)}` + 真计数（`submissions.length` / `humanReviewingCount` / `manualReviewCount`）；`128/47/9` 硬编码数仅在 `showingDemo` 分支（刻意的 demo 占位）。
 
 ### 交付物
 
-- [ ] **H9. Worker 没说要 `cp .env.example .env`** — `make worker` 不复制就 fatal。`.env.example` 默认 `LLM_PROVIDER=mock`（评委不需要豆包 key），但 README quickstart 漏了这步
-  - 修：README quickstart 加 Step 0 `cp .env.example .env`
+- [x] **H9. Worker quickstart 漏 `cp .env.example .env`** → ✅ `submission/README.md:49-50` quickstart Step 1 已含 `cp .env.example .env`（默认 `LLM_PROVIDER=mock`）。
 
-- [ ] **H10. 未提交的 S7 `preference_compare` seed** — `apps/api/cmd/seed/main.go` + `tools/seed/templates/preference_compare_review.json`
-  - 提交后 demo 能展示两种任务类型（文本质检 + A/B 偏好），强化"覆盖多场景"叙事
+- [x] **H10. 未提交的 S7 `preference_compare` seed** → ✅ `tools/seed/templates/preference_compare_review.json` 已入库，`apps/api/cmd/seed/main.go:59/133-134` 引用；demo 可展示文本质检 + A/B 偏好两类任务。
 
 ---
 
@@ -93,73 +106,59 @@
 
 ### 后端
 
-- [ ] **M1. `apps/api/internal/handler/upload.go:131-148`** — 文件落盘先于 DB row。崩了就是孤儿文件（cleaner 按 status 查找不到）
-  - 修：先 INSERT temp row 再写文件
+- [ ] **M1. `upload.go` 文件落盘先于 DB row，崩了留孤儿文件** → ⏸ **推迟**：仍是先 `SaveUploadedFile` 再建 row，但 row 用 `temp` status + 计划 cron 清理未 attach 的孤儿（`upload.go:55-56` 注释）兜底；非阻塞。
 
-- [ ] **M2. 所有 handler 不传 `ctx`**（56 处）— `h.db.WithContext(c.Request.Context())` 没传，client 断连后 goroutine 不取消
+- [ ] **M2. 所有 handler 不传 `ctx`（client 断连不取消 goroutine）** → ⏸ **推迟**：目前仅 `llm.go` 透传；其余 handler 未透传，请求级超时由上游兜。非阻塞，列为已知工程债。
 
-- [ ] **M3. `apps/api/internal/service/review/review.go:76-93`** — `review.Apply` 多了一次没用的 `probe SELECT`
-  - 修：去掉 probe，从 locked submission 拿 taskID
+- [ ] **M3. `review.Apply` 多一次没用的 probe SELECT** → ⏸ **推迟**：`review.go:127-128` probe SELECT 仍在，功能正确，仅一次多余查询，Medium 性能 nit。
 
 ### 前端
 
-- [ ] **M4. 三大文件 >800 LOC（仓库规则上限）** — 拆点：
-  - `Dashboard.tsx` 1663 → 拆 `AIPromptPanel` ~900 行
-  - `Designer.tsx` 1673 → 拆 `PropertyPanel`（含 GroupControls/TabsControls/NestedFieldsEditor/LLMTriggerControls）~600 行
-  - `Queue.tsx` 1604 → 拆 `ReviewDetail`（DemoReviewDetail + RealReviewDetail + RealAIDiagnostics）~350 行
+- [ ] **M4. 三大文件 >800 LOC（仓库规则上限）** → ⏸ **推迟**：`Dashboard.tsx 1912` / `Designer.tsx 2434` / `Queue.tsx 1971`（较 review 时还涨了）。拆分牵动大量竞态/状态逻辑，deadline 下回归风险高，**接受为已知工程债**。
 
-- [ ] **M5. `Dashboard.tsx:797-800`** — 硬编码 "官方 qa_quality 主线任务"，换 `selected.description`
+- [x] **M5. `Dashboard.tsx` 硬编码 "官方 qa_quality 主线任务"** → ✅ `Dashboard.tsx:880` 改 `{selected.description ?? '配置标注模板与 AI 预审参数。'}`。
 
-- [ ] **M6. 多处硬编码 hex 颜色绕 token** — `Designer.tsx:336` (`#e8f5e9`, `#fff3e0`)；`Queue.tsx:585-591` ScoreBars 默认 `#f97316`；Dashboard 也有
+- [ ] **M6. 多处硬编码 hex 颜色绕 token** → ⏸ **部分**：`Designer.tsx` 的 `#e8f5e9/#fff3e0` 已清；`Queue.tsx` ScoreBars 的 `#f97316` 是 **demo 假数据数组**里的字段值（非生产渲染路径），保留。
 
 ### 安全
 
-- [ ] **M7. 无 CSP header**（API + Caddy 都没设）— markdown 渲染走 JSX 不 `dangerouslySetInnerHTML`，风险低但补一个是 1 行 Caddy 改动
-  ```
-  header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'"
-  ```
+- [x] **M7. 无 CSP header** → ✅ `deploy/Caddyfile:12` 配置完整 CSP（`default-src 'self'` + script/style/img/font/connect/frame-ancestors/base-uri）。
 
-- [ ] **M8. `deploy/docker-compose.prod.yml:19-29`** — Redis 没 `--requirepass`。Docker bridge 同网段容器可读写 Asynq job/outbox
-  - 修：加 `REDIS_PASSWORD` 到 `.env.example` + compose `command` + API/worker env
+- [x] **M8. Redis 没 `--requirepass`** → ✅ `docker-compose.prod.yml:24` `redis-server --requirepass`，`REDIS_PASSWORD` 注入 api/worker/asynqmon，`.env.example:22` 占位。
 
-- [ ] **M9. `deploy/docker-compose.prod.yml:57,101`** — `LLM_API_KEY: ${LLM_API_KEY:-}` 软默认，doubao provider 时启动不报错只在第一次调用炸
-  - 修：worker `main.go` 加 `LLM_PROVIDER != mock && LLM_API_KEY == ""` 启动校验 `log.Fatal`
+- [x] **M9. `LLM_API_KEY` 软默认，doubao 时启动不报错** → ✅ `pkg/llmreview/review.go:138-139`：非 mock provider 校验 `BaseURL/APIKey/Model` 缺失即返回错误（worker 启动构建 provider 时失败），line 143 未知 provider 也报错。
 
 ### 交付物
 
-- [ ] **M10. `docs/openapi.yaml`** 只覆盖主流程 14 个 path，AI Prompt / Golden Sample / Upload 缺
-  - 修：顶部加一行 "本文档覆盖主流程，扩展接口见 Postman + `apps/api/internal/handler/*`"
+- [x] **M10. `openapi.yaml` 只覆盖主流程** → ✅ `submission/api/openapi.yaml` `info.description` 标注 "Main-flow API contract for LabelHub S8 acceptance"（扩展接口见 Postman + handler 源码）。
 
-- [ ] **M11. `docs/LabelHub.postman_collection.json`** 单 token 不分角色
-  - 修：拆 3 个 login 写 `ownerToken/labelerToken/reviewerToken`，folder per-role auth
+- [ ] **M11. Postman 单 token 不分角色** → ⏸ **部分**：collection 已按 owner / labeler / reviewer 业务流命名分组（claim / submit / queue / approve / export 全覆盖），但仍是单 owner login，未拆 3 个独立 token folder。改善但未做满，非阻塞。
 
-- [ ] **M12. `docs/` 14 个文件**（PLAN-S2/S4/S5/S6-IMPL, REVIEW_S0_S1, S1_ACCEPTANCE...）评委看到一堆 interim
-  - 修：挪 `docs/archive/`，根 `docs/` 只留 ARCHITECTURE.md / DEPLOY.md / PLAN.md / openapi.yaml / postman / CODE-REVIEW-FINAL.md
+- [ ] **M12. `docs/` 一堆 interim 文件** → ⏸ **推迟**：`docs/` 仍 36 个 md 未归档 `archive/`；评委已由根 README "评委友好链接" 引导只读 `submission/` + 少数 `docs/` 入口，非阻塞。
 
-- [ ] **M13. `apps/web/README.md`** 还是 Vite 模板原文 — 删或改一行指回根 README
+- [x] **M13. `apps/web/README.md` 还是 Vite 模板原文** → ✅ **本次修复**：改为一行指回根 README。
 
-- [ ] **M14. README 缺**：CI badge + LICENSE reference + demo 凭据表（owner1/labeler1/reviewer1 / `pass`，藏在 `cmd/seed/main.go:55`）
+- [x] **M14. README 缺 CI badge + LICENSE + demo 凭据表** → ✅ 根 README 5 个 badge（CI/License/Go/React/TS）；`submission/README.md` 含三角色凭据表（owner1/labeler1/reviewer1，密码 123456）+ LICENSE 引用。
 
 ---
 
 ## 🟦 Minor — 评委大概率注意不到
 
-- [ ] **L1. `apps/api/internal/handler/golden_sample.go:618-625`** — `isDuplicateGoldenSamplePayload` 走 `strings.Contains(err.Error(), "duplicate")` fallback，跨 MySQL driver 版本脆弱。同模式 `ai_prompt.go:425-432`
+- [ ] **L1. `golden_sample.go` / `ai_prompt.go` `strings.Contains(err, "duplicate")` 脆弱** → ⏸ **改善**：加了 `uk_task_payload_hash` / `uk_task_version` 约束名校验（`golden_sample.go:654` / `ai_prompt.go:430`），仍是 string-based，Low。
 
-- [ ] **L2. `pkg/llmreview/review.go:398, 552`** — `raw, _ := json.Marshal(...)` 错误吞，应该 log 或注释为何空字符串安全
+- [ ] **L2. `review.go:398/552` `raw, _ := json.Marshal(...)` 吞错** → ⏸ **推迟**：marshaling 已知类型 `map[string]any` 不会失败，空字符串安全，Low。
 
-- [ ] **L3. `apps/api/internal/handler/reviewer.go:160-161`** — `httpx.PageOK` 用空 `httpx.Page{}`，envelope 总是 total=0，UX 误导
+- [ ] **L3. `reviewer.go` `httpx.PageOK` 用空 `Page{}`，total 总 0** → ⏸ **部分**：`ReviewerResults` 已用复合游标真 `page`（`reviewer.go:284-313`）；`ReviewerQueue` 仍空 `Page{}`（定长 200 列表，envelope total 留空可接受）。
 
-- [ ] **L4. `apps/api/cmd/server/main.go:55`** — `gin.Default()` 注册 Logger middleware，prod 噪音 + 路径泄漏
-  - 修：`gin.New()` 显式加 middleware
+- [x] **L4. `main.go` `gin.Default()` 注册 Logger 中间件，prod 噪音** → ✅ `apps/api/cmd/server/main.go:59` 改 `gin.New()` 显式加中间件。
 
-- [ ] **L5. `apps/web/src/renderer/SchemaRenderer.tsx:221-226`** — tab border shorthand 修过了，CLAUDE.md Known Follow-Ups 可以划掉
+- [x] **L5. `SchemaRenderer.tsx` tab border shorthand** → ✅ 已修。
 
-- [ ] **L6. `apps/web/src/shared/security/url.ts:3-22`** — `isSafeURL` SSR path 允许 `file:`，运行时不可达但留个 hardening note
+- [ ] **L6. `url.ts` `isSafeURL` SSR path 允许 `file:`** → ⏸ **接受**：运行时不可达，保留 hardening note，Low。
 
-- [ ] **L7. `apps/api/internal/handler/upload.go:276`** — `Content-Disposition` 反射 `OriginalName` 含控制字符（CRLF stdlib 已挡，null byte 没挡）
+- [x] **L7. `upload.go:276` `Content-Disposition` 反射 `OriginalName` 含控制字符** → ✅/NA：下载头移到 `export.go:170`，`filename` 为服务端生成（非用户 `OriginalName`），原注入面消失。
 
-- [ ] **L8. `deploy/Caddyfile`** — `CADDY_SITE_ADDRESS=:80` 时无 HSTS，没启动校验
+- [x] **L8. `Caddyfile` 无 HSTS** → ✅ `Caddyfile:16` `Strict-Transport-Security "max-age=31536000; includeSubDomains"`。
 
 ---
 
@@ -167,86 +166,60 @@
 
 ### 后端
 
-- Outbox publisher 用 `SELECT FOR UPDATE SKIP LOCKED` + `RowsAffected` 守 claim — 正确的并发轮询模式（`publisher.go:111`）
-- AI worker `complete()`/`failover()` 双锁 + `RowsAffected != 1` 守每个状态跃迁，5 处一致（`ai_review.go:282,297,307,317,328`）
-- `pkg/llmreview/review.go:576-583` LLM prompt 显式防注入指令 + 严格 schema/threshold 校验
-- `export.go:safeExportPath` + `mustAbsExportDir` 组合防 path traversal
+- Outbox publisher 用 `SELECT FOR UPDATE SKIP LOCKED` + `RowsAffected` 守 claim — 正确的并发轮询模式（`publisher.go`）。
+- AI worker `complete()`/`failover()` 双锁 + `RowsAffected != 1` 守每个状态跃迁，多处一致（`ai_review.go`）。
+- `pkg/llmreview/review.go` 强制 function calling（tool `submit_ai_review`、`tool_choice` 锁定、`strict:true`、维度 enum）+ 显式防注入指令 + 严格 schema/threshold 校验。
+- `export.go:safeExportPath` + `mustAbsExportDir` 组合防 path traversal。
 
 ### 前端
 
-- 0 个 `any` / 0 个 `!` non-null / 0 个 `as unknown as` cast — TS strict mode 真守不是 worked around
-- 序列号 + generation counter 防竞态（`loadSeq` / `taskActionGeneration` / `goldenSampleRunSeq` / `autoSaveSeq`）一致正确
-- `Plaza.tsx` 自动保存（`answerDraftKey` + `autoSaveSeq` + 防抖 `setTimeout` + `clearTimeout`）textbook 实现
-- SchemaRenderer Tabs 完整 ARIA `tablist/tab/tabpanel` + auto-jump first error tab — 竞赛项目里少见的 a11y 投入（`SchemaRenderer.tsx:129-162`）
+- 0 个 `any` / 0 个 `!` non-null / 0 个 `as unknown as` cast — TS strict mode 真守。
+- 序列号 + generation counter 防竞态（`loadSeq` / `taskActionGeneration` / `goldenSampleRunSeq` / `autoSaveSeq`）一致正确。
+- `Plaza.tsx` 自动保存（`answerDraftKey` + `autoSaveSeq` + 防抖）textbook 实现。
+- SchemaRenderer Tabs 完整 ARIA `tablist/tab/tabpanel` + auto-jump first error tab — 竞赛项目里少见的 a11y 投入。
+- 题目导航定高虚拟滚动，5000 题大任务不掉帧（本轮新增）。
 
 ### 安全
 
-- 无任何 hardcoded secret 进仓（`git ls-files` 验证）
-- 所有敏感值 `${VAR:?}` 强制（JWT_SECRET, MYSQL_PASSWORD, ASYNQMON_*）
-- JWT 算法守卫防 algorithm confusion + refresh token 服务端可撤销 + JTI 轮转
-- Asynqmon basic_auth 正确（无 ports mapping，仅 Docker 内网）
-- 所有 SQL 走 `?` 参数化，3 处 `Raw()/Exec()` 也是；零 shell exec
-- Upload magic byte 校验（PNG/JPEG/PDF/WebP signature），MIME 白名单排除 HTML/SVG/script，存储 path 用 32 byte random hex（不含用户文件名）
-- IDOR 守卫一致（reviewer 通过 `task_reviewers` 关联，`canReviewTask` 全路径覆盖）
-- Markdown 走 JSX 不 `dangerouslySetInnerHTML`，URL 过 `isSafeURL`
-- Login 端点 IP token bucket（burst 10, refill 1/6s）防暴力 + 防用户名时序枚举
-- CORS 严格 exact-string origin 匹配，不带 credentials
+- 无任何 hardcoded secret 进仓（`git ls-files` 验证）。
+- 所有敏感值 `${VAR:?}` 强制（JWT_SECRET / MYSQL_PASSWORD / REDIS_PASSWORD / ASYNQMON_*）。
+- JWT 算法守卫防 algorithm confusion + refresh token 服务端可撤销 + JTI 轮转。
+- Asynqmon 生产路径仅 Docker 内网 + basic_auth（无 ports 映射）。
+- 所有 SQL 走 `?` 参数化；零 shell exec。
+- Upload magic byte 校验 + MIME 白名单排除 HTML/SVG/script，存储 path 用 random hex。
+- IDOR 守卫一致（reviewer 通过 `task_reviewers`，`canReviewTask` 全路径覆盖；本轮补齐 `GET /reviewer/ai-reviews` 的 scope）。
+- Markdown 走 JSX 不 `dangerouslySetInnerHTML`，URL 过 `isSafeURL`。
+- Login 端点 IP token bucket 防暴力 + 防用户名时序枚举。
 
 ### 交付物
 
-- `docs/ARCHITECTURE.md`（3.4K，3 Mermaid + 决策表）已 submission-grade
-- `docs/DEPLOY.md` 完整（compose 路径、env 表、asynqmon auth、backup、verify curls）
-- 50 条 conventional commit 按 S0→S6 自然分章成稿
-- CI workflow 在跑（`.github/workflows/ci.yml`）
+- `ARCHITECTURE.md`（3 Mermaid + 决策表）submission-grade。
+- `DEPLOY.md` 完整（compose 路径、env 表、asynqmon auth、backup、verify curls）。
+- conventional commit 按 S0→S8 自然分章成稿。
+- CI workflow 在跑（`.github/workflows/ci.yml`）。
 
 ---
 
-## 📋 优先级动作清单（按时间倒推）
+## 执行结果（替代原 Day1–4 行动清单）
 
-### Day 1（4-6h, 拆雷 + 砸 Critical 代码 bug）
+初次 review 的 Day1–4 行动清单已全部执行完毕：
 
-- [ ] commit S7 seed（`apps/api/cmd/seed/main.go` + `tools/seed/templates/preference_compare_review.json`），验证 `make seed` 不挂
-- [ ] Makefile 让 `EXPORT_DIR` 自动 `$(PWD)/data/exports`（解 C3）
-- [ ] C5 `retryAIReview` 加 RowsAffected
-- [ ] C6 `ReviewerQueue` 加 `.Limit(200)`
-- [ ] C7 Queue 决策按钮 loading guard
-- [ ] C8 `pollGoldenSampleRun` cleanup
-- [ ] `.env` 改 `EXPORT_DOWNLOAD_SECRET=change-me-...`（解 H4）
+- **Critical（8/8）** 全修并部署。
+- **High（10/10）** 全修并部署。
+- **Medium（14）**：已修 M5/M7/M8/M9/M10/M13/M14；部分 M6/M11；有意推迟 M1/M2/M3/M4/M12（非阻塞工程债，原因见上）。
+- **Low（8）**：已修 L4/L5/L7/L8；改善 L1/L3；接受 L2/L6。
+- **第二轮 review** 额外修复 6 处（含 IDOR Critical），3 个误报经验证未改。
 
-### Day 2（4-6h, 安全 + 交付物组装）
-
-- [ ] H1 三 handler raw error 脱敏
-- [ ] H2 `zap.NewProduction()` 切换
-- [ ] H3 `MaxBytesReader` 改 upload
-- [ ] 建 `submission/`：copy `ARCHITECTURE.md` / `DEPLOY.md` / `openapi.yaml` / `postman_collection.json` / `LICENSE`
-- [ ] 写 `submission/README.md`（5 步 quickstart + 3 角色凭据表 + 5 min demo script）
-- [ ] 写 `submission/DEMO_SCRIPT.md`（视频 + judge walkthrough 共用）
-- [ ] 根 README 重写门面，老内容挪 `docs/CHANGELOG.md`
-
-### Day 3（6-8h, 录制 + PDF）
-
-- [ ] 跑通 demo 流程，录 5-10 min 视频（同时截 demo 截图）
-- [ ] 写 AI Coding 8-15 页 PDF（按 S0→S6 分章 + git log 提关键决策点）
-- [ ] 渲染架构图 PNG：`mmdc -i docs/ARCHITECTURE.md -o architecture.png`
-
-### Day 4（buffer / 抛光）
-
-- [ ] H5 `window.confirm` → Semi Modal.confirm
-- [ ] H6 Designer 英文标签改中文
-- [ ] H7 嵌套字段 `_draftId`
-- [ ] H8 / H10 真假数据展示策略对齐
-- [ ] M5 Dashboard 硬编码 task description
-- [ ] M11 Postman 拆 3 角色 token
-- [ ] M12 `docs/archive/` 归档老 plan
-- [ ] M14 README CI badge + LICENSE + demo 凭据表
+剩余唯一硬缺口：演示视频实录。
 
 ---
 
 ## Review 元信息
 
-| Reviewer | 范围 | LOC | 用时 | 主要发现 |
-|---|---|---|---|---|
-| go-reviewer | apps/api + worker + pkg | 15.5k | ~30 min | 2 Critical / 3 Important / 4 Minor |
-| typescript-reviewer | apps/web | 14k | ~30 min | 2 Critical / 5 Important / 4 Minor |
-| security-reviewer | 跨栈 auth/secrets/injection | 全栈 | ~30 min | 0 Critical / 4 High / 3 Medium / 4 Low |
-| 交付物 readiness | submission/docs/deploy/judge UX | — | ~20 min | 5 Critical / 7 Important / 6 Polish |
+| Reviewer | 范围 | LOC | 主要发现 |
+|---|---|---|---|
+| go-reviewer | apps/api + worker + pkg | 15.5k | 2 Critical / 3 Important / 4 Minor |
+| typescript-reviewer | apps/web | 14k | 2 Critical / 5 Important / 4 Minor |
+| security-reviewer | 跨栈 auth/secrets/injection | 全栈 | 0 Critical / 4 High / 3 Medium / 4 Low |
+| 交付物 readiness | submission/docs/deploy/judge UX | — | 5 Critical / 7 Important / 6 Polish |
+| 第二轮 review（2026-06-10） | S7/S8 新增（labeler 大任务 / AI 队列 / acceptance） | — | 1 Critical(IDOR) + 5 修复，3 误报排除 |

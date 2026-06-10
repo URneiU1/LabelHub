@@ -25,10 +25,13 @@ const (
 
 // reviewerReadableSubmissionStatuses:reviewer 角色允许查看的 submission 状态白名单。
 // 草稿 / 提交中 / AI 审中 / 修订中 都属于 labeler 私域,reviewer 无权窥探 raw payload。
+// manual_review 是 AI 可疑转人工复核态,本就要交给 reviewer 初审,必须可见。
 var reviewerReadableSubmissionStatuses = map[string]struct{}{
-	statemachine.StateHumanReviewing: {},
-	statemachine.StateApproved:       {},
-	statemachine.StateRejected:       {},
+	statemachine.StateHumanReviewing:   {},
+	statemachine.StateManualReview:     {},
+	statemachine.StateNeedsArbitration: {},
+	statemachine.StateApproved:         {},
+	statemachine.StateRejected:         {},
 }
 
 // HasRole 判断 claims 是否携带指定角色。nil-safe。
@@ -126,9 +129,6 @@ func CanReadItem(claims *auth.Claims, task model.Task, item model.TaskItem, subm
 // reviewerAssigned 必须由调用方通过 task_reviewers(task_id,user_id) 查出。
 func CanReviewTask(claims *auth.Claims, task model.Task, reviewerAssigned bool) bool {
 	if HasRole(claims, RoleAdmin) {
-		return true
-	}
-	if HasRole(claims, RoleOwner) && task.OwnerID == claims.UserID {
 		return true
 	}
 	return HasRole(claims, RoleReviewer) && reviewerAssigned

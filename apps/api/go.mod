@@ -13,6 +13,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.42.0
+	github.com/xuri/excelize/v2 v2.10.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/time v0.14.0
@@ -20,11 +21,14 @@ require (
 	gorm.io/gorm v1.31.1
 	labelhub.local/exporter v0.0.0
 	labelhub.local/llmreview v0.0.0
+	labelhub.local/reviewsampling v0.0.0
 )
 
 replace labelhub.local/exporter => ../../pkg/exporter
 
 replace labelhub.local/llmreview => ../../pkg/llmreview
+
+replace labelhub.local/reviewsampling => ../../pkg/reviewsampling
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
@@ -101,7 +105,6 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
-	github.com/xuri/excelize/v2 v2.10.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect

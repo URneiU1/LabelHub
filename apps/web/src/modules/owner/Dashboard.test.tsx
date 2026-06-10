@@ -4,6 +4,7 @@ import type React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OwnerDashboard from './Dashboard'
 import { apiDelete, apiGet, apiPost, apiPostRawJSON } from '../../shared/api/client'
+import { resetOwnerSection, setOwnerSection } from '../../shared/state/ownerSection'
 
 const mockModalConfirm = vi.hoisted(() => vi.fn())
 
@@ -55,6 +56,13 @@ describe('OwnerDashboard AI prompt flow', () => {
     mockApiDelete.mockReset()
     mockModalConfirm.mockReset()
     window.history.pushState({}, '', '/')
+    // 分节是模块级 store:先 reset 清掉跨用例泄漏,再显式进入 'ai' 分节。
+    // owner 默认落地页已改为「任务管理」(tasks),而这批用例测的是 AI 预审分节,
+    // 不显式 setOwnerSection('ai') 就渲染不出 prompt/baseline/dry-run 等表单。
+    resetOwnerSection()
+    setOwnerSection('ai')
+    // owner 选中任务现持久化到 localStorage,用例间清掉避免上次选中污染默认任务。
+    localStorage.clear()
     mockApiGet.mockImplementation(async (path) => {
       if (path === '/tasks') {
         return [task]
@@ -124,6 +132,31 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     expect(await screen.findByDisplayValue('Reviewer 跳转规则')).toBeInTheDocument()
     expect(mockApiGet).toHaveBeenCalledWith('/tasks/2/ai-prompts')
+  })
+
+  it('switches the task detail between sections via the owner-section store (AI / export)', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') return [task]
+      if (path === '/tasks/1/ai-prompts') return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      if (path === '/tasks/1/golden-samples') return { samples: [] }
+      if (path.startsWith('/tasks/1/ai-dry-runs')) return { dryRuns: [] }
+      if (path === '/tasks/1/exports') return { exports: [] }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    // 默认进入 AI 预审一节:prompt 模板可见
+    expect(await screen.findByLabelText('prompt_template')).toBeInTheDocument()
+
+    // 切到「数据导出」一节(分节由全局工作区侧栏经 store 驱动):AI 控件卸载,导出面板出现
+    act(() => setOwnerSection('export'))
+    await waitFor(() => expect(screen.queryByLabelText('prompt_template')).toBeNull())
+    expect(await screen.findByLabelText('数据导出')).toBeInTheDocument()
+
+    // 切回「AI 预审」一节:prompt 模板重新出现
+    act(() => setOwnerSection('ai'))
+    expect(await screen.findByLabelText('prompt_template')).toBeInTheDocument()
   })
 
   it('saves editable baseline description for the selected task', async () => {
@@ -1207,7 +1240,7 @@ describe('OwnerDashboard AI prompt flow', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
 
-    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', {})
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', { repeat_count: 1 })
     expect(await screen.findByText('mismatch')).toBeInTheDocument()
     expect(screen.getAllByText('not enough evidence').length).toBeGreaterThan(0)
     expect(screen.getByText('44')).toBeInTheDocument()
@@ -1332,7 +1365,7 @@ describe('OwnerDashboard AI prompt flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Run all visible samples' }))
 
     await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12] })
+      expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/dry-runs', { sample_ids: [11, 12], repeat_count: 1 })
     })
     expect(mockApiPost).toHaveBeenCalledTimes(1)
     // 入队后由轮询填充每个样本的结果行(reason 同时出现在结果行与详情面板,故用 findAllByText)。
@@ -1793,6 +1826,130 @@ describe('OwnerDashboard AI prompt flow', () => {
     expect(screen.getByLabelText('golden_sample_expected_verdict')).toHaveValue('uncertain')
     expect(screen.getByLabelText('golden_sample_prompt')).toHaveValue('none')
     expect(screen.getByLabelText('golden_sample_notes')).toHaveValue('Task B note')
+  })
+
+  it('sends the selected repeat_count when running a golden sample for a stability check', async () => {
+    const user = userEvent.setup()
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path.startsWith('/tasks/1/ai-dry-runs')) {
+        return { dryRuns: [] }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+    mockApiPost.mockResolvedValue({
+      provider: 'mock',
+      dryRunId: 44,
+      matchedExpected: true,
+      result: { verdict: 'pass', overall_score: 90, dimensions: [], reason: 'ok', model: 'mock-model' },
+    })
+
+    render(<OwnerDashboard />)
+
+    await user.selectOptions(await screen.findByLabelText('dry_run_repeat_count'), '3')
+    await user.click(await screen.findByRole('button', { name: 'Run golden sample 11' }))
+
+    expect(mockApiPost).toHaveBeenCalledWith('/tasks/1/golden-samples/11/dry-run', { repeat_count: 3 })
+  })
+
+  it('renders stability metrics from a dry-run history result', async () => {
+    mockApiGet.mockImplementation(async (path) => {
+      if (path === '/tasks') {
+        return [task]
+      }
+      if (path === '/tasks/1/ai-prompts') {
+        return { prompts: [], activePromptId: null, aiReviewEnabled: false }
+      }
+      if (path === '/tasks/1/golden-samples') {
+        return {
+          samples: [{
+            id: 11,
+            taskId: 1,
+            aiPromptId: null,
+            payload: { text: 'a' },
+            payloadHash: 'hash',
+            expectedAnswer: { label: 'ok' },
+            expectedVerdict: 'pass',
+            notes: null,
+            createdBy: 7,
+            createdAt: '2026-05-23T12:00:00Z',
+          }],
+        }
+      }
+      if (path === '/tasks/1/ai-dry-runs?limit=10') {
+        return {
+          dryRuns: [
+            {
+              id: 90,
+              taskId: 1,
+              aiPromptId: 33,
+              goldenSampleId: 11,
+              promptVersion: 3,
+              expectedVerdict: 'pass',
+              actualVerdict: 'pass',
+              matchedExpected: true,
+              status: 'succeeded',
+              result: {
+                verdict: 'pass',
+                overall_score: 80,
+                dimensions: [],
+                reason: 'ok',
+                stability: {
+                  repeat_count: 3,
+                  success_count: 3,
+                  error_count: 1,
+                  error_rate: 0.25,
+                  verdict_agreement: 0.6667,
+                  score_stddev: 4.32,
+                  expected_match_rate: 0.6667,
+                  verdict_counts: { pass: 2, reject: 1 },
+                  runs: [
+                    { verdict: 'pass', score: 80 },
+                    { verdict: 'pass', score: 78 },
+                    { verdict: 'reject', score: 40 },
+                  ],
+                },
+              },
+              errorMsg: null,
+              createdAt: '2026-05-25T12:00:00Z',
+              finishedAt: '2026-05-25T12:01:00Z',
+            },
+          ],
+        }
+      }
+      throw new Error(`unexpected GET ${path}`)
+    })
+
+    render(<OwnerDashboard />)
+
+    expect(await screen.findByText('#90')).toBeInTheDocument()
+    // verdict_agreement / expected_match_rate 0.6667 → 67%,error_rate 0.25 → 25%,score_stddev 4.32。
+    expect(screen.getAllByText('67%').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('25%')).toBeInTheDocument()
+    expect(screen.getByText('4.32')).toBeInTheDocument()
+    expect(screen.getByText('pass · 78')).toBeInTheDocument()
+    expect(screen.getByText(/needs adjustment or manual review/)).toBeInTheDocument()
   })
 })
 

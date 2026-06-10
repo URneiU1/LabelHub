@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import type { AnswerValue, FieldSchema, RenderPayload, RenderRuntime, TemplateSchema, ValidationError } from './types'
+import type { AnswerValue, FieldSchema, RenderPayload, RenderRuntime, TemplateSchema, ValidationError, VisibleWhen } from './types'
 import { widgetRegistry } from './widgets'
 import FieldFrame from './widgets/FieldFrame'
 
@@ -22,8 +22,15 @@ export default function SchemaRenderer({
   runtime,
   onChange,
 }: SchemaRendererProps) {
+  useEffect(() => {
+    const next = pruneHiddenAnswerValues(schema, value)
+    if (next !== value) {
+      onChange?.(next)
+    }
+  }, [schema, value, onChange])
+
   function updateField(name: string, nextValue: unknown) {
-    onChange?.({ ...value, [name]: nextValue })
+    onChange?.(pruneHiddenAnswerValues(schema, { ...value, [name]: nextValue }))
   }
 
   return (
@@ -42,6 +49,9 @@ function renderField(
   runtime: RenderRuntime | undefined,
   updateField: (name: string, nextValue: unknown) => void,
 ) {
+  if (!visibleWhenMatches(field.visibleWhen, value)) {
+    return null
+  }
   if (field.widget === 'Group') {
     return (
       <div key={field.name} style={fieldBlockStyle} data-widget={field.widget}>
@@ -86,6 +96,43 @@ function renderField(
       ))}
     </div>
   )
+}
+
+function pruneHiddenAnswerValues(schema: TemplateSchema, answer: AnswerValue): AnswerValue {
+  const visibleNames = collectVisibleLeafFieldNames(schema.fields, answer)
+  const allNames = collectLeafFieldNames(schema.fields)
+  let changed = false
+  const next: AnswerValue = {}
+  for (const [key, value] of Object.entries(answer)) {
+    if (allNames.has(key) && !visibleNames.has(key)) {
+      changed = true
+      continue
+    }
+    next[key] = value
+  }
+  return changed ? next : answer
+}
+
+function collectVisibleLeafFieldNames(fields: FieldSchema[], answer: AnswerValue, names = new Set<string>()) {
+  for (const field of fields) {
+    if (!visibleWhenMatches(field.visibleWhen, answer)) {
+      continue
+    }
+    if (field.widget === 'Group' && field.fields) {
+      collectVisibleLeafFieldNames(field.fields, answer, names)
+      continue
+    }
+    if (field.widget === 'Tabs' && field.tabs) {
+      for (const tab of field.tabs) {
+        collectVisibleLeafFieldNames(tab.fields, answer, names)
+      }
+      continue
+    }
+    if (field.widget !== 'ShowItem') {
+      names.add(field.name)
+    }
+  }
+  return names
 }
 
 function TabsField({
@@ -250,6 +297,30 @@ const tabErrorBadgeStyle: CSSProperties = {
   fontSize: 'var(--text-sm)',
   lineHeight: '18px',
   textAlign: 'center',
+}
+
+function visibleWhenMatches(condition: VisibleWhen | undefined, answer: AnswerValue) {
+  if (!condition) {
+    return true
+  }
+  const value = answer[condition.field]
+  if ('equals' in condition) {
+    return value === condition.equals
+  }
+  return condition.notEmpty === true && !isEmptyValue(value)
+}
+
+function isEmptyValue(value: unknown) {
+  if (value === undefined || value === null) {
+    return true
+  }
+  if (typeof value === 'string') {
+    return value.trim() === ''
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0
+  }
+  return false
 }
 
 function countFieldErrors(fields: FieldSchema[], errors: ValidationError[]) {
