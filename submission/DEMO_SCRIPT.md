@@ -4,17 +4,73 @@
 > - **5 分钟版**(评委本机跑)— 跳过粗体 *【10 min only】* 段落
 > - **10 分钟版**(录制视频/现场 demo)— 全程跑
 
+## 录制总流程
+
+### 1. 先定录制线路
+
+推荐优先级:
+
+| 线路 | 适用场景 | 地址 | 备注 |
+|---|---|---|---|
+| 线上 demo | 最终提交视频 | `http://43.155.210.70` | 最接近评委实际看到的环境;录制前先按 `submission/DEMO_ENV.md` 做一次线上 smoke |
+| 本地 mock | 本机备用录制 / 无公网时 | `http://localhost:5173` | `cp .env.example .env && make up && make seed`,AI 预审走 deterministic mock,稳定可复现 |
+| 本地真模型 | 展示真实豆包链路 | `http://localhost:5173` | 保留本机真实 `.env`,确认 `LLM_PROVIDER=doubao` 且 worker 启动无 provider 错误 |
+
+最终视频建议只选一条主线,不要在视频里切环境。若线上状态被演示操作污染,先重跑 seed 或换 `labeler2` 录制,避免同一题已被 `labeler1` 领走导致镜头卡住。
+
+### 2. 录制前 15 分钟检查
+
+- [ ] 确认当前代码/部署就是要交付的版本,`git status --short` 里没有未解释的交付物改动
+- [ ] 打开目标地址并硬刷新一次,确认不是旧缓存 bundle
+- [ ] 三个演示账号可登录: `owner1 / 123456`, `labeler1 / 123456`, `reviewer1 / 123456`
+- [ ] Owner 任务列表里 `qa_quality` / `preference_compare` 均为发布中或可演示状态
+- [ ] `qa_quality` 已启用 AI 预审,有 active prompt 和 Golden Sample
+- [ ] Labeler 任务广场能看到 `qa_quality`,领取后能进入作答页
+- [ ] Reviewer 审核队列能打开详情页,AI 预审结论区域不报错
+- [ ] Owner 导出页能创建一次 JSONL/CSV/XLSX 导出并下载
+- [ ] 浏览器缩放 100%,窗口 1920×1080,关闭 devtools、书签栏和无关 tab
+- [ ] 开启勿扰模式,隐藏桌面通知、菜单栏敏感信息和输入法候选窗
+- [ ] 录屏软件设置为 1920×1080 / 30fps / H.264 MP4,鼠标光标可见
+- [ ] 麦克风试录 10 秒,确认音量不过曝、键盘声不过大
+
+### 3. 本地录制启动命令
+
+线上录制不需要跑本地服务。若选择本地线路,按下面顺序启动:
+
+```bash
+cd ~/Desktop/LabelHub
+cp .env.example .env
+make up
+make seed
+make api
+make worker
+make web
+```
+
+`make api` / `make worker` / `make web` 建议分三个终端前台运行,方便录制前确认没有启动错误。若要用真实豆包,不要覆盖已有 `.env`;先备份再手动确认 `LLM_PROVIDER`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。
+
+### 4. 视频结构
+
+| 段落 | 时长 | 目标 |
+|---|---:|---|
+| 开场 | 0:00-0:30 | 一句话讲清 LabelHub 是三角色数据标注平台 |
+| Owner | 0:30-3:00 | 展示任务、Designer、AI Prompt、Golden Sample、Stats |
+| Labeler | 3:00-5:00 | 领取题目、作答、LLM 辅助、提交触发 AI 预审 |
+| Reviewer | 5:00-7:00 | 查看 AI verdict、审计、人工通过 |
+| Export | 7:00-8:30 | 回 Owner 异步导出并下载 |
+| 收尾 | 8:30-9:00 | 回扣工程亮点和提交资料 |
+
+5 分钟版压缩方法:Designer 只展示不拖拽,Golden Sample 只看已有结果,Labeler 不刷新验证 autosave,导出只跑 JSONL。
+
 ## 录制前准备(作者填)
 
-- [ ] 确认仓库在 `main`(`git status` 干净)
-- [ ] `cp .env.example .env`
-- [ ] `make dev` 起栈,等到 "Development stack is ready" 提示
-- [ ] 三终端起好:`make api` / `make worker` / `make web`
-- [ ] 确认 `qa_quality` 官方任务显示 AI REVIEW = ON,且已有 active prompt 与 Golden Sample
-- [ ] http://localhost:5173 已加载首屏
-- [ ] 浏览器开发者面板关闭 / 缩放 100%(避免视频里看到 devtools)
-- [ ] 录屏分辨率 1920×1080,鼠标光标可见
-- [ ] 准备好 OBS / Screen Studio / macOS 系统录屏
+- [ ] 录制日期:
+- [ ] 录制线路:线上 demo / 本地 mock / 本地真模型
+- [ ] 目标地址:
+- [ ] 录制版本/commit:
+- [ ] 视频目标时长:5 min / 10 min
+- [ ] 录屏工具:OBS / Screen Studio / macOS 系统录屏 / 其他
+- [ ] 备注:
 
 ## 录制时口播大纲(中文)
 
@@ -27,6 +83,11 @@
 > 技术栈:**前端 React 18 + TypeScript strict + Semi Design**,**后端 Go + Gin + GORM**,**AI Worker 走 Asynq + 豆包 Function Calling**。今天我会跑三个角色的完整链路,展示 9 + 2 个 Designer 物料、AI 预审、Stats Board 和多格式导出。"
 
 **镜头**:浏览器首屏(登录页),录屏左下角不要遮挡 URL。
+
+**操作**:
+- 打开目标地址
+- 确认登录页完整显示
+- 鼠标停在角色快捷登录或用户名输入框附近,不要快速晃动
 
 ---
 
@@ -79,6 +140,7 @@
 #### 2.3 提交(4:30 - 5:00) · 30s
 - 按 **Ctrl/Cmd + Enter** 提交(展示快捷键)
 - 等 toast 提示 "已提交,AI 预审中"
+- 若队列需要几秒,停留在页面上口播 outbox/worker 链路,不要连续乱点
 
 > "提交后业务事务同写 outbox 表,后台 publisher 用 SELECT FOR UPDATE SKIP LOCKED 把事件投到 Redis,AI Worker 拉走跑豆包。整个链路是 durable outbox 加至少一次投递,消费端保证幂等。"
 
@@ -89,6 +151,7 @@
 #### 3.1 切角色 + 审核队列(5:00 - 5:30) · 30s
 - 退出 → 登 `reviewer1` / `123456`
 - 进入审核队列,等待刚才那条出现(AI 已跑完)
+- 若刚才提交未出现,刷新一次队列;仍未出现就打开已有 demo submission,口播说明这是同一条 AI 预审链路的历史样例
 
 > "Reviewer 看到 AI 预审结果——verdict、score、三维度评分、处理日志和 prompt 版本号。"
 
@@ -134,10 +197,16 @@
 
 ## 录制后
 
-- [ ] 视频导出为最终提交附件(MP4 / H.264 / 1080p / 30fps,不放入 Git 仓库)
-- [ ] 5min 与 10min 各导一份(`demo-5min.mp4` / `demo-10min.mp4`)
+- [ ] 看一遍完整视频,确认没有密码管理器弹窗、聊天通知、API key、终端密钥或私人路径
+- [ ] 剪掉开头等待、结尾空白和明显误点;不要剪掉关键加载过程,保留平台真实感
+- [ ] 音频响度大致一致,无长时间静音
+- [ ] 字幕可选;若加字幕,只修明显口误,不要改成视频里没展示的能力
+- [ ] 视频导出为最终提交附件:MP4 / H.264 / 1080p / 30fps,不放入 Git 仓库
+- [ ] 推荐命名:`demo-5min.mp4` 或 `demo-10min.mp4`
+- [ ] 压缩后文件大小符合提交平台限制,播放无花屏
 - [ ] 如界面有变化,刷新 4 个关键节点截图(Owner Designer / Labeler 答题 / Reviewer 详情 / 导出 history)到 `assets/screenshots/`
-- [ ] 在本文件顶部追加 "录制日期 / 视频时长 / 备注"
+- [ ] 在本文件顶部填写 "录制日期 / 视频时长 / 备注"
+- [ ] 上传视频到比赛平台或外部附件,并在最终提交说明里放链接/附件名
 
 ## 备用素材路径(若现场出问题)
 
@@ -147,3 +216,5 @@
 | MySQL 连不上 | 重跑 `make down && make up && make seed` |
 | 前端白屏 | F12 → Network tab,通常是 :8080 被占,改 API_PORT |
 | Designer 拖拽失灵 | 切到 1920 视口(响应式 ≤1599 时拖拽手柄藏起来) |
+| 刚提交的题没进 Reviewer 队列 | 先刷新队列;仍没有就切已有 demo submission,录完后用 smoke 脚本补查 AI worker |
+| 线上任务被误下线/数据污染 | 重跑 seed 或切本地 mock 线路,视频里不要现场修库 |

@@ -33,92 +33,75 @@ After every code change, update project documentation before the final handoff:
 <claude-mem-context>
 # Memory Context
 
-# [LabelHub] recent context, 2026-06-01 3:58am GMT+8
+# [LabelHub] recent context, 2026-06-09 1:19am GMT+8
 
-Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
+Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (7,977t read) | 469,885t work | 98% savings
+Stats: 50 obs (9,706t read) | 492,268t work | 98% savings
 
-### May 31, 2026
-S769 LabelHub owner 审核结果质检反馈闭环功能实现 — 用户要求"做你推荐的"，即将 Owner「审核结果」节从薄回显升级为逐条 AI vs 人工判定对比面板。 (May 31 at 9:33 PM)
-S770 Redesign LabelHub UI to match PetaV2 style; work executed comprehensive navigation architecture refactoring as prerequisite (URL-routed sections, in-page sub-tabs, CSS-based filtering) (May 31 at 10:00 PM)
-S771 Redesign LabelHub Owner navigation from single-page internal section switching to URL-based independent page routing, matching PetaV2 style conventions; verify all existing tests remain passing (May 31 at 11:15 PM)
-S772 LabelHub Owner 后台「数据导出」分节拆分为「导出配置/导出历史」子页，并泛化子页过滤机制 (May 31 at 11:19 PM)
-### Jun 1, 2026
-S773 用户询问数据导出页面是否已拆分为标签页 (Jun 1 at 12:18 AM)
-S774 LabelHub Owner 后台「数据导出」分节去掉"全部"标签，只保留两个子页标签 (Jun 1 at 12:56 AM)
-S775 LabelHub「数据导出」分节去掉"全部"标签，只保留「导出配置」和「导出历史」两个子页标签 (Jun 1 at 2:37 AM)
-5885 2:37a ✅ 生产端 /owner/export 重定向到 /owner/export/config 验证成功
-5886 " ✅ 生产端 export 分节 UI 全链路验证通过
-5887 2:38a ✅ LabelHub Sprint 进度更新：Sprint 6 进行中，1-5 已完成
-5888 " ✅ CHANGELOG.md 追加 owner-export-no-overview 条目
-5889 " ✅ CHANGELOG commit 72a5266 提交，近三条 commit 序列确认
-S776 LabelHub 数据看板丰富方案调研与规划 (Jun 1 at 2:38 AM)
-5890 2:57a 🔵 LabelHub StatsBoard 现有实现结构
-5891 2:58a 🔵 API stats 端点实现文件位置确认
-5892 " 🔵 LabelHub stats.go 完整实现细节
-5893 " 🔵 Submission 和 AIReview 模型可用字段确认
-5894 " 🔵 LabelHub 全量数据模型结构速览
-5895 2:59a 🔵 HumanReview 有 Stage 字段，支持多阶段审核
-S777 全仓代码审查 LabelHub 项目 (Jun 1 at 2:59 AM)
-5896 3:07a 🔵 LabelHub stats_test.go 测试覆盖结构
-5897 3:08a 🟣 LabelHub stats.go 新增混淆矩阵、分桶、趋势三个响应字段
-5898 " 🟣 stats.go 接入 buildConfusion 填充混淆矩阵响应字段
-5899 3:09a 🟣 TaskStats 新增 AI 评分分桶与每日完成趋势两条 SQL 查询
-5900 " 🟣 实现 buildConfusion 和 bucketScores 两个纯函数
-5901 " 🟣 stats_test.go 扩展集成测试覆盖混淆矩阵、分桶、趋势三个新字段
-5902 " 🟣 新增 TestBuildConfusion 和 TestBucketScores 纯函数单元测试
-5903 " 🔵 stats 测试失败：ai_score 查询被 sqlmock 拒绝返回 500
-5904 3:10a 🔴 修复 sqlmock ai_score 正则不匹配 GORM 反引号问题
-5905 " 🔴 stats handler 全部 4 个测试修复后通过
-5906 3:11a 🔵 StatsBoard.tsx 当前仅渲染 5 个卡片，三个新字段尚未接入前端
-5907 3:12a 🟣 StatsBoard.tsx 扩展 TaskStats 类型接入三个新字段
-5908 " 🟣 StatsBoard.tsx 重构图表 spec 并准备混淆矩阵渲染数据
-5909 " 🟣 StatsBoard.tsx 全面重构看板布局，新增 KPI 行、混淆矩阵热力表和三个新图表卡
-5910 3:13a 🟣 StatsBoard.tsx 补全新布局所需 CSS 常量，移除废弃进度条样式
-5911 " 🟣 LabelHub stats 看板扩展全链路验证通过
-5912 3:14a 🔵 前端 vitest 运行失败，退出码 1
-5913 " 🔵 StatsBoard 测试失败：mock 数据缺少三个新字段导致 .map() 报错
-5914 3:15a 🔵 StatsBoard.test.tsx 与新组件有四处不兼容，需同步更新
-5915 " 🔴 StatsBoard.tsx 对三个新字段和 dimensionAverages 加防御性空值默认
-5916 3:16a 🔴 StatsBoard.test.tsx mock 补全三个新字段，组件 confMap/confMax 改用防御变量
-5917 " 🔴 StatsBoard.test.tsx 第一个测试用例更新 aria-label 断言和通过率格式
-5918 " 🟣 LabelHub stats 看板全栈扩展完整通过所有验证
-5919 3:17a 🟣 stats 看板扩展 commit 并触发生产部署
-5920 3:18a 🔵 LabelHub Template Designer 结构概览
-5921 3:19a 🟣 stats 看板扩展成功部署到生产环境
-5922 3:20a 🔵 生产 stats API 实测：新三字段正常返回，发现两处细节问题
-5923 " 🔵 生产看板页面浏览器验证全部通过
-5924 " 🔵 生产 /owner/stats 页面截图验证看板完整渲染
-5925 3:21a 🔵 生产混淆矩阵真实数据验证：pass/approve=7，pass/reject=2
-5926 3:25a 🔵 LabelHub 项目完成开发，进入代码审查阶段
-5927 3:26a ⚖️ LabelHub 标注质量机制字段选型决策
-5928 3:27a 🔵 LabelHub 项目未初始化 CodeGraph 索引
-5929 3:29a ⚖️ LabelHub S8 质量控制功能规划 — Handoff 文档
-5930 " 🔵 LabelHub Template Designer 现有版本控制与只读机制
-5931 3:30a 🔵 LabelHub API 架构盘点：状态机、分发逻辑、迁移文件位置
-5932 3:31a ✅ LabelHub S8 Handoff 文档创建完成
-5933 3:32a ✅ CLAUDE.md 更新：S8 交接入口指向 HANDOFF-S8.md
-5934 " ✅ S8 Handoff 文档提交入库
-S778 为 LabelHub S8 sprint 写 handoff 文档，说明已完成工作并为下一个开发者指定两项待办（Designer 重做 + S8 任务条例） (Jun 1 at 3:32 AM)
-**Investigated**: - 阅读了 Designer.tsx 渲染部分（第362-511行），确认现有三栏布局、LATEST/EDITABLE vs READONLY 双态、Fork 版本机制、右侧属性面板已有「基础/校验/联动」三标签
-    - 用 git log + grep 盘点了后端结构：状态机模块（statemachine/machine.go + task.go）、分发逻辑（service/submission/claim.go）、迁移文件（最新 008_task_status_add_ended）
-    - 确认 Task 模型已有 Deadline/Tags/HumanReviewEnabled/Distribution/QuotaPerUser/PublishedAt 等字段，S8 新字段只需从 009 起追加迁移
-    - 读取了 CLAUDE.md 现有 Current Handoff 区块，了解历史交接脉络（S4→S5→S6→S7）
+### Jun 2, 2026
+6274 5:24a 🔵 Designer 布局 1280×800 实测：overflow=0 但不能确认三栏
+6275 5:25a 🔵 Designer.tsx 已有 1 行本地修改，其他 6 文件为队友变更
+6276 " 🔴 Designer 属性面板内容溢出修复（commit 3dfc17b）
+S800 Designer 三栏布局修复：属性栏常驻右侧第三栏，专注模式隐藏全局侧边栏 (Jun 2 at 5:26 AM)
+6278 1:03p 🔵 LabelHub 模板搭建界面空间问题 — 调研 AppLayout 侧边栏隐藏方案
+6280 " 🔵 AppLayout.tsx 结构：侧边栏固定渲染，无路由感知隐藏逻辑
+6281 1:04p 🔵 LabelHub 路由结构：TemplateDesigner 嵌套在 AppLayout 内，路径为 /owner/:taskId/templates/:templateId
+6292 1:10p ✅ Designer 三栏布局断点修复交接文档已提交
+6299 1:12p 🔵 Designer.tsx 布局结构：网格由 CSS 类 + 内联 style 双轨驱动
+6304 1:13p 🔵 Designer.tsx 三栏 DOM 结构精确行号确认
+6306 1:14p 🟣 AppLayout 新增 isDesigner 标志用于 Designer 专注模式
+6307 " 🟣 AppLayout 实现 Designer 专注模式：侧边栏在 Designer 页自动隐藏
+6309 1:15p 🔴 Designer.css 三栏列宽更新：property 栏拓宽至 340px，注释同步反映专注模式
+6310 " 🔴 Designer.css 媒体查询断点从 1199px 降至 1024px，新增专注模式 sticky 面板规则
+S801 Designer 三栏布局修复 + 专注模式（隐藏侧边栏）实现，tsc 已通过，等待 eslint 完成后跑测试和部署 (Jun 2 at 1:17 PM)
+6323 1:20p 🔵 LabelHub web tsc -b 会挂起，需手动 pkill 终止
+6324 1:22p 🔵 tsc -b 无报错通过，耗时约 84 秒
+6326 1:25p 🔵 本地开发机内存压力导致 eslint/tsc 工具链严重变慢
+S802 Designer 三栏布局修复 + 专注模式实现，代码已 rsync 至 prod，Docker 重建 web 容器中 (Jun 2 at 1:26 PM)
+6333 1:27p 🔵 vitest --pool=threads 对 AppLayout + Designer 报 2 errors，0 测试运行
+6335 1:28p 🔵 vitest 4.1.7 不支持 --poolOptions CLI 参数，该配置只能写 vitest.config
+6341 1:29p 🔵 vitest --pool=threads 固定 60 秒超时崩溃，原因是 transform 0ms 说明 worker 未能初始化
+6342 1:31p 🔵 AppLayout.test.tsx 3 个测试全部通过，setup 耗时 51.59s（jsdom 环境初始化极慢）
+6343 1:32p 🔵 Designer 模块 17 个测试全部通过，无回归
+6344 " ✅ Designer 专注模式代码已 rsync 至 prod 服务器 43.155.210.70
+6345 " 🔵 LabelHub prod 部署方式：docker compose --build web 重建前端容器
+S803 Designer 三栏布局 + 专注模式修复，sticky 面板失效根因已定位并修复，第二轮 rsync+rebuild 部署中 (Jun 2 at 1:32 PM)
+6348 1:34p 🔵 prod 验证：nav 隐藏和三栏布局正确，但 palette/property sticky 未生效（panels 随 document 滚走）
+6349 1:35p 🔵 lh-topnav 是 position:sticky（非 fixed），与 palette/property sticky 共享同一 scroll container
+6351 " 🔴 Designer.css 修复 sticky 面板失效：解除 lh-shell__main overflow，top 值补入 topnav 高度
+S804 Designer 三栏布局专注模式完整实现并部署：隐藏全局导航、放宽列宽、属性/物料面板 sticky 吸顶自身滚动 (Jun 2 at 1:36 PM)
+6352 1:37p 🔵 第二轮 prod 验证：overflow 修复生效，palette pinned ✅，property 因内容超过视口高度仍会滚出
+6353 1:38p 🔵 property 面板 offsetH=1000px（几乎满视口），scrollH=4921px；sticky 失效原因与 CSS Grid 行高关联
+6354 1:40p 🔵 Designer 专注模式 1920px 视口截图：三栏并排、无侧边栏、property 内容超高导致无法完全 sticky
+6355 " 🔵 prod Designer 页面唯一控制台错误：CSP 阻止 Google Fonts 加载（style-src 未含外部域）
+6356 1:41p 🔵 1280x800 视口验收全部通过：三栏正常，palette/property 均 sticky 锁定在 y=72
+6357 " ✅ Designer 专注模式 1280x800 视口截图验收通过：三栏并排，sticky 面板锁定正常
+6358 1:42p ✅ CHANGELOG.md 新增 designer-focus-mode 条目，完整记录专注模式实现细节和验证结果
+6359 " ✅ Designer 专注模式改动已提交至 feat/ui 分支，commit 4bcae06
+S805 Designer 专注模式完整交付（commit 4bcae06），任务已完成，等待用户决定是否进一步改为全程固定三栏 app-shell (Jun 2 at 1:42 PM)
+S806 LabelHub Designer 画布预览纵向过长的原因分析 + 是否修改的推荐 (Jun 2 at 1:43 PM)
+6368 3:52p 🔵 LabelHub Designer 画布预览纵向过长的代码根因调查
+S807 LabelHub Designer 画布预览过长问题——根因分析 + 紧凑化改造实施 (Jun 2 at 3:52 PM)
+6374 3:55p 🔵 Designer.integration.test.tsx 覆盖范围确认
+6376 3:56p 🔵 Designer 集成测试包含 Schema round-trip 验证和嵌套预览 aria-label 断言
+6379 3:57p ✅ Designer 画布 minHeight 从 800 降至 360
+6380 " 🟣 CanvasField 新增 per-card `showPreview` 状态，实现按需展开 Widget 预览
+6381 3:58p 🟣 Designer 画布紧凑化改造完成：Widget 预览改为每卡按需展开
+S808 LabelHub Designer 画布紧凑化改造——根因分析 + 实施 + 测试 + 部署 (Jun 2 at 4:01 PM)
+6382 4:03p 🔵 Designer 集成测试 2/17 失败——per-card 预览 toggle 导致 Widget DOM 不再默认渲染
+6383 4:04p 🔵 2 个失败测试精确定位：ShowItem 预览内容断言因 toggle 默认关闭失效
+6388 " 🔴 ShowItem 默认展开修复：`useState(field.widget === 'ShowItem')` 解决测试失败
+6389 4:05p 🟣 Designer 画布紧凑化改造全部测试通过：17/17 绿灯
+6390 4:07p 🔵 生产环境实测：compact canvas 画布高度 2670px，12 个 toggle 按钮，ShowItem 默认展开，toggle 功能正常
+6391 " 🔵 生产实测：单个 Radio 字段卡片高度 161px，toggle 按钮 35px，无 Widget 渲染区域
+6392 4:09p ✅ 删除 CanvasField header 中冗余的 `canvas-field__meta` span
+6393 4:10p ✅ meta span 删除后 tsc + vitest 全绿：17/17 通过，TypeScript 无错误
+S809 LabelHub Designer 画布紧凑化改造——5 步改动全部完成，第二轮 rsync 推生产中 (Jun 2 at 4:10 PM)
+6394 4:11p 🔵 生产最终实测：画布从 2670px 降至 2328px（-13%），Radio 卡片从 161px 降至 132px（-18%）
+6395 4:12p 🟣 LabelHub Designer 画布紧凑化改造完成并截图验证：终态 scrollHeight 2328px，卡片 132px
 
-**Learned**: - LabelHub 前端版本控制模式已完备：isLatest 决定 EDITABLE/READONLY，READONLY 强制 Fork 新版本，与 S8「发布后冻结」设计方向一致，后端补状态机拒绝逻辑即可
-    - 分发/领题逻辑集中在 claim.go，overlap/lease/sampling 均应在此挂钩
-    - 导航 URL↔store 同步边界在 AppLayout.tsx，Dashboard.tsx 保持 router-free，改 Designer 时不得破坏这个边界
-    - 子页过滤用 CSS data-sub 属性，默认 all 既支持概览又保证 jsdom 测试通过
-
-**Completed**: - 创建 docs/HANDOFF-S8.md：§0 本会话已完成工作（6 个 commit 表 + 关键设计边界）；§1 Designer 待办（现状 vs 设计稿差距，含画布 Tab 栏/顶部栏/物料分组/字段卡精修）；§2 S8 任务条例（第一批必做 5 项 + 第二批 3 项 + 任务创建页三区块 + 代码落点）；§3 工程约定（测试门槛/sqlmock 反引号坑/迁移规范）
-    - 更新 CLAUDE.md Current Handoff 顶部，插入 2026-06-01 指针条目指向 HANDOFF-S8.md
-    - commit 629780f：docs(handoff): write S8 handoff (Designer reskin + task policies)，2 文件 108 行新增，已提交到 feat/ui-reskin-s7-and-followups 分支
-
-**Next Steps**: 本会话已明确结束于 handoff 文档交付，两项待办（Designer 重做 + S8 任务条例实现）留给下一个开发者，代码未动。用户可选择在此会话继续开始其中一项，或留给新会话处理。
-
-
-Access 470k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 492k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

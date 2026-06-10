@@ -15,7 +15,7 @@
 | 2 | 评委 README + 5 分钟评估路径 | 本文件 + [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | 产品体验 15% |
 | 3 | 演示视频脚本(5-10 分钟) | [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md);视频二进制由最终提交平台上传,不纳入 Git | 产品体验 15% |
 | 4 | 架构图 + 关键技术点 | [`ARCHITECTURE.md`](ARCHITECTURE.md)(含 Mermaid topology / 状态机 / outbox sequence) | 工程质量 25% |
-| 5 | Demo 截图 | [`assets/screenshots/`](assets/screenshots/) — 6 张主流程截图 + 1 张修复前问题证据已入库 | 产品体验 15% |
+| 5 | Demo 截图 | [`assets/screenshots/`](assets/screenshots/) — 10 张主流程截图 + 1 张修复前问题证据已入库 | 产品体验 15% |
 | 6 | AI Coding 过程记录(8-15 页 PDF) | [`assets/AI-Coding-Process.pdf`](assets/AI-Coding-Process.pdf) + [`assets/AI-Coding-Process.md`](assets/AI-Coding-Process.md) | 工程质量 25%(附加) |
 | 7 | 部署说明 | [`DEPLOY.md`](DEPLOY.md) | 工程质量 25% |
 | 8 | API 文档 | [`api/openapi.yaml`](api/openapi.yaml) + [`api/postman_collection.json`](api/postman_collection.json) | 工程质量 25% |
