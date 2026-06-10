@@ -33,6 +33,12 @@
 		reverse_proxy asynqmon:8080
 	}
 
+	# 演示视频静态托管:/demo/ → /srv/media(挂载自 deploy/media,见 docker-compose.prod.yml)。
+	handle_path /demo/* {
+		root * /srv/media
+		file_server
+	}
+
 	handle {
 		reverse_proxy web:80
 	}

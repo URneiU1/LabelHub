@@ -145,6 +145,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./media:/srv/media:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

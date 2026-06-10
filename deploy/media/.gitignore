@@ -1,0 +1,4 @@
+# 演示视频(大文件)与索引页通过 scp 上传到 prod,不入 git。
+# 这个目录由 caddy 以只读挂载到 /srv/media,对外暴露为 /demo/。
+*
+!.gitignore
