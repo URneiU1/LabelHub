@@ -342,6 +342,13 @@ func (h TaskHandler) UpdateTask(c *gin.Context) {
 	if frozenPolicyUpdate {
 		query = query.Where("status = ?", statemachine.TaskDraft)
 	}
+	if req.TemplateID != nil {
+		// Re-assert template ownership atomically with the write: the First() pre-check above is
+		// only for a friendly 422, but it leaves a TOCTOU window before this UPDATE. Gating the
+		// write on EXISTS makes binding a template that isn't a version of this task impossible
+		// regardless of any concurrent change (defense in depth — no path re-parents templates).
+		query = query.Where("EXISTS (SELECT 1 FROM task_templates WHERE id = ? AND task_id = ?)", *req.TemplateID, task.ID)
+	}
 	result := query.Updates(updates)
 	if result.Error != nil {
 		httpx.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update task")

@@ -232,8 +232,8 @@ func TestUpdateTaskBindsTemplateVersion(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "version"}).
 			AddRow(12, 1, 2))
 	mock.ExpectBegin()
-	// 切模板属冻结策略字段,UPDATE 必须带 status 乐观锁守卫。
-	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status = .+`).
+	// 切模板属冻结策略字段:UPDATE 必须带 status 乐观锁守卫 + 模板归属 EXISTS 守卫(与写原子,防 TOCTOU)。
+	mock.ExpectExec(`(?is)^UPDATE .tasks. SET .+ WHERE id = .+ AND status = .+ AND \(EXISTS .+task_templates`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery(`(?is)^SELECT.+FROM .tasks.`).
