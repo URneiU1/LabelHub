@@ -65,6 +65,16 @@
   }
 }
 
+/* 宽屏(≥1680px,覆盖 1920×1080)收敛正文最大宽度并居中:避免内容在大屏上整宽拉伸、
+   行长过宽显得空。仅在宽屏生效,不触及 1280×800(此处不应用)与既有窄屏收敛,
+   1600px 上限下数据密集页仍有充足宽度(1920 主区约 1680px,仅两侧各留约 40px)。 */
+@media (min-width: 1680px) {
+  .lh-app-content {
+    max-width: 1600px;
+    margin-inline: auto;
+  }
+}
+
 @media (max-width: 760px) {
   .lh-app-layout {
     flex-direction: column !important;
