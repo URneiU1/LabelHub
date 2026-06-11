@@ -128,7 +128,7 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
           <button
             key={f}
             type="button"
-            aria-label={`格式 ${f.toUpperCase()}：${FORMAT_HINTS[f]}`}
+            aria-label={`格式 ${f}`}
             title={FORMAT_HINTS[f]}
             aria-pressed={format === f}
             onClick={() => setFormat(f)}
