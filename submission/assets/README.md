@@ -20,8 +20,8 @@
 | [`screenshots/03-labeler-answer-1280.png`](screenshots/03-labeler-answer-1280.png) | Labeler 作答页（Tabs + 多物料 + 3s 自动保存）· 1280×800 |
 | [`screenshots/04-reviewer-detail-1920.png`](screenshots/04-reviewer-detail-1920.png) | Reviewer 详情 + AI 预审结论（verdict / 维度分 / 处理日志审计）· 1920×1080 |
 | [`screenshots/04-reviewer-detail-1280.png`](screenshots/04-reviewer-detail-1280.png) | Reviewer 详情 + AI 预审结论 · 1280×800 |
-| [`screenshots/05-export-config-1920.png`](screenshots/05-export-config-1920.png) | Owner 多格式导出配置（json/jsonl/csv/xlsx/md + 字段映射）· 1920×1080 |
-| [`screenshots/05-export-config-1280.png`](screenshots/05-export-config-1280.png) | Owner 多格式导出配置（json/jsonl/csv/xlsx/md + 字段映射）· 1280×800 |
+| [`screenshots/05-export-config-1920.png`](screenshots/05-export-config-1920.png) | Owner 多格式导出配置（8 格式 json/jsonl/csv/xlsx/md/coco/sft/dpo + DPO 偏好对字段映射）· 1920×1080 |
+| [`screenshots/05-export-config-1280.png`](screenshots/05-export-config-1280.png) | Owner 多格式导出配置（8 格式含 SFT/DPO 训练格式 + 字段映射）· 1280×800 |
 
 ## 视频交付
 
