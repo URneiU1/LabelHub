@@ -103,7 +103,7 @@ func (h TaskHandler) AddReviewers(c *gin.Context) {
 
 	// 校验被指派用户确实具备 reviewer 角色:统计落在 reviewer 角色里的去重用户数,
 	// 不等于请求里的去重用户数即有人不是 reviewer,整批拒绝。
-	wantIDs := uniqueUserIDs(req.UserIDs)
+	wantIDs := uniqueUint64(req.UserIDs)
 	var reviewerCount int64
 	if err := h.db.Model(&model.UserRole{}).
 		Where("role = ? AND user_id IN ?", policy.RoleReviewer, wantIDs).
@@ -173,8 +173,8 @@ func reviewerCandidateUsers(db *gorm.DB) ([]model.User, error) {
 	return users, err
 }
 
-// uniqueUserIDs 去重并保持原顺序。
-func uniqueUserIDs(ids []uint64) []uint64 {
+// uniqueUint64 去重并保持原顺序。
+func uniqueUint64(ids []uint64) []uint64 {
 	seen := make(map[uint64]struct{}, len(ids))
 	out := make([]uint64, 0, len(ids))
 	for _, id := range ids {

@@ -32,8 +32,17 @@ function verdictView(verdict: string | null): { label: string, tone: string } {
   }
 }
 
+// formatSnapshot 把快照(发给 LLM 的 messages JSON)美化成可读文本;解析失败则原样返回。
+function formatSnapshot(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
 // AI 审核队列:只读展示 AI 预审 Agent 流水线 —— 每条提交的入队、按维度结构化打分、通过/打回/转人工结论、
-// 原始 Prompt、耗时/tokens/重试/幂等键。把「可配置评测标准的审核 Agent」可视化给审核员看。
+// 原始 Prompt、AI 实际看到的渲染后快照、配置漂移、耗时/tokens/重试/幂等键。把「可配置评测标准的审核 Agent」可视化给审核员看。
 export default function AIReviewQueue() {
   const [rows, setRows] = useState<AIReviewRow[]>([])
   const [status, setStatus] = useState('')
@@ -144,6 +153,14 @@ export default function AIReviewQueue() {
                   <div style={{ fontSize: 12, color: 'var(--lh-text-3)', fontFamily: 'var(--lh-font-mono)', marginTop: 4 }}>
                     预审 #{active.id} · 题目 #{active.itemId} · 模板 v{active.promptVersion} · {STATUS_LABEL[active.status] ?? active.status}
                   </div>
+                  {active.promptDrift ? (
+                    <div
+                      title="该预审使用的 Prompt 配置已不是任务当前生效版本,结论可能基于旧配置"
+                      style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 999, padding: '2px 10px' }}
+                    >
+                      Prompt 配置已变更 · 当前生效 v{active.activePromptVersion}
+                    </div>
+                  ) : null}
                 </div>
                 <span style={{ fontSize: 14, fontWeight: 700, color: verdictView(active.verdict).tone, whiteSpace: 'nowrap' }}>
                   AI {verdictView(active.verdict).label}{active.overallScore != null ? ` (${active.overallScore})` : ''}
@@ -187,6 +204,19 @@ export default function AIReviewQueue() {
                 <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--lh-text-3)', marginBottom: 6 }}>审核 Prompt 模板（{active.model || '—'}）</div>
                 <pre style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--lh-bg-elev)', borderRadius: 'var(--lh-radius)', padding: '10px 12px', color: 'var(--lh-text-1)' }}>{active.promptTemplate || '（未配置 Prompt 模板）'}</pre>
               </div>
+
+              {/* AI 实际看到的 Prompt:渲染后快照(已填入本提交的 payload/answer)+ sha256 指纹 */}
+              {active.promptSnapshot ? (
+                <details>
+                  <summary aria-label="展开 AI 实际看到的 Prompt 渲染后快照" style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--lh-text-3)' }}>
+                    AI 实际看到的 Prompt（渲染后快照）
+                  </summary>
+                  <pre style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 320, overflow: 'auto', background: 'var(--lh-bg-elev)', borderRadius: 'var(--lh-radius)', padding: '10px 12px', color: 'var(--lh-text-1)' }}>{formatSnapshot(active.promptSnapshot)}</pre>
+                  {active.promptHash ? (
+                    <div style={{ fontSize: 11, color: 'var(--lh-text-3)', fontFamily: 'var(--lh-font-mono)', wordBreak: 'break-all', marginTop: 6 }}>指纹 sha256:{active.promptHash}</div>
+                  ) : null}
+                </details>
+              ) : null}
 
               {/* 工程化元信息 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, fontSize: 12 }}>

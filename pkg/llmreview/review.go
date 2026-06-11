@@ -560,15 +560,38 @@ func (p OpenAICompatibleProvider) call(ctx context.Context, body []byte, model s
 	return result, nil
 }
 
+// RenderPromptSnapshot 返回本次评测真正发给 LLM 的消息(system + user)的 JSON 序列化,
+// 即"AI 实际看到的 prompt 全文"——已填充本提交的 payload/answer 以及模板/维度/阈值/baseline。
+// 复用与 Evaluate 同一个 buildMessages,保证快照即真相(snapshot == 真实发送内容)。
+func RenderPromptSnapshot(prompt PromptConfig, input EvaluationInput) (string, error) {
+	raw, err := json.Marshal(buildMessages(prompt, input))
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// reviewUserPayload 是发给 LLM 的 user 消息内容。用具名 struct(而非 map[string]any)序列化,
+// 让 JSON 键顺序由字段声明顺序固定、与 Go 版本无关——保证 prompt 快照与其 sha256 指纹可复现。
+type reviewUserPayload struct {
+	PromptTemplate      string            `json:"prompt_template"`
+	Dimensions          []DimensionConfig `json:"dimensions"`
+	PassThreshold       float64           `json:"pass_threshold"`
+	UncertainMin        float64           `json:"uncertain_min"`
+	Payload             any               `json:"payload"`
+	Answer              any               `json:"answer"`
+	BaselineDescription string            `json:"baseline_description"`
+}
+
 func buildMessages(prompt PromptConfig, input EvaluationInput) []chatMessage {
-	userPayload, _ := json.Marshal(map[string]any{
-		"prompt_template":      prompt.PromptTemplate,
-		"dimensions":           prompt.Dimensions,
-		"pass_threshold":       prompt.PassThreshold,
-		"uncertain_min":        prompt.UncertainMin,
-		"payload":              jsonValueOrString(input.PayloadJSON),
-		"answer":               jsonValueOrString(input.AnswerJSON),
-		"baseline_description": input.BaselineDescription,
+	userPayload, _ := json.Marshal(reviewUserPayload{
+		PromptTemplate:      prompt.PromptTemplate,
+		Dimensions:          prompt.Dimensions,
+		PassThreshold:       prompt.PassThreshold,
+		UncertainMin:        prompt.UncertainMin,
+		Payload:             jsonValueOrString(input.PayloadJSON),
+		Answer:              jsonValueOrString(input.AnswerJSON),
+		BaselineDescription: input.BaselineDescription,
 	})
 	return []chatMessage{
 		{

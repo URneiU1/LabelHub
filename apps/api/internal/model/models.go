@@ -184,6 +184,8 @@ type AIReview struct {
 	Dimensions     *string    `gorm:"type:json" json:"dimensions"`
 	Reason         NullString `json:"reason"`
 	RawResponse    *string    `gorm:"type:json" json:"rawResponse"`
+	PromptSnapshot *string    `gorm:"column:prompt_snapshot" json:"promptSnapshot"`
+	PromptHash     *string    `gorm:"column:prompt_hash" json:"promptHash"`
 	TokensInput    int        `json:"tokensInput"`
 	TokensOutput   int        `json:"tokensOutput"`
 	LatencyMS      int        `json:"latencyMs"`

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,14 +80,16 @@ type aiReviewPayload struct {
 }
 
 type aiEvaluation struct {
-	Verdict      string
-	Score        float64
-	Reason       string
-	Dimensions   string
-	RawResponse  string
-	TokensInput  int
-	TokensOutput int
-	LatencyMS    int
+	Verdict        string
+	Score          float64
+	Reason         string
+	Dimensions     string
+	RawResponse    string
+	PromptSnapshot string
+	PromptHash     string
+	TokensInput    int
+	TokensOutput   int
+	LatencyMS      int
 }
 
 type aiReviewInput struct {
@@ -128,7 +132,7 @@ func newEvaluatorFromEnv() (aiEvaluator, error) {
 }
 
 func evaluateWithProvider(ctx context.Context, provider llmreview.Provider, payload aiReviewPayload, input aiReviewInput) (aiEvaluation, error) {
-	result, err := provider.Evaluate(ctx, input.Prompt, llmreview.EvaluationInput{
+	evalInput := llmreview.EvaluationInput{
 		TaskID:              payload.TaskID,
 		SubmissionID:        payload.SubmissionID,
 		RevisionID:          payload.RevisionID,
@@ -138,7 +142,8 @@ func evaluateWithProvider(ctx context.Context, provider llmreview.Provider, payl
 		PayloadJSON:         input.PayloadJSON,
 		AnswerJSON:          input.AnswerJSON,
 		BaselineDescription: input.BaselineDescription,
-	})
+	}
+	result, err := provider.Evaluate(ctx, input.Prompt, evalInput)
 	if err != nil {
 		return aiEvaluation{}, err
 	}
@@ -149,16 +154,29 @@ func evaluateWithProvider(ctx context.Context, provider llmreview.Provider, payl
 	if err != nil {
 		return aiEvaluation{}, err
 	}
+	// 记录"AI 实际看到的 prompt 全文"快照 + sha256 指纹,供审核台追溯与漂移判定;
+	// 与 provider.Evaluate 走同一个 buildMessages,保证快照即真实发送内容。
+	snapshot, err := llmreview.RenderPromptSnapshot(input.Prompt, evalInput)
+	if err != nil {
+		return aiEvaluation{}, err
+	}
 	return aiEvaluation{
-		Verdict:      result.Verdict,
-		Score:        result.OverallScore,
-		Reason:       result.Reason,
-		Dimensions:   string(dimensions),
-		RawResponse:  result.RawResponse,
-		TokensInput:  result.TokensInput,
-		TokensOutput: result.TokensOutput,
-		LatencyMS:    result.LatencyMS,
+		Verdict:        result.Verdict,
+		Score:          result.OverallScore,
+		Reason:         result.Reason,
+		Dimensions:     string(dimensions),
+		RawResponse:    result.RawResponse,
+		PromptSnapshot: snapshot,
+		PromptHash:     sha256Hex(snapshot),
+		TokensInput:    result.TokensInput,
+		TokensOutput:   result.TokensOutput,
+		LatencyMS:      result.LatencyMS,
 	}, nil
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 func parseAIReviewPayload(raw []byte) (aiReviewPayload, error) {
@@ -275,8 +293,8 @@ func (h workerHandlers) complete(ctx context.Context, payload aiReviewPayload, r
 	}
 	now := time.Now().UTC()
 	reviewRes, err := tx.ExecContext(ctx,
-		`UPDATE ai_reviews SET status = 'succeeded', prompt_config_id = COALESCE(prompt_config_id, ?), verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
-		payload.PromptConfigID, result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
+		`UPDATE ai_reviews SET status = 'succeeded', prompt_config_id = COALESCE(prompt_config_id, ?), verdict = ?, overall_score = ?, dimensions = ?, reason = ?, raw_response = ?, prompt_snapshot = ?, prompt_hash = ?, tokens_input = ?, tokens_output = ?, latency_ms = ?, error_msg = NULL, finished_at = ? WHERE idempotency_key = ? AND submission_id = ? AND revision_id = ? AND prompt_version = ? AND (prompt_config_id IS NULL OR prompt_config_id = ?) AND status IN ('pending','running','failed')`,
+		payload.PromptConfigID, result.Verdict, result.Score, result.Dimensions, result.Reason, result.RawResponse, result.PromptSnapshot, result.PromptHash, result.TokensInput, result.TokensOutput, result.LatencyMS, now, payload.IdempotencyKey, payload.SubmissionID, payload.RevisionID, payload.PromptVersion, payload.PromptConfigID,
 	)
 	if err != nil {
 		return err

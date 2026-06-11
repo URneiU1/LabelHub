@@ -30,19 +30,26 @@ type aiReviewRow struct {
 	PromptTemplate string           `json:"promptTemplate"`
 	PassThreshold  float64          `json:"passThreshold"`
 	UncertainMin   float64          `json:"uncertainMin"`
-	TokensInput    int              `json:"tokensInput"`
-	TokensOutput   int              `json:"tokensOutput"`
-	LatencyMs      int              `json:"latencyMs"`
-	RetryCount     int              `json:"retryCount"`
-	IdempotencyKey string           `json:"idempotencyKey"`
-	ErrorMsg       model.NullString `json:"errorMsg"`
-	CreatedAt      time.Time        `json:"createdAt"`
-	StartedAt      model.NullTime   `json:"startedAt"`
-	FinishedAt     model.NullTime   `json:"finishedAt"`
-	SubmissionID   uint64           `json:"submissionId"`
-	TaskID         uint64           `json:"taskId"`
-	TaskTitle      string           `json:"taskTitle"`
-	ItemID         uint64           `json:"itemId"`
+	// PromptSnapshot 是本次预审真正发给 LLM 的消息全文(AI 实际看到的 prompt);PromptHash 是其
+	// sha256 指纹。PromptDrift 为真表示该预审所用 prompt 配置已不再是任务当前生效版本(配置已变更),
+	// ActivePromptVersion 是任务当前生效的 prompt 版本号,供审核员判断结论是否基于旧配置。
+	PromptSnapshot      *string          `json:"promptSnapshot"`
+	PromptHash          *string          `json:"promptHash"`
+	PromptDrift         bool             `json:"promptDrift"`
+	ActivePromptVersion int              `json:"activePromptVersion"`
+	TokensInput         int              `json:"tokensInput"`
+	TokensOutput        int              `json:"tokensOutput"`
+	LatencyMs           int              `json:"latencyMs"`
+	RetryCount          int              `json:"retryCount"`
+	IdempotencyKey      string           `json:"idempotencyKey"`
+	ErrorMsg            model.NullString `json:"errorMsg"`
+	CreatedAt           time.Time        `json:"createdAt"`
+	StartedAt           model.NullTime   `json:"startedAt"`
+	FinishedAt          model.NullTime   `json:"finishedAt"`
+	SubmissionID        uint64           `json:"submissionId"`
+	TaskID              uint64           `json:"taskId"`
+	TaskTitle           string           `json:"taskTitle"`
+	ItemID              uint64           `json:"itemId"`
 }
 
 type aiReviewQueueResponse struct {
@@ -119,10 +126,17 @@ func (h ReviewerHandler) AIReviewQueue(c *gin.Context) {
 			return
 		}
 	}
-	taskTitleByID := make(map[uint64]string, len(tasks))
+	taskByID := make(map[uint64]model.Task, len(tasks))
 	for _, task := range tasks {
-		taskTitleByID[task.ID] = task.Title
+		taskByID[task.ID] = task
+		// 把每个任务当前生效的 prompt 配置 id 也纳入待加载集合,用于漂移判定(取其版本号)。
+		if task.AIPromptID != nil {
+			promptIDs = append(promptIDs, *task.AIPromptID)
+		}
 	}
+
+	// 去重:review 用的 prompt 与任务当前生效 prompt 常常相同(无漂移),避免 IN 子句重复值。
+	promptIDs = uniqueUint64(promptIDs)
 
 	var prompts []model.AIPromptConfig
 	if err := h.db.Where("id IN ?", promptIDs).Find(&prompts).Error; err != nil {
@@ -142,31 +156,44 @@ func (h ReviewerHandler) AIReviewQueue(c *gin.Context) {
 		}
 		sub := subByID[review.SubmissionID]
 		prompt := promptByID[review.PromptConfigID]
+		task := taskByID[sub.TaskID]
+		promptDrift := false
+		activePromptVersion := 0
+		if task.AIPromptID != nil {
+			promptDrift = *task.AIPromptID != review.PromptConfigID
+			if active, ok := promptByID[*task.AIPromptID]; ok {
+				activePromptVersion = active.Version
+			}
+		}
 		rows = append(rows, aiReviewRow{
-			ID:             review.ID,
-			Status:         review.Status,
-			Verdict:        review.Verdict,
-			OverallScore:   review.OverallScore,
-			Dimensions:     dims,
-			Reason:         review.Reason,
-			PromptVersion:  review.PromptVersion,
-			Model:          prompt.Model,
-			PromptTemplate: prompt.PromptTemplate,
-			PassThreshold:  prompt.PassThreshold,
-			UncertainMin:   prompt.UncertainMin,
-			TokensInput:    review.TokensInput,
-			TokensOutput:   review.TokensOutput,
-			LatencyMs:      review.LatencyMS,
-			RetryCount:     review.RetryCount,
-			IdempotencyKey: review.IdempotencyKey,
-			ErrorMsg:       review.ErrorMsg,
-			CreatedAt:      review.CreatedAt,
-			StartedAt:      review.StartedAt,
-			FinishedAt:     review.FinishedAt,
-			SubmissionID:   review.SubmissionID,
-			TaskID:         sub.TaskID,
-			TaskTitle:      taskTitleByID[sub.TaskID],
-			ItemID:         sub.ItemID,
+			ID:                  review.ID,
+			Status:              review.Status,
+			Verdict:             review.Verdict,
+			OverallScore:        review.OverallScore,
+			Dimensions:          dims,
+			Reason:              review.Reason,
+			PromptVersion:       review.PromptVersion,
+			Model:               prompt.Model,
+			PromptTemplate:      prompt.PromptTemplate,
+			PassThreshold:       prompt.PassThreshold,
+			UncertainMin:        prompt.UncertainMin,
+			PromptSnapshot:      review.PromptSnapshot,
+			PromptHash:          review.PromptHash,
+			PromptDrift:         promptDrift,
+			ActivePromptVersion: activePromptVersion,
+			TokensInput:         review.TokensInput,
+			TokensOutput:        review.TokensOutput,
+			LatencyMs:           review.LatencyMS,
+			RetryCount:          review.RetryCount,
+			IdempotencyKey:      review.IdempotencyKey,
+			ErrorMsg:            review.ErrorMsg,
+			CreatedAt:           review.CreatedAt,
+			StartedAt:           review.StartedAt,
+			FinishedAt:          review.FinishedAt,
+			SubmissionID:        review.SubmissionID,
+			TaskID:              sub.TaskID,
+			TaskTitle:           task.Title,
+			ItemID:              sub.ItemID,
 		})
 	}
 

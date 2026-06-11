@@ -219,6 +219,13 @@ export type AIReviewRow = {
   promptTemplate: string
   passThreshold: number
   uncertainMin: number
+  // promptSnapshot 是本次预审真正发给 LLM 的消息全文(AI 实际看到的 prompt);promptHash 是其
+  // sha256 指纹。promptDrift 为真表示该预审所用 prompt 配置已不再是任务当前生效版本,
+  // activePromptVersion 是任务当前生效的 prompt 版本号。
+  promptSnapshot: string | null
+  promptHash: string | null
+  promptDrift: boolean
+  activePromptVersion: number
   tokensInput: number
   tokensOutput: number
   latencyMs: number
