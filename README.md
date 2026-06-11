@@ -23,6 +23,18 @@
 
 想本地完整跑(改代码、看 AI worker、换真实豆包 key)见下方「快速启动」。
 
+## 界面预览(1920×1080)
+
+**多格式导出 — 8 格式(含 SFT / DPO 训练格式,直达模型微调)+ DPO 偏好对字段映射**
+
+![多格式导出配置](submission/assets/screenshots/05-export-config-1920.png)
+
+| **可视化模板 Designer**<br>拖拽物料 / 字段联动 / 多 Tab 嵌套<br>![模板 Designer](submission/assets/screenshots/02-designer-1920.png) | **Owner 任务管理**<br>全生命周期 + 统计卡 + 状态筛选<br>![Owner 任务管理](submission/assets/screenshots/01-owner-tasks-1920.png) |
+|---|---|
+| **Labeler 作答工作台**<br>多物料 + Tabs + 草稿自动保存<br>![Labeler 作答](submission/assets/screenshots/03-labeler-answer-1920.png) | **Reviewer + AI 预审结论**<br>verdict / 维度评分 / 审计时间线<br>![Reviewer 详情](submission/assets/screenshots/04-reviewer-detail-1920.png) |
+
+> 截图为 1920×1080;1280×800 版本见 [`submission/assets/screenshots/`](submission/assets/screenshots/)。
+
 ## 快速启动(本地搭建)
 
 ```bash
