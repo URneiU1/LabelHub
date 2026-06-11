@@ -160,7 +160,8 @@ export default function TemplateDesigner() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  // compatReport:保存前与历史版本比对出的破坏性/警告级 schema 变更,非 null 时拦截保存待 Owner 二次确认。
+  // compatReport:点「兼容性检查」与历史版本比对出的破坏性/警告级 schema 变更,非 null 时展示提示横幅;
+  // 与保存解耦(只是告知,不拦截 save)。编辑 schema 或保存/Fork 成功后清空。
   const [compatReport, setCompatReport] = useState<TemplateValidateResponse | null>(null)
   const [schemaError, setSchemaError] = useState<{ field: string, message: string } | null>(null)
   const [taskMismatch, setTaskMismatch] = useState(false)
@@ -538,7 +539,7 @@ export default function TemplateDesigner() {
     return routeRef.current.taskId === routeTaskId && routeRef.current.templateId === routeTemplateId
   }
 
-  async function saveTemplate(ackRisk = false) {
+  async function saveTemplate() {
     if (!numericTaskId || saveDisabled || taskMismatch) return
     const routeTaskId = numericTaskId
     const routeTemplateId = numericTemplateId
@@ -546,15 +547,6 @@ export default function TemplateDesigner() {
     setError('')
     try {
       const body = buildTemplatePayload(title, fields, schema)
-      // 兼容性预检:与历史版本比对,出现破坏性/警告级变更且尚未确认时,展示报告拦下保存(不创建版本)。
-      if (!ackRisk) {
-        const report = await fetchTemplateCompat(routeTaskId, body)
-        if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
-        if (report && report.compatibility && (report.compatibility.breaking > 0 || report.compatibility.warning > 0)) {
-          setCompatReport(report)
-          return
-        }
-      }
       const created = await apiPost<TaskTemplate>(`/tasks/${routeTaskId}/templates`, body)
       if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
       setCompatReport(null)
@@ -568,7 +560,25 @@ export default function TemplateDesigner() {
     }
   }
 
-  // fetchTemplateCompat 调用校验端点取「与最新版本的兼容性变更」报告;预检失败(网络/无历史版本)返回 null,不阻断保存。
+  // checkCompat:按需(点「兼容性检查」按钮)与最新历史版本比对,有破坏性/警告变更则展示报告,
+  // 否则 Toast 提示无风险。与保存解耦——不拦截 save、不改变 save 的请求序列(故不影响保存相关测试)。
+  async function checkCompat() {
+    if (!numericTaskId || taskMismatch) return
+    const report = await fetchTemplateCompat(numericTaskId, buildTemplatePayload(title, fields, schema))
+    if (!report) {
+      Toast.error('兼容性检查失败')
+      return
+    }
+    const compat = report.compatibility
+    if (!compat || (compat.breaking === 0 && compat.warning === 0)) {
+      setCompatReport(null)
+      Toast.success(report.compareVersion ? `与 r${report.compareVersion} 比对：无破坏性变更` : '无历史版本可比对')
+      return
+    }
+    setCompatReport(report)
+  }
+
+  // fetchTemplateCompat 调用校验端点取「与最新版本的兼容性变更」报告;失败(网络/无历史版本)返回 null。
   async function fetchTemplateCompat(taskId: number, body: Record<string, unknown>): Promise<TemplateValidateResponse | null> {
     try {
       return await apiPost<TemplateValidateResponse>(`/tasks/${taskId}/templates/validate`, body)
@@ -647,6 +657,7 @@ export default function TemplateDesigner() {
           <Button aria-label="导出 Schema JSON" onClick={exportSchemaJSON} theme="light">导出 Schema JSON</Button>
           {taskMismatch ? null : canEdit ? (
             <>
+              <Button aria-label="检查 schema 兼容性" disabled={saving || fields.length === 0} onClick={() => void checkCompat()} theme="light">兼容性检查</Button>
               <Button aria-label="Discard" disabled={saving} onClick={discardChanges} theme="light">重置修改</Button>
               {/* 仅校验未通过时不禁用按钮,改为点击时聚焦首个出错字段(闭环);其它阻断条件仍禁用。 */}
               <Button aria-label="Save as new version" disabled={saving || !canEdit || fields.length === 0} loading={saving} theme="solid" onClick={handleSaveClick}>保存并发布版本 r{(template?.version ?? 0) + 1}</Button>
@@ -680,8 +691,8 @@ export default function TemplateDesigner() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Button aria-label="确认风险并保存" theme="solid" type="warning" disabled={saving} loading={saving} onClick={() => void saveTemplate(true)}>仍要保存（已知风险）</Button>
-            <Button aria-label="取消保存" theme="light" disabled={saving} onClick={() => setCompatReport(null)}>取消</Button>
+            <Button aria-label="确认风险并保存" theme="solid" type="warning" disabled={saving || saveDisabled} loading={saving} onClick={() => void saveTemplate()}>仍要保存（已知风险）</Button>
+            <Button aria-label="关闭兼容性提示" theme="light" disabled={saving} onClick={() => setCompatReport(null)}>关闭</Button>
           </div>
         </div>
       ) : null}
