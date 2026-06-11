@@ -26,21 +26,36 @@ var sftPromptKeys = []string{"prompt", "question", "input", "instruction", "text
 var sftCompletionKeys = []string{"completion", "output", "corrected_answer", "answer", "response", "summary", "text"}
 
 // EncodeSFT 输出 OpenAI Chat 微调 JSONL:逐行 {"messages":[{user},{assistant}],"metadata":{...}}。
-// user content 取题目 payload、assistant content 取标注 answer(均按候选键提取、回退整体 JSON),
-// metadata 携带 submission/item 标识 + 质量溯源(含审核时 AI 分数 / 人工结论),供下游训练时按质量过滤。
+// 走候选键启发式提取(无字段映射配置),保持向后兼容;真实导出路径走 EncodeSFTWithConfig。
 func EncodeSFT(w io.Writer, cols []Column, rows []Row) (int, error) {
+	return EncodeSFTWithConfig(w, rows, nil)
+}
+
+// EncodeSFTWithConfig 与 EncodeSFT 相同,但支持显式字段映射:cfg.PromptField/CompletionField 非空时
+// 按点号路径精准从 payload/answer 取文本(适配任意字段命名),为空则回退候选键启发式。
+// cfg.SystemPrompt 非空则在 user 之前加一条 system 消息。metadata 携带标识 + 质量溯源供下游按质量过滤。
+func EncodeSFTWithConfig(w io.Writer, rows []Row, cfg *SFTConfig) (int, error) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	n := 0
 	for _, row := range rows {
-		rec := sftRecord{
-			Messages: []sftMessage{
-				{Role: "user", Content: extractText(pick(row, "payload"), sftPromptKeys)},
-				{Role: "assistant", Content: extractText(pick(row, "answer"), sftCompletionKeys)},
-			},
-			Metadata: provenanceMeta(row),
+		var user, assistant string
+		if cfg != nil && cfg.PromptField != "" {
+			user = stringifyCell(resolvePath(pick(row, "payload"), cfg.PromptField))
+		} else {
+			user = extractText(pick(row, "payload"), sftPromptKeys)
 		}
-		if err := enc.Encode(rec); err != nil {
+		if cfg != nil && cfg.CompletionField != "" {
+			assistant = stringifyCell(resolvePath(pick(row, "answer"), cfg.CompletionField))
+		} else {
+			assistant = extractText(pick(row, "answer"), sftCompletionKeys)
+		}
+		msgs := make([]sftMessage, 0, 3)
+		if cfg != nil && cfg.SystemPrompt != "" {
+			msgs = append(msgs, sftMessage{Role: "system", Content: cfg.SystemPrompt})
+		}
+		msgs = append(msgs, sftMessage{Role: "user", Content: user}, sftMessage{Role: "assistant", Content: assistant})
+		if err := enc.Encode(sftRecord{Messages: msgs, Metadata: provenanceMeta(row)}); err != nil {
 			return n, err
 		}
 		n++

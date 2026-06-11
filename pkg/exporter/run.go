@@ -108,7 +108,17 @@ func encodeToFile(ctx context.Context, db *sql.DB, taskID uint64, format string,
 	if err != nil {
 		return RunResult{}, fmt.Errorf("exporter: create temp: %w", err)
 	}
-	rowCount, encErr := Encode(format, f, cols, rows)
+	// sft/dpo 走配置感知的编码器,支持显式字段映射(fm.SFT / fm.DPO);其余格式走通用 Encode。
+	var rowCount int
+	var encErr error
+	switch format {
+	case "sft":
+		rowCount, encErr = EncodeSFTWithConfig(f, rows, fm.SFT)
+	case "dpo":
+		rowCount, encErr = EncodeDPOWithConfig(f, rows, fm.DPO)
+	default:
+		rowCount, encErr = Encode(format, f, cols, rows)
+	}
 	if encErr == nil {
 		encErr = f.Sync()
 	}

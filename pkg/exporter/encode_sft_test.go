@@ -166,3 +166,45 @@ func TestEncodeSFT_EmptyRowsYieldsEmptyOutput(t *testing.T) {
 		t.Fatalf("expected empty output, got %q", buf.String())
 	}
 }
+
+func TestEncodeSFTWithConfig_ExplicitFieldMappingNestedPathAndSystem(t *testing.T) {
+	var buf bytes.Buffer
+	rows := []Row{{
+		{Key: "payload", Value: map[string]any{"q": map[string]any{"text": "问题X"}, "prompt": "不该被选"}},
+		{Key: "answer", Value: map[string]any{"final": "答案Y", "summary": "不该被选"}},
+	}}
+	cfg := &SFTConfig{PromptField: "q.text", CompletionField: "final", SystemPrompt: "你是裁判"}
+	n, err := EncodeSFTWithConfig(&buf, rows, cfg)
+	if err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	msgs := parseJSONL(t, buf.Bytes())[0]["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("expected system+user+assistant, got %d: %v", len(msgs), msgs)
+	}
+	sys := msgs[0].(map[string]any)
+	if sys["role"] != "system" || sys["content"] != "你是裁判" {
+		t.Fatalf("system msg = %v", sys)
+	}
+	if msgs[1].(map[string]any)["content"] != "问题X" {
+		t.Fatalf("user content should follow nested path q.text, got %v", msgs[1])
+	}
+	if msgs[2].(map[string]any)["content"] != "答案Y" {
+		t.Fatalf("assistant content should follow explicit field, got %v", msgs[2])
+	}
+}
+
+func TestEncodeSFTWithConfig_NilConfigFallsBackToHeuristic(t *testing.T) {
+	var buf bytes.Buffer
+	rows := []Row{{
+		{Key: "payload", Value: map[string]any{"prompt": "P"}},
+		{Key: "answer", Value: map[string]any{"summary": "A"}},
+	}}
+	if _, err := EncodeSFTWithConfig(&buf, rows, nil); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	user, asst := sftMessagesOf(t, parseJSONL(t, buf.Bytes())[0])
+	if user != "P" || asst != "A" {
+		t.Fatalf("nil cfg should use heuristic, got %q/%q", user, asst)
+	}
+}

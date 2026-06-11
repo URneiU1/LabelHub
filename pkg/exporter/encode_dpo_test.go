@@ -112,6 +112,39 @@ func TestEncodeDPO_NonPreferenceRowsSkippedGracefully(t *testing.T) {
 	}
 }
 
+func TestEncodeDPOWithConfig_CustomFieldMapping(t *testing.T) {
+	var buf bytes.Buffer
+	rows := []Row{{
+		{Key: "submission_id", Value: uint64(1)},
+		{Key: "payload", Value: map[string]any{"task": "问题Z", "ans1": "甲", "ans2": "乙"}},
+		{Key: "answer", Value: map[string]any{"winner": "B"}},
+	}}
+	cfg := &DPOConfig{PromptField: "task", CandidateAField: "ans1", CandidateBField: "ans2", PreferredField: "winner"}
+	n, err := EncodeDPOWithConfig(&buf, rows, cfg)
+	if err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	rec := parseJSONL(t, buf.Bytes())[0]
+	if rec["prompt"] != "问题Z" {
+		t.Fatalf("prompt should follow mapped field, got %v", rec["prompt"])
+	}
+	// winner=B → chosen=候选B(ans2=乙)、rejected=候选A(ans1=甲)
+	if rec["chosen"] != "乙" || rec["rejected"] != "甲" {
+		t.Fatalf("custom-mapped chosen/rejected = %v/%v", rec["chosen"], rec["rejected"])
+	}
+}
+
+func TestEncodeDPOWithConfig_NilConfigUsesPreferenceConvention(t *testing.T) {
+	var buf bytes.Buffer
+	n, err := EncodeDPOWithConfig(&buf, []Row{prefRow(1, "A", false)}, nil)
+	if err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if rec := parseJSONL(t, buf.Bytes())[0]; rec["chosen"] != "A 的回答" {
+		t.Fatalf("nil cfg should use preference_compare convention, got %v", rec["chosen"])
+	}
+}
+
 func TestEncode_RoutesDPOAndExtAndContentType(t *testing.T) {
 	var buf bytes.Buffer
 	n, err := Encode("dpo", &buf, nil, []Row{prefRow(1, "A", false)})

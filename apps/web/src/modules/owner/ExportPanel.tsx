@@ -46,6 +46,9 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
   const [includeReviews, setIncludeReviews] = useState(false)
   const [selectedCols, setSelectedCols] = useState<Record<string, boolean>>({})
   const [renames, setRenames] = useState<Record<string, string>>({})
+  // SFT/DPO 字段映射(留空走后端默认约定):适配任意字段命名,提升训练样本的下游可用性。
+  const [sftMap, setSftMap] = useState({ prompt_field: '', completion_field: '', system_prompt: '' })
+  const [dpoMap, setDpoMap] = useState({ prompt_field: '', candidate_a_field: '', candidate_b_field: '', preferred_field: '' })
   const [records, setRecords] = useState<ExportRecord[]>([])
   const [creating, setCreating] = useState(false)
   // taskRef 做 stale guard:切任务后晚到的历史响应不污染当前任务。
@@ -87,7 +90,11 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
     const columns = availableColumns
       .filter((src) => selectedCols[src])
       .map((src) => ({ source: src, export: (renames[src] || '').trim() || src }))
-    return JSON.stringify({ format, include_reviews: includeReviews, field_map: { include_reviews: includeReviews, columns } })
+    const fieldMap: Record<string, unknown> = { include_reviews: includeReviews, columns }
+    // 仅在对应训练格式下携带字段映射;空字段后端会回退到默认约定。
+    if (format === 'sft') fieldMap.sft = sftMap
+    if (format === 'dpo') fieldMap.dpo = dpoMap
+    return JSON.stringify({ format, include_reviews: includeReviews, field_map: fieldMap })
   }
 
   async function createExport() {
@@ -118,6 +125,8 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
     }
   }
 
+  const mapInputStyle: CSSProperties = { width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--color-border-light, #d1d5db)', fontSize: 13, boxSizing: 'border-box' }
+
   return (
     <section style={panelStyle} aria-label="数据导出">
       <h3 style={headingStyle}>数据导出</h3>
@@ -138,6 +147,26 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
           </button>
         ))}
       </div>
+
+      {format === 'sft' || format === 'dpo' ? (
+        <div style={{ marginBottom: 'var(--space-md)', padding: '10px 12px', border: '1px solid var(--color-border-light, #e5e7eb)', borderRadius: 8 }} aria-label="训练格式字段映射">
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>字段映射(可选,留空用默认约定)</div>
+          {format === 'sft' ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <input aria-label="SFT user 字段" placeholder="user 取自 payload 的字段,如 prompt / question.text" value={sftMap.prompt_field} onChange={(e) => setSftMap((m) => ({ ...m, prompt_field: e.target.value }))} style={mapInputStyle} />
+              <input aria-label="SFT assistant 字段" placeholder="assistant 取自 answer 的字段,如 corrected_answer" value={sftMap.completion_field} onChange={(e) => setSftMap((m) => ({ ...m, completion_field: e.target.value }))} style={mapInputStyle} />
+              <input aria-label="SFT system 提示" placeholder="system 提示(可选)" value={sftMap.system_prompt} onChange={(e) => setSftMap((m) => ({ ...m, system_prompt: e.target.value }))} style={mapInputStyle} />
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <input aria-label="DPO prompt 字段" placeholder="prompt 字段(payload),默认 prompt" value={dpoMap.prompt_field} onChange={(e) => setDpoMap((m) => ({ ...m, prompt_field: e.target.value }))} style={mapInputStyle} />
+              <input aria-label="DPO 候选A 字段" placeholder="候选 A 字段(payload),默认 response_a" value={dpoMap.candidate_a_field} onChange={(e) => setDpoMap((m) => ({ ...m, candidate_a_field: e.target.value }))} style={mapInputStyle} />
+              <input aria-label="DPO 候选B 字段" placeholder="候选 B 字段(payload),默认 response_b" value={dpoMap.candidate_b_field} onChange={(e) => setDpoMap((m) => ({ ...m, candidate_b_field: e.target.value }))} style={mapInputStyle} />
+              <input aria-label="DPO preferred 字段" placeholder="偏好字段(answer,值 A/B/tie),默认 preferred" value={dpoMap.preferred_field} onChange={(e) => setDpoMap((m) => ({ ...m, preferred_field: e.target.value }))} style={mapInputStyle} />
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <label style={switchRowStyle}>
         <input type="checkbox" checked={includeReviews} onChange={(e) => setIncludeReviews(e.target.checked)} aria-label="含审核记录" />

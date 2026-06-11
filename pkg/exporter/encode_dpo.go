@@ -15,12 +15,34 @@ type dpoRecord struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// EncodeDPO 针对 preference_compare 任务输出 DPO 偏好对 JSONL。
-// payload 含 prompt / response_a / response_b,标注 answer.preferred ∈ {A,B,tie}:
-// preferred=A → chosen=response_a、rejected=response_b;=B → 反之;
-// tie / 缺失 / 任一回答为空 → 跳过(无有效偏好信号,绝不产出残缺样本)。
-// 返回真实产出的样本数(已跳过的 tie 不计入),如实反映可用偏好对数量。
+// EncodeDPO 输出 DPO 偏好对 JSONL(无字段映射配置,走 preference_compare 约定),保持向后兼容;
+// 真实导出路径走 EncodeDPOWithConfig。
 func EncodeDPO(w io.Writer, cols []Column, rows []Row) (int, error) {
+	return EncodeDPOWithConfig(w, rows, nil)
+}
+
+// EncodeDPOWithConfig 输出 DPO 偏好对 JSONL,字段映射可配置以适配任意 A/B 偏好任务:
+// cfg 各字段非空时按点号路径取 prompt / 候选 A / 候选 B(相对 payload)与 preferred(相对 answer),
+// 为空则回退 preference_compare 约定(prompt / response_a / response_b / preferred)。
+// preferred=A → chosen=候选A、rejected=候选B;=B → 反之;tie / 缺失 / 任一候选为空 → 跳过(不产残缺样本)。
+// model_a/model_b 是约定的可选元数据(不参与映射),缺失则省略。返回真实产出的偏好对数。
+func EncodeDPOWithConfig(w io.Writer, rows []Row, cfg *DPOConfig) (int, error) {
+	promptF, aF, bF, prefF := "prompt", "response_a", "response_b", "preferred"
+	if cfg != nil {
+		if cfg.PromptField != "" {
+			promptF = cfg.PromptField
+		}
+		if cfg.CandidateAField != "" {
+			aF = cfg.CandidateAField
+		}
+		if cfg.CandidateBField != "" {
+			bF = cfg.CandidateBField
+		}
+		if cfg.PreferredField != "" {
+			prefF = cfg.PreferredField
+		}
+	}
+
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	n := 0
@@ -31,15 +53,13 @@ func EncodeDPO(w io.Writer, cols []Column, rows []Row) (int, error) {
 			continue
 		}
 
-		// preference_compare 是约定 schema(response_a/b、model_a/b 为固定字段),
-		// 故直接按键取值,不像 SFT 那样做候选键回退。
-		respA := stringifyCell(payload["response_a"])
-		respB := stringifyCell(payload["response_b"])
+		respA := stringifyCell(resolvePath(payload, aF))
+		respB := stringifyCell(resolvePath(payload, bF))
 		modelA := stringifyCell(payload["model_a"])
 		modelB := stringifyCell(payload["model_b"])
 
 		var chosen, rejected, chosenModel, rejectedModel string
-		switch normPreferred(answer["preferred"]) {
+		switch normPreferred(resolvePath(answer, prefF)) {
 		case "A":
 			chosen, rejected, chosenModel, rejectedModel = respA, respB, modelA, modelB
 		case "B":
@@ -52,7 +72,7 @@ func EncodeDPO(w io.Writer, cols []Column, rows []Row) (int, error) {
 		}
 
 		rec := dpoRecord{
-			Prompt:   stringifyCell(payload["prompt"]),
+			Prompt:   stringifyCell(resolvePath(payload, promptF)),
 			Chosen:   chosen,
 			Rejected: rejected,
 			Metadata: dpoMeta(row, answer, chosenModel, rejectedModel),
