@@ -16,6 +16,7 @@ import (
 	"labelhub-api/internal/httpx"
 	"labelhub-api/internal/middleware"
 	"labelhub-api/internal/model"
+	"labelhub-api/internal/schemadiff"
 	"labelhub-api/internal/statemachine"
 )
 
@@ -134,10 +135,23 @@ func (h TemplateHandler) ValidateTemplate(c *gin.Context) {
 		return
 	}
 	errs := validateTemplateSchema(string(raw))
-	httpx.OK(c, gin.H{
+	resp := gin.H{
 		"valid":  len(errs) == 0,
 		"errors": errs,
-	})
+	}
+	// 兼容性:schema 合法且任务已有历史模板版本时,比对最新版本,提示破坏性/警告级结构变更,
+	// 让 Owner 在保存新版本前知道改动是否会让历史标注失效或丢数据。
+	if len(errs) == 0 {
+		var latest model.TaskTemplate
+		if err := h.db.Where("task_id = ?", task.ID).Order("version DESC").First(&latest).Error; err == nil {
+			if changes, derr := schemadiff.DetectChanges(latest.SchemaJSON, string(raw)); derr == nil {
+				resp["compareVersion"] = latest.Version
+				resp["changes"] = changes
+				resp["compatibility"] = schemadiff.Summarize(changes)
+			}
+		}
+	}
+	httpx.OK(c, resp)
 }
 
 var (

@@ -22,7 +22,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { apiGet, apiPost, type TaskTemplate } from '../../shared/api/client'
+import { apiGet, apiPost, type TaskTemplate, type TemplateValidateResponse } from '../../shared/api/client'
 import SchemaErrorBanner from '../../renderer/components/SchemaErrorBanner'
 import SchemaRenderer from '../../renderer/SchemaRenderer'
 import { parseTemplateSchema } from '../../renderer/parser'
@@ -160,6 +160,8 @@ export default function TemplateDesigner() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // compatReport:保存前与历史版本比对出的破坏性/警告级 schema 变更,非 null 时拦截保存待 Owner 二次确认。
+  const [compatReport, setCompatReport] = useState<TemplateValidateResponse | null>(null)
   const [schemaError, setSchemaError] = useState<{ field: string, message: string } | null>(null)
   const [taskMismatch, setTaskMismatch] = useState(false)
   const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null)
@@ -374,6 +376,12 @@ export default function TemplateDesigner() {
     return true
   }, [validationErrors])
 
+  // 编辑 schema(字段/标题)后,上一次保存预检得到的兼容性报告即过时,清空避免误导。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- schema 变更后让过时的兼容性报告失效
+    setCompatReport(null)
+  }, [fields, title])
+
   function handleSaveClick() {
     // 出现校验错误时,先把用户带回首个出错字段,而不是静默禁用按钮。
     if (focusFirstError()) return
@@ -530,7 +538,7 @@ export default function TemplateDesigner() {
     return routeRef.current.taskId === routeTaskId && routeRef.current.templateId === routeTemplateId
   }
 
-  async function saveTemplate() {
+  async function saveTemplate(ackRisk = false) {
     if (!numericTaskId || saveDisabled || taskMismatch) return
     const routeTaskId = numericTaskId
     const routeTemplateId = numericTemplateId
@@ -538,8 +546,18 @@ export default function TemplateDesigner() {
     setError('')
     try {
       const body = buildTemplatePayload(title, fields, schema)
+      // 兼容性预检:与历史版本比对,出现破坏性/警告级变更且尚未确认时,展示报告拦下保存(不创建版本)。
+      if (!ackRisk) {
+        const report = await fetchTemplateCompat(routeTaskId, body)
+        if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
+        if (report && report.compatibility && (report.compatibility.breaking > 0 || report.compatibility.warning > 0)) {
+          setCompatReport(report)
+          return
+        }
+      }
       const created = await apiPost<TaskTemplate>(`/tasks/${routeTaskId}/templates`, body)
       if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
+      setCompatReport(null)
       Toast.success(`模板 v${created.version ?? ''} 已保存`)
       navigate(`/owner/tasks/${routeTaskId}/templates/${created.id}`)
     } catch (error) {
@@ -547,6 +565,15 @@ export default function TemplateDesigner() {
       setError(error instanceof Error ? error.message : '保存模板失败')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // fetchTemplateCompat 调用校验端点取「与最新版本的兼容性变更」报告;预检失败(网络/无历史版本)返回 null,不阻断保存。
+  async function fetchTemplateCompat(taskId: number, body: Record<string, unknown>): Promise<TemplateValidateResponse | null> {
+    try {
+      return await apiPost<TemplateValidateResponse>(`/tasks/${taskId}/templates/validate`, body)
+    } catch {
+      return null
     }
   }
 
@@ -559,6 +586,7 @@ export default function TemplateDesigner() {
     try {
       const created = await apiPost<TaskTemplate>(`/tasks/${routeTaskId}/templates`, buildTemplatePayload(title, fields, schema))
       if (!isCurrentRoute(routeTaskId, routeTemplateId)) return
+      setCompatReport(null)
       Toast.success(`已 Fork 为 v${created.version ?? ''}`)
       navigate(`/owner/tasks/${routeTaskId}/templates/${created.id}`)
     } catch (error) {
@@ -636,6 +664,25 @@ export default function TemplateDesigner() {
         <div role="alert" style={{ ...alertStyle, margin: 'var(--space-md) 0', background: '#fff1f0' }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>存在配置错误 ({validationErrors.length}):</div>
           {validationErrors.map((item) => <div key={`${item.field}-${item.message}`} style={{ fontSize: 13 }}>• {item.field}: {item.message}</div>)}
+        </div>
+      ) : null}
+      {compatReport && compatReport.compatibility && (compatReport.compatibility.breaking > 0 || compatReport.compatibility.warning > 0) ? (
+        <div role="alert" aria-label="schema 兼容性变更" style={{ ...alertStyle, margin: 'var(--space-md) 0', background: '#fffbeb', borderColor: '#fcd34d' }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            与版本 r{compatReport.compareVersion ?? '?'} 相比有 {compatReport.compatibility.breaking} 项破坏性、{compatReport.compatibility.warning} 项警告级变更，可能影响历史标注：
+          </div>
+          <div style={{ display: 'grid', gap: 4, marginBottom: 10 }}>
+            {(compatReport.changes ?? []).filter((c) => c.severity !== 'safe').map((c) => (
+              <div key={`${c.field}-${c.kind}`} style={{ fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: c.severity === 'breaking' ? '#dc2626' : '#d97706' }}>{c.severity === 'breaking' ? '破坏性' : '警告'}</span>
+                {' · '}{c.detail}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button aria-label="确认风险并保存" theme="solid" type="warning" disabled={saving} loading={saving} onClick={() => void saveTemplate(true)}>仍要保存（已知风险）</Button>
+            <Button aria-label="取消保存" theme="light" disabled={saving} onClick={() => setCompatReport(null)}>取消</Button>
+          </div>
         </div>
       ) : null}
       {showSchemaPreview ? (

@@ -207,6 +207,18 @@ export async function claimTask(taskId: number): Promise<{ task: Task }> {
 }
 
 // 「AI 审核队列」只读视图里的一条 AI 预审 + 其提交/任务/Prompt 上下文。
+// 模板 schema 兼容性:保存新模板版本前与历史版本比对的结构变更报告。
+export type SchemaChangeSeverity = 'safe' | 'warning' | 'breaking'
+export type SchemaChange = { field: string, kind: string, severity: SchemaChangeSeverity, detail: string }
+export type SchemaCompatibility = { breaking: number, warning: number, safe: number }
+export type TemplateValidateResponse = {
+  valid: boolean
+  errors: Array<{ field: string, message: string }>
+  compareVersion?: number
+  changes?: SchemaChange[]
+  compatibility?: SchemaCompatibility
+}
+
 export type AIReviewRow = {
   id: number
   status: string
