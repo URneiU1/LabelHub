@@ -23,6 +23,10 @@ func Encode(format string, w io.Writer, cols []Column, rows []Row) (int, error) 
 		return EncodeMarkdown(w, cols, rows)
 	case "coco":
 		return EncodeCOCO(w, cols, rows)
+	case "sft":
+		return EncodeSFT(w, cols, rows)
+	case "dpo":
+		return EncodeDPO(w, cols, rows)
 	default:
 		return 0, ErrUnsupportedFormat
 	}
@@ -31,7 +35,7 @@ func Encode(format string, w io.Writer, cols []Column, rows []Row) (int, error) 
 // SupportedFormat 判断 format 是否受支持(handler 校验白名单用)。
 func SupportedFormat(format string) bool {
 	switch format {
-	case "json", "jsonl", "csv", "xlsx", "md", "coco":
+	case "json", "jsonl", "csv", "xlsx", "md", "coco", "sft", "dpo":
 		return true
 	default:
 		return false
@@ -53,6 +57,10 @@ func FileExtension(format string) string {
 		return ".md"
 	case "coco":
 		return ".coco.json"
+	case "sft":
+		return ".sft.jsonl"
+	case "dpo":
+		return ".dpo.jsonl"
 	default:
 		return ".bin"
 	}
@@ -73,6 +81,8 @@ func ContentType(format string) string {
 		return "text/markdown; charset=utf-8"
 	case "coco":
 		return "application/json; charset=utf-8"
+	case "sft", "dpo":
+		return "application/x-ndjson; charset=utf-8"
 	default:
 		return "application/octet-stream"
 	}

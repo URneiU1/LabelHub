@@ -61,7 +61,7 @@ func (h ExportHandler) CreateExport(c *gin.Context) {
 		return
 	}
 	if !exporter.SupportedFormat(req.Format) {
-		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "format must be one of json, jsonl, csv, xlsx, md, coco")
+		httpx.Error(c, http.StatusBadRequest, "VALIDATION_ERROR", "format must be one of json, jsonl, csv, xlsx, md, coco, sft, dpo")
 		return
 	}
 	var fieldMap *string

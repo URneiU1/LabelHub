@@ -896,7 +896,7 @@ components:
       properties:
         format:
           type: string
-          enum: [json, jsonl, csv, xlsx]
+          enum: [json, jsonl, csv, xlsx, md, coco, sft, dpo]
         field_map:
           type: object
           additionalProperties: true

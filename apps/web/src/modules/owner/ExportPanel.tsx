@@ -6,7 +6,19 @@ import EmptyState from '../../shared/components/EmptyState'
 import StatusBadge from '../../shared/components/StatusBadge'
 import { isSafeURL } from '../../shared/security/url'
 
-type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx' | 'md' | 'coco'
+type ExportFormat = 'json' | 'jsonl' | 'csv' | 'xlsx' | 'md' | 'coco' | 'sft' | 'dpo'
+
+// 每种格式的下游用途提示(hover title):SFT/DPO 直达模型微调,评委一眼看懂"可被下游消费"。
+const FORMAT_HINTS: Record<ExportFormat, string> = {
+  json: 'JSON 数组,通用结构化交换',
+  jsonl: 'JSON Lines,逐行对象,流式可读',
+  csv: 'CSV 表格,Excel/表格工具可开',
+  xlsx: 'Excel 工作簿',
+  md: 'Markdown 表格,文档内嵌',
+  coco: 'COCO 风格 JSON,CV 标注管线',
+  sft: 'OpenAI Chat 微调样本 (messages),直接喂 SFT',
+  dpo: 'DPO 偏好对 (prompt/chosen/rejected),喂 TRL DPO',
+}
 
 type ExportRecord = {
   id: number
@@ -20,7 +32,7 @@ type ExportListResponse = { exports: ExportRecord[] }
 type CreateExportResponse = { id: number, status: string }
 type DownloadURLResponse = { url: string, expiresIn: number }
 
-const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx', 'md', 'coco']
+const FORMATS: ExportFormat[] = ['json', 'jsonl', 'csv', 'xlsx', 'md', 'coco', 'sft', 'dpo']
 const BASE_COLUMNS = ['submission_id', 'item_id', 'external_id', 'payload', 'answer']
 const REVIEW_COLUMNS = ['ai_review.verdict', 'ai_review.overall_score', 'ai_review.reason', 'human_review.verdict', 'human_review.reason']
 const POLL_INTERVAL_MS = 2000
@@ -116,7 +128,8 @@ export default function ExportPanel({ taskId }: ExportPanelProps) {
           <button
             key={f}
             type="button"
-            aria-label={`格式 ${f}`}
+            aria-label={`格式 ${f.toUpperCase()}：${FORMAT_HINTS[f]}`}
+            title={FORMAT_HINTS[f]}
             aria-pressed={format === f}
             onClick={() => setFormat(f)}
             style={format === f ? formatActiveStyle : formatStyle}

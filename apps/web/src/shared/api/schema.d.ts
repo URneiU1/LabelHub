@@ -1035,7 +1035,7 @@ export interface components {
         };
         CreateExportRequest: {
             /** @enum {string} */
-            format: "json" | "jsonl" | "csv" | "xlsx";
+            format: "json" | "jsonl" | "csv" | "xlsx" | "md" | "coco" | "sft" | "dpo";
             field_map?: {
                 [key: string]: unknown;
             } | null;
