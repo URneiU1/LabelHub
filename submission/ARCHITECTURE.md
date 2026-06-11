@@ -5,8 +5,9 @@ LabelHub is a monorepo data labeling platform. The current production path is:
 - `apps/web`: React 18 + TypeScript SPA, Semi UI, Vite.
 - `apps/api`: Go + Gin REST API, MySQL persistence, migrations on startup.
 - `apps/ai-worker`: Go Asynq worker for AI review, dry-runs, and async exports.
-- `pkg/exporter`: shared JSON/JSONL/CSV/XLSX export engine.
-- `pkg/llmreview`: shared mock/OpenAI-compatible AI review evaluator.
+- `pkg/exporter`: shared JSON/JSONL/CSV/XLSX/Markdown/COCO/SFT/DPO export engine (SFT/DPO are LLM training-ready formats with quality-provenance metadata).
+- `pkg/llmreview`: shared mock/OpenAI-compatible AI review evaluator; also renders the exact prompt snapshot persisted per review.
+- `apps/api/internal/schemadiff`: pure-function template schema diff engine classifying version-to-version changes as safe/warning/breaking.
 
 ## Runtime Topology
 

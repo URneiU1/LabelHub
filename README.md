@@ -59,7 +59,7 @@ make web       # 终端 C — http://localhost:5173
 2. 进 **Owner Dashboard** → 选官方 `qa_quality` 任务 → 看模板/AI Prompt/Golden Sample/Stats Board(官方任务 seed 后已启用 AI review)
 3. 退出登 `labeler1/123456` → **任务广场** → 领取一题 → 作答并提交,触发 AI 预审
 4. 退出登 `reviewer1/123456` → **审核队列** → 看 AI verdict + 维度评分 → 初审通过;再登 `reviewer2` 做终审(两级独立,需不同审核员)→ 定稿
-5. 回 `owner1` → **导出**(JSON/JSONL/CSV/XLSX 任选)→ 下载
+5. 回 `owner1` → **导出**(JSON/JSONL/CSV/XLSX/Markdown/COCO/SFT/DPO 任选,SFT/DPO 直达模型微调)→ 下载
 
 完整 walkthrough 见 [`submission/`](submission/) 交付包。
 
@@ -69,7 +69,7 @@ make web       # 终端 C — http://localhost:5173
 apps/web        React 18 + TypeScript(strict)+ Semi Design(单一 SPA,角色路由)
 apps/api        Go + Gin + GORM REST API(:8080)
 apps/ai-worker  Go + Asynq AI 预审 Worker(豆包 Function Calling)
-pkg/exporter    共享多格式导出器(JSON / JSONL / CSV / XLSX / Markdown)
+pkg/exporter    共享多格式导出器(JSON / JSONL / CSV / XLSX / Markdown / COCO / SFT / DPO)
 pkg/llmreview   共享 LLM provider(mock / OpenAI-compatible / 豆包)
 ```
 
@@ -88,6 +88,9 @@ pkg/llmreview   共享 LLM provider(mock / OpenAI-compatible / 豆包)
 - **Outbox 一致性** — 业务事务同写 `outbox_events`,后台 publisher 用 `FOR UPDATE SKIP LOCKED` + deterministic Asynq TaskID 防双投
 - **AI 预审幂等** — Worker `complete()/failover()` 双锁 + `RowsAffected != 1` 守每个状态跃迁,保证 5xx 重试不破坏状态
 - **熔断 + 限流** — Provider 5xx 连续 20 次/5 分钟自动熔断,dry-run 走 task-scoped quota,登录走 IP token bucket
+- **导出直达训练管线** — 除 JSON/JSONL/CSV/XLSX/Markdown/COCO 外,新增 **SFT**(OpenAI Chat 微调 `messages`)与 **DPO**(偏好对 `prompt/chosen/rejected`,自 `preference_compare` 任务推导)导出,内联质量溯源 metadata(AI 分数 / 人工结论),标注产物可直接喂模型微调
+- **AI prompt 快照 + 配置漂移** — 每条预审落库「AI 实际看到的 prompt 全文」`prompt_snapshot` + sha256 指纹(与发送给 LLM 的 `buildMessages` 同源,保证快照即真相);审核台展示渲染后快照,并在该预审所用 prompt 配置已非任务当前生效版本时标「配置漂移」,审核员可判断结论是否基于旧配置
+- **Schema 破坏性变更检测** — `internal/schemadiff` 递归比对模板版本间字段变更(穿透 Group/Tabs 嵌套),分级 safe / warning / breaking(删字段、改控件、加必填、删选项…);Owner 保存新版本前「兼容性检查」预知改动是否让历史标注失效
 - **类型契约** — `docs/openapi.yaml` 是真相源,`pnpm -F web gen:api` 生成 `schema.d.ts`,前端 TypeScript strict mode + 0 个 `any`
 - **测试纪律** — testcontainers 真 MySQL+Redis 集成测试覆盖主链路(submit→outbox→Redis→AI→review→export);CI 跑 Go workspace + web test+lint+build + 独立 `-tags=integration` job
 - **首屏性能** — VChart 通过 `React.lazy` + Vite vendor split,首屏 eager vendor 从 2.2MB(gzip 616KB)降到 412KB(gzip 125KB)
@@ -128,7 +131,7 @@ docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.example 
 │   ├── api/              Gin REST API(handler / service / model)
 │   └── ai-worker/        Asynq AI 预审 worker
 ├── pkg/
-│   ├── exporter/         JSON / JSONL / CSV / XLSX 导出器
+│   ├── exporter/         JSON / JSONL / CSV / XLSX / MD / COCO / SFT / DPO 导出器
 │   └── llmreview/        LLM provider(mock + OpenAI-compatible)
 ├── tools/seed/           官方数据集(qa_quality + preference_compare)+ 模板
 ├── deploy/               生产 docker-compose + Caddyfile + Dockerfile

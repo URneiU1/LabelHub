@@ -76,7 +76,7 @@ make web       # 终端 C — http://localhost:5173
 1. **Owner**(2 min) — 登 `owner1` → 选 `qa_quality` 官方任务 → 看模板 Designer 嵌套 Tabs/Group → 看 AI Prompt 三维度 + threshold → 跑 Golden Sample dry-run → 看 Stats Board(进度 / 通过率 / AI vs 人工 / 维度均分)
 2. **Labeler**(1.5 min) — 退出登 `labeler1` → 任务广场领一题 → 看 Schema Renderer 真实物料 → 触发 LLM 辅助 → 提交
 3. **Reviewer**(1 min) — 退出登 `reviewer1` → 审核队列 → 看 AI verdict + 维度评分 + 处理日志 → 通过
-4. **Owner 导出**(0.5 min) — 回 `owner1` → 任务详情 → 选 JSONL/CSV/XLSX → 异步导出 → 下载
+4. **Owner 导出**(0.5 min) — 回 `owner1` → 任务详情 → 选 JSONL/CSV/XLSX/Markdown/COCO/**SFT/DPO**(SFT/DPO 直达模型微调)→ 异步导出 → 下载
 
 ### 评委可能踩坑(已尽力清扫)
 
@@ -118,6 +118,9 @@ React 18 + TS strict + Semi Design (SPA, 角色路由)
 | **Outbox 一致性** | 业务事务同写 `outbox_events`,后台 publisher 用 `FOR UPDATE SKIP LOCKED` + deterministic Asynq TaskID 防双投 |
 | **AI 预审幂等** | Worker `complete()/failover()` 双锁 + `RowsAffected != 1` 守每个状态跃迁 |
 | **熔断 + 限流** | Provider 5xx 连续 20 次/5 分钟自动熔断;dry-run 走 task-scoped quota;登录 IP token bucket |
+| **导出直达训练管线** | 8 格式(JSON/JSONL/CSV/XLSX/MD/COCO/**SFT**/**DPO**);SFT=OpenAI Chat 微调 `messages`、DPO=偏好对,内联质量溯源 metadata,标注产物直接喂微调 |
+| **AI prompt 快照 + 漂移** | 落库「AI 实际看到的 prompt 全文」+ sha256 指纹(与发送 LLM 同源);审核台展示快照,prompt 配置非当前生效版本时标「配置漂移」 |
+| **Schema 破坏性变更检测** | `internal/schemadiff` 递归比对模板版本字段变更,分级 safe/warning/breaking;保存新版本前「兼容性检查」防历史标注失效 |
 | **类型契约** | `openapi.yaml` 是真相源,`pnpm -F web gen:api` 生成 `schema.d.ts`,前端 strict + 0 个 `any` |
 | **测试纪律** | testcontainers 真 MySQL+Redis 集成测试覆盖主链路;CI 跑 Go workspace + web test/lint/build + 独立 `-tags=integration` job |
 | **首屏性能** | VChart `React.lazy` + Vite vendor split,首屏 eager vendor 2.2MB → 412KB |
